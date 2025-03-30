@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+current_dir=`pwd`
+
+cd "$(dirname "$0")"
+cd ../
+
+all_tool_dir=`pwd`
+
+cd "$current_dir"
+
+if [ ! -f "$all_tool_dir/ohpm/bin/ohpm" ]; then
+    echo File not found: "$all_tool_dir/ohpm/bin/ohpm"
+    exit 1
+fi
+
+"$all_tool_dir/ohpm/bin/ohpm" "$@"

@@ -54,7 +54,7 @@ The Dockerfile provides a complete environment for building Oniro/OpenHarmony Ar
 6. Builds the application and outputs artifacts to the `output` directory.
 
 ## Environment Variables
-- `OHOS_SDK_VERSION`: OpenHarmony SDK version (default: `5.0.0`).
+- `OHOS_SDK_VERSION`: OpenHarmony SDK version.
 
 ## Contribution
 Contributions are welcome! Create a pull request or open an issue for suggestions or issues.

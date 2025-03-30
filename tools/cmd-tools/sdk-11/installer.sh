@@ -4,7 +4,7 @@
 set -e # Exit on error
 
 # Start main log group for better visualization in GitHub Actions
-echo "::group::Setting up OpenHarmony command-line tools for SDK 12"
+echo "::group::Setting up OpenHarmony command-line tools for SDK 11"
 
 # Validate required environment variables
 # CMD_PATH: Directory where tools will be installed
@@ -15,25 +15,33 @@ for var in CMD_PATH ; do
     fi
 done
 
+# Get absolute path of the script's directory for reliable file operations
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Output debug information for troubleshooting
+echo "::debug::Script directory: $SCRIPT_DIR"
 echo "::debug::CMD_PATH: $CMD_PATH"
 
 # Install and configure OHPM (OpenHarmony Package Manager)
 setup_ohpm() {
     echo "::group::Setting up OHPM..."
     # Create installation directory
-    mkdir -p "$CMD_PATH"
+    mkdir -p "$CMD_PATH/ohpm"
 
-    # extract oh-command-line-tools
-    curl -L "https://repo.huaweicloud.com/harmonyos/ohpm/5.0.2/oh-command-line-tools-20240715.zip" -o /tmp/oh-command-line-tools.zip
-    unzip /tmp/oh-command-line-tools.zip -d /tmp/oh-command-line-tools
-    mv /tmp/oh-command-line-tools/oh-command-line-tools/* "$CMD_PATH"
-    rm -rf /tmp/oh-command-line-tools
-    rm /tmp/oh-command-line-tools.zip
+    # Extract OHPM package to installation directory
+    if ! unzip -o "$SCRIPT_DIR/ohpm/ohpm.zip" -d "$CMD_PATH/ohpm"; then
+        echo "::error::Failed to extract ohpm.zip"
+        return 1
+    fi
+    echo "::endgroup::"
+}
 
-    # set ohpm as executable
-    if ! chmod +x "$CMD_PATH/ohpm/bin/ohpm"; then
-        echo "::error::Failed to set executable permissions"
+# Setup executable files in bin directory
+setup_executables() {
+    echo "::group::Setting up executables..."
+    # Copy bin directory to installation path
+    if ! cp -r "$SCRIPT_DIR/bin" "$CMD_PATH/"; then
+        echo "::error::Failed to copy bin directory"
         return 1
     fi
 
@@ -67,6 +75,7 @@ setup_environment() {
 # Main installation sequence
 main() {
     setup_ohpm || exit 1
+    setup_executables || exit 1
     setup_environment || exit 1
     echo "::notice::OpenHarmony tools installation completed successfully"
 }

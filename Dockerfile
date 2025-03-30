@@ -15,7 +15,7 @@ RUN apt update && \
 
 # Set environment variables
 ENV HOME=/root
-ENV OHOS_SDK_VERSION=5.0.0
+ENV OHOS_SDK_VERSION=4.1
 
 # Copy and run install_ohos_sdk.sh
 COPY tools/install_ohos_sdk.sh /tmp/install_ohos_sdk.sh
@@ -48,7 +48,7 @@ RUN echo "@ohos:registry=https://repo.harmonyos.com/npm/" > $HOME/.npmrc
 ENV CMD_PATH="/root/command-line-tools"
 
 # Run cmd_tools_installer.sh from the tools directory
-RUN source $TOOLS_DIR/cmd_tools_installer.sh
+RUN source $TOOLS_DIR/cmd-tools/sdk-11/installer.sh
 
 # Add cmd-tools and TOOLS_DIR to PATH
 ENV PATH="$PATH:$CMD_PATH/bin:$TOOLS_DIR"
