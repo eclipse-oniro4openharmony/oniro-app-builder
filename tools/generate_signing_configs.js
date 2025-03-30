@@ -8,10 +8,11 @@ const json5 = require("json5");
 
 // Define constants for SDK paths
 const SDK_HOME = process.env.OHOS_BASE_SDK_HOME;
-const SIGN_TOOL_PATH = path.join(SDK_HOME, "12/toolchains/lib/hap-sign-tool.jar");
-const KEYSTORE_FILE = path.join(SDK_HOME, "12/toolchains/lib/OpenHarmony.p12");
-const PROFILE_CERT_FILE = path.join(SDK_HOME, "12/toolchains/lib/OpenHarmonyProfileRelease.pem");
-const UNSIGNED_PROFILE_TEMPLATE = path.join(SDK_HOME, "12/toolchains/lib/UnsgnedReleasedProfileTemplate.json");
+const SDK_API = process.env.OHOS_SDK_API;
+const SIGN_TOOL_PATH = path.join(SDK_HOME, SDK_API, "toolchains/lib/hap-sign-tool.jar");
+const KEYSTORE_FILE = path.join(SDK_HOME, SDK_API, "toolchains/lib/OpenHarmony.p12");
+const PROFILE_CERT_FILE = path.join(SDK_HOME, SDK_API, "toolchains/lib/OpenHarmonyProfileRelease.pem");
+const UNSIGNED_PROFILE_TEMPLATE = path.join(SDK_HOME, SDK_API, "toolchains/lib/UnsgnedReleasedProfileTemplate.json");
 
 // Function to copy necessary files to the project directory
 function copyFilesToProject(projectDir) {

@@ -40,6 +40,7 @@ RUN cd $TOOLS_DIR && npm install
 
 # Set OHOS_BASE_SDK_HOME environment variable
 ENV OHOS_BASE_SDK_HOME="${HOME}/setup-ohos-sdk/linux"
+ENV OHOS_SDK_API=11
 
 # Setup .npmrc File
 RUN echo "@ohos:registry=https://repo.harmonyos.com/npm/" > $HOME/.npmrc
