@@ -1,4 +1,11 @@
 name: Build Sample App
+env:
+  APP_DIR: sample_app
+  BUILD_PATH: entry/build/default/outputs/default
+  ARTIFACT_NAME: sample_app_outputs
+  HAP_FILE: entry-default-signed.hap
+  BUNDLE_NAME: com.example.helloworld
+  ENTRY_ABILITY: EntryAbility
 
 on:
   push:
@@ -19,6 +26,119 @@ jobs:
 
       - name: Build and sign app
         run: |
-          cd "$GITHUB_WORKSPACE/sample_app"
+          cd "$GITHUB_WORKSPACE/${{ env.APP_DIR }}"
           onirobuilder sign
           onirobuilder build
+
+      - name: Upload built sample_app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.APP_DIR }}/${{ env.BUILD_PATH }}
+
+      - name: Upload toolchains
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchains
+          path: /root/command-line-tools/sdk/default/openharmony/toolchains
+
+  emulator:
+    needs: build
+    runs-on: oniro-runner
+    steps:
+      - name: Download built sample_app
+        uses: actions/download-artifact@v4
+
+      - name: Run Oniro Emulator and Capture Screenshot
+        run: |
+          set -x
+          # derive artifact dir from workflow‐level env
+          ARTIFACT_DIR="$GITHUB_WORKSPACE/${ARTIFACT_NAME}"
+          
+          sudo apt-get update && sudo apt-get install -y xvfb tigervnc-viewer imagemagick qemu-system
+
+          # Add downloaded toolchains from job artifacts to PATH
+          TOOLCHAINS_DIR="$GITHUB_WORKSPACE/toolchains"
+          export PATH="$TOOLCHAINS_DIR:$PATH"
+          sudo chmod +x "$TOOLCHAINS_DIR"/hdc
+          sudo chown -R $USER:$USER "$TOOLCHAINS_DIR"
+
+          # Download emulator images
+          EMULATOR_URL="https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/download/v1.0.0/oniro_emulator.zip"
+          EMULATOR_DIR="$GITHUB_WORKSPACE/emulator"
+          mkdir -p "$EMULATOR_DIR"
+          TMP_ZIP="/tmp/oniro_emulator.zip"
+          curl -L "$EMULATOR_URL" -o "$TMP_ZIP"
+          unzip -o "$TMP_ZIP" -d "$EMULATOR_DIR"
+
+          cd "$EMULATOR_DIR/images"
+
+          # Start QEMU with VNC on display :1 (port 5901), headless
+          sudo qemu-system-x86_64 -machine q35 -smp 6 -m 4096M -boot c -nographic -vga none \
+            -device virtio-gpu-pci,xres=360,yres=720 -display none -vnc :1 \
+            -rtc base=utc,clock=host -initrd ramdisk.img -kernel bzImage \
+            -drive file=updater.img,if=virtio,media=disk,format=raw,index=0 \
+            -drive file=system.img,if=virtio,media=disk,format=raw,index=1 \
+            -drive file=vendor.img,if=virtio,media=disk,format=raw,index=2 \
+            -drive file=sys_prod.img,if=virtio,media=disk,format=raw,index=3 \
+            -drive file=chip_prod.img,if=virtio,media=disk,format=raw,index=4 \
+            -drive file=userdata.img,if=virtio,media=disk,format=raw,index=5 \
+            -append "ip=dhcp loglevel=4 console=ttyS0,115200 init=init root=/dev/ram0 rw  ohos.boot.hardware=virt default_boot_device=10007000.virtio_mmio sn=8823456789 ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required" \
+            -netdev user,id=net0,hostfwd=tcp::55555-:55555 -device virtio-net-pci,netdev=net0 \
+            -serial tcp::3333,server,nowait \
+            > qemu.log 2>&1 &
+          QEMU_PID=$!
+          echo "QEMU started with PID $QEMU_PID"
+
+          # Send commands over TCP serial (port 3333)
+          SERIAL_HOST=127.0.0.1
+          SERIAL_PORT=3333
+          echo "---- Guest output ----"
+          echo "ping -c 4 8.8.8.8" | timeout 5s nc $SERIAL_HOST $SERIAL_PORT || true
+          echo "--------------------------------"
+
+          # HDC server uses libusb that is trying to enumerate USB devices via /dev/bus/usb, but the 
+          # directory doesn't exist — because the CI runner has no USB subsystem.
+          # Therefore we are faking /dev/bus/usb directory to initialize it properly.
+          sudo mkdir -p /dev/bus/usb/001
+          sudo mknod /dev/bus/usb/001/001 c 189 0
+          sudo chmod 666 /dev/bus/usb/001/001
+
+          # Try to connect with hdc until Connect OK
+          while true; do
+            OUT=$(hdc start -r && hdc tconn 127.0.0.1:55555 2>&1)
+            if echo "$OUT" | grep -q "Connect OK"; then
+              echo "HDC connected."
+              break
+            fi
+            echo "Waiting for HDC connection..."
+            sleep 5
+          done
+
+          echo "Waiting for the device to be ready..."
+          sleep 30
+
+          echo "Installing and starting app..."
+          hdc install "$ARTIFACT_DIR/${HAP_FILE}"
+          hdc shell aa start -a "$ENTRY_ABILITY" -b "$BUNDLE_NAME" || true
+          sleep 30
+          
+          echo "Attempting to capture VNC screenshot..."
+          # Use xvfb-run to provide X server for vncviewer and import
+          xvfb-run --auto-servernum --server-args='-screen 0 360x720x24' bash -c '
+            vncviewer -viewonly 127.0.0.1:1 &
+            VNC_PID=$!
+            sleep 5
+            import -window root emulator_screenshot.png
+            kill $VNC_PID || true
+          '
+          echo "Screenshot capture finished. Listing files:"
+          ls -lh
+          kill $QEMU_PID || true
+        continue-on-error: true
+
+      - name: Upload Emulator Screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-screenshot
+          path: emulator/images/emulator_screenshot.png
