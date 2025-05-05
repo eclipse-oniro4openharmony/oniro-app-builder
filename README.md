@@ -90,7 +90,7 @@ The Dockerfile provides a complete environment for building Oniro/OpenHarmony Ar
 
 ## Build and Test Sample App with Oniro Emulator
 
-This repository includes a [GitHub Actions workflow](.github/workflows/build-sample-app.yml) that automates building, signing, and testing a sample OpenHarmony application using the Oniro build system and emulator.
+This repository includes a [GitHub Actions workflow](.github/workflows/build-test-app.yml) that automates building, signing, and testing a sample OpenHarmony application using the Oniro build system and emulator.
 
 It consists of two main jobs: `build` and `emulator`.
 

@@ -1,17 +1,39 @@
-name: Build Sample App
-env:
-  APP_DIR: sample_app
-  BUILD_PATH: entry/build/default/outputs/default
-  ARTIFACT_NAME: sample_app_outputs
-  HAP_FILE: entry-default-signed.hap
-  BUNDLE_NAME: com.example.helloworld
-  ENTRY_ABILITY: EntryAbility
+# Copyright (C) 2025 Huawei Inc.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Build and test application on Oniro Emulator
 
 on:
-  push:
-    branches: [ main, dev ]
-  pull_request:
-    branches: [ main ]
+  workflow_call:
+    inputs:
+      app_dir:
+        type: string
+        default: sample_app
+      build_path:
+        type: string
+        default: entry/build/default/outputs/default
+      artifact_name:
+        type: string
+        default: sample_app_outputs
+      hap_file:
+        type: string
+        default: entry-default-signed.hap
+      bundle_name:
+        type: string
+        default: com.example.helloworld
+      entry_ability:
+        type: string
+        default: EntryAbility
 
 jobs:
   build:
@@ -26,15 +48,15 @@ jobs:
 
       - name: Build and sign app
         run: |
-          cd "$GITHUB_WORKSPACE/${{ env.APP_DIR }}"
+          cd "$GITHUB_WORKSPACE/${{ inputs.app_dir }}"
           onirobuilder sign
           onirobuilder build
 
       - name: Upload built sample_app
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.APP_DIR }}/${{ env.BUILD_PATH }}
+          name: ${{ inputs.artifact_name }}
+          path: ${{ inputs.app_dir }}/${{ inputs.build_path }}
 
       - name: Upload toolchains
         uses: actions/upload-artifact@v4
@@ -53,7 +75,7 @@ jobs:
         run: |
           set -x
           # derive artifact dir from workflow‐level env
-          ARTIFACT_DIR="$GITHUB_WORKSPACE/${ARTIFACT_NAME}"
+          ARTIFACT_DIR="$GITHUB_WORKSPACE/${{ inputs.artifact_name }}"
           
           sudo apt-get update && sudo apt-get install -y xvfb tigervnc-viewer imagemagick qemu-system
 
@@ -119,8 +141,8 @@ jobs:
           sleep 30
 
           echo "Installing and starting app..."
-          hdc install "$ARTIFACT_DIR/${HAP_FILE}"
-          hdc shell aa start -a "$ENTRY_ABILITY" -b "$BUNDLE_NAME" || true
+          hdc install "$ARTIFACT_DIR/${{ inputs.hap_file }}"
+          hdc shell aa start -a "${{ inputs.entry_ability }}" -b "${{ inputs.bundle_name }}" || true
           sleep 30
           
           echo "Attempting to capture VNC screenshot..."
