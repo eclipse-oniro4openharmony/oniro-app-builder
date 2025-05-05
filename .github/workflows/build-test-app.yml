@@ -138,12 +138,12 @@ jobs:
           done
 
           echo "Waiting for the device to be ready..."
-          sleep 30
+          sleep 60
 
           echo "Installing and starting app..."
           hdc install "$ARTIFACT_DIR/${{ inputs.hap_file }}"
           hdc shell aa start -a "${{ inputs.entry_ability }}" -b "${{ inputs.bundle_name }}" || true
-          sleep 30
+          sleep 60
           
           echo "Attempting to capture VNC screenshot..."
           # Use xvfb-run to provide X server for vncviewer and import
