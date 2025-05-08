@@ -59,7 +59,7 @@ add_env_to_shell_profile() {
     if [ -f "$HOME/.zshrc" ]; then
         SHELL_PROFILE="$HOME/.zshrc"
     fi
-    echo "Do you want to add OHOS_BASE_SDK_HOME and CMD_PATH/bin to your shell profile ($SHELL_PROFILE)? [y/N]: "
+    echo "Do you want to add OHOS_BASE_SDK_HOME, CMD_PATH/bin, and CMD_PATH/sdk/default/openharmony/toolchains to your shell profile ($SHELL_PROFILE)? [y/N]: "
     read -r env_ans
     if [[ "$env_ans" =~ ^[Yy]$ ]]; then
         if ! grep -q 'export OHOS_BASE_SDK_HOME=' "$SHELL_PROFILE"; then
@@ -71,7 +71,10 @@ add_env_to_shell_profile() {
         if ! grep -q 'export PATH=.*$CMD_PATH/bin' "$SHELL_PROFILE"; then
             echo 'export PATH="$CMD_PATH/bin:$PATH"' >> "$SHELL_PROFILE"
         fi
-        echo "Added OHOS_BASE_SDK_HOME and CMD_PATH/bin to PATH in $SHELL_PROFILE. Please restart your shell or run: source $SHELL_PROFILE"
+        if ! grep -q 'export PATH=.*$CMD_PATH/sdk/default/openharmony/toolchains' "$SHELL_PROFILE"; then
+            echo 'export PATH="$CMD_PATH/sdk/default/openharmony/toolchains:$PATH"' >> "$SHELL_PROFILE"
+        fi
+        echo "Added OHOS_BASE_SDK_HOME, CMD_PATH/bin, and CMD_PATH/sdk/default/openharmony/toolchains to PATH in $SHELL_PROFILE. Please restart your shell or run: source $SHELL_PROFILE"
     else
         echo "Skipped modifying $SHELL_PROFILE. You may need to set OHOS_BASE_SDK_HOME and update PATH manually."
     fi
