@@ -26,7 +26,7 @@ RUN dpkg -i /tmp/onirobuilder.deb || apt-get install -fy
 RUN rm /tmp/onirobuilder.deb
 
 # Run `onirobuilder init` to set up dependencies
-RUN onirobuilder init --no-env
+RUN onirobuilder init --no-env --sdk-version 5.1.0
 
 # remove temporary files to keep the image smaller
 RUN rm -rf /tmp/*

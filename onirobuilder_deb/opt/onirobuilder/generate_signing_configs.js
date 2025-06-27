@@ -8,20 +8,51 @@ const json5 = require("json5");
 
 // Define constants for SDK paths
 const SDK_HOME = process.env.OHOS_BASE_SDK_HOME;
-const SIGN_TOOL_PATH = path.join(SDK_HOME, "12/toolchains/lib/hap-sign-tool.jar");
-const KEYSTORE_FILE = path.join(SDK_HOME, "12/toolchains/lib/OpenHarmony.p12");
-const PROFILE_CERT_FILE = path.join(SDK_HOME, "12/toolchains/lib/OpenHarmonyProfileRelease.pem");
-const UNSIGNED_PROFILE_TEMPLATE = path.join(SDK_HOME, "12/toolchains/lib/UnsgnedReleasedProfileTemplate.json");
+
+// Function to get SDK paths based on API version
+function getSdkPaths(apiVersion) {
+    return {
+        SIGN_TOOL_PATH: path.join(SDK_HOME, `${apiVersion}/toolchains/lib/hap-sign-tool.jar`),
+        KEYSTORE_FILE: path.join(SDK_HOME, `${apiVersion}/toolchains/lib/OpenHarmony.p12`),
+        PROFILE_CERT_FILE: path.join(SDK_HOME, `${apiVersion}/toolchains/lib/OpenHarmonyProfileRelease.pem`),
+        UNSIGNED_PROFILE_TEMPLATE: path.join(SDK_HOME, `${apiVersion}/toolchains/lib/UnsgnedReleasedProfileTemplate.json`)
+    };
+}
+
+// Function to get API version from build-profile.json5
+function getApiVersionFromBuildProfile(projectDir) {
+    const buildProfilePath = path.join(projectDir, "build-profile.json5");
+    
+    if (!fs.existsSync(buildProfilePath)) {
+        console.error(`Error: ${buildProfilePath} does not exist.`);
+        process.exit(1);
+    }
+
+    let buildProfile;
+    try {
+        buildProfile = json5.parse(fs.readFileSync(buildProfilePath, "utf-8"));
+    } catch (e) {
+        console.error(`Error parsing ${buildProfilePath}: ${e.message}`);
+        process.exit(1);
+    }
+
+    if (!buildProfile.app || !buildProfile.app.products || !buildProfile.app.products[0] || !buildProfile.app.products[0].compileSdkVersion) {
+        console.error(`Error: build-profile.json5 does not contain the required compileSdkVersion field.`);
+        process.exit(1);
+    }
+
+    return buildProfile.app.products[0].compileSdkVersion;
+}
 
 // Function to copy necessary files to the project directory
-function copyFilesToProject(projectDir) {
+function copyFilesToProject(projectDir, sdkPaths) {
     console.log("Copying files to project directory...");
     const signaturesDir = path.join(projectDir, "signatures");
     fs.mkdirSync(signaturesDir, { recursive: true });
 
-    fs.copyFileSync(KEYSTORE_FILE, path.join(signaturesDir, "OpenHarmony.p12"));
-    fs.copyFileSync(PROFILE_CERT_FILE, path.join(signaturesDir, "OpenHarmonyProfileRelease.pem"));
-    fs.copyFileSync(UNSIGNED_PROFILE_TEMPLATE, path.join(signaturesDir, "UnsgnedReleasedProfileTemplate.json"));
+    fs.copyFileSync(sdkPaths.KEYSTORE_FILE, path.join(signaturesDir, "OpenHarmony.p12"));
+    fs.copyFileSync(sdkPaths.PROFILE_CERT_FILE, path.join(signaturesDir, "OpenHarmonyProfileRelease.pem"));
+    fs.copyFileSync(sdkPaths.UNSIGNED_PROFILE_TEMPLATE, path.join(signaturesDir, "UnsgnedReleasedProfileTemplate.json"));
     console.log("Files copied successfully.");
 }
 
@@ -80,19 +111,19 @@ function modifyProfileTemplate(projectDir) {
 }
 
 // Function to generate the P7b file using the signing tool
-function generateP7bFile(projectDir) {
+function generateP7bFile(projectDir, sdkPaths) {
     console.log("Generating P7b file...");
     const signaturesDir = path.join(projectDir, "signatures");
     const profileTemplatePath = path.join(signaturesDir, "UnsgnedReleasedProfileTemplate.json");
     const outputProfilePath = path.join(signaturesDir, "app1-profile.p7b");
 
-    const command = `java -jar ${SIGN_TOOL_PATH} sign-profile \
+    const command = `java -jar ${sdkPaths.SIGN_TOOL_PATH} sign-profile \
     -keyAlias "openharmony application profile release" \
     -signAlg "SHA256withECDSA" \
     -mode "localSign" \
-    -profileCertFile "${PROFILE_CERT_FILE}" \
+    -profileCertFile "${sdkPaths.PROFILE_CERT_FILE}" \
     -inFile "${profileTemplatePath}" \
-    -keystoreFile "${KEYSTORE_FILE}" \
+    -keystoreFile "${sdkPaths.KEYSTORE_FILE}" \
     -outFile "${outputProfilePath}" \
     -keyPwd "123456" \
     -keystorePwd "123456"`;
@@ -164,9 +195,17 @@ function main() {
     }
 
     console.log("Starting signing configuration generation...");
-    copyFilesToProject(projectDir);
+    
+    // Get API version from build profile
+    const apiVersion = getApiVersionFromBuildProfile(projectDir);
+    console.log(`Using API version: ${apiVersion}`);
+    
+    // Get SDK paths based on API version
+    const sdkPaths = getSdkPaths(apiVersion);
+    
+    copyFilesToProject(projectDir, sdkPaths);
     modifyProfileTemplate(projectDir);
-    generateP7bFile(projectDir);
+    generateP7bFile(projectDir, sdkPaths);
     prepareMaterialDirectory(projectDir);
     updateBuildProfile(projectDir);
 
