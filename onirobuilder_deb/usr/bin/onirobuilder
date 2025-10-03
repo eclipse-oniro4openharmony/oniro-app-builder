@@ -75,7 +75,7 @@ add_env_to_shell_profile() {
 
 init() {
     # Parse optional --sdk-version and --no-env flags
-    SDK_VERSION="5.0.0"
+    SDK_VERSION="6.0" # Default SDK version
     SKIP_ENV=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
