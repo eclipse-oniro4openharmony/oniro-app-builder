@@ -149,30 +149,5 @@ else
     OHOS_BASE_SDK_HOME="$PWD"
 fi
 
-if [ "${INPUT_FIXUP_PATH}" = "true" ]; then
-  # When we are restoring from cache we don't know the API version, so we glob for now.
-  # In the future we should do something more robust, like copying `oh-uni-package.json` to the root.
-  OHOS_NDK_HOME=$(cd "${OHOS_BASE_SDK_HOME}"/* && pwd)
-  OHOS_SDK_NATIVE="${OHOS_NDK_HOME}"/native
-else
-  OHOS_NDK_HOME="${OHOS_BASE_SDK_HOME}"
-  OHOS_SDK_NATIVE="${OHOS_BASE_SDK_HOME}/native"
-fi
-
-cd "${OHOS_SDK_NATIVE}"
-SDK_VERSION="$(jq -r .version < oh-uni-package.json)"
-API_VERSION="$(jq -r .apiVersion < oh-uni-package.json)"
-
-# Output environment variables for downstream processes.
-{
-  echo "OHOS_BASE_SDK_HOME=${OHOS_BASE_SDK_HOME}"
-  echo "ohos-base-sdk-home=${OHOS_BASE_SDK_HOME}"
-  echo "OHOS_NDK_HOME=${OHOS_NDK_HOME}"
-  echo "OHOS_SDK_NATIVE=${OHOS_SDK_NATIVE}"
-  echo "ohos_sdk_native=${OHOS_SDK_NATIVE}"
-  echo "sdk-version=${SDK_VERSION}"
-  echo "api-version=${API_VERSION}"
-} >> "${GITHUB_OUTPUT:-sdk-output.txt}"
-
 # Optionally, also export to the current shell environment.
-export OHOS_BASE_SDK_HOME OHOS_NDK_HOME OHOS_SDK_NATIVE
+export OHOS_BASE_SDK_HOME
