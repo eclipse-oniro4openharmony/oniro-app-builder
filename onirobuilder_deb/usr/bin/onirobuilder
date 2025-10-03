@@ -14,8 +14,8 @@ set -e
 BASE_DIR="/opt/onirobuilder"
 export CMD_PATH="$HOME/command-line-tools"
 export OHOS_BASE_SDK_HOME="$HOME/setup-ohos-sdk/linux"
-EMULATOR_DIR="$CMD_PATH/emulator"
-EMULATOR_BIN="$CMD_PATH/bin/oniro-emulator"
+EMULATOR_DIR="$HOME/oniro-emulator"
+EMULATOR_BIN="$EMULATOR_DIR/images/run.sh"
 
 # Usage function.
 usage() {
@@ -37,21 +37,14 @@ usage() {
 # --------------------------------------------------
 
 install_emulator() {
-    EMULATOR_URL="https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/download/v1.0.0/oniro_emulator.zip"
+    EMULATOR_URL="https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/latest/download/oniro_emulator.zip"
     mkdir -p "$EMULATOR_DIR"
     mkdir -p "$CMD_PATH/bin"
     TMP_ZIP="/tmp/oniro_emulator.zip"
     curl -L "$EMULATOR_URL" -o "$TMP_ZIP"
     unzip -o "$TMP_ZIP" -d "$EMULATOR_DIR"
     chmod +x "$EMULATOR_DIR/images/run.sh"
-    # Create launcher binary
-    cat <<EOF > "$EMULATOR_BIN"
-#!/bin/bash
-cd "\$(dirname "\$0")/../emulator/images" || exit
-exec "./run.sh" "\$@"
-EOF
-    chmod +x "$EMULATOR_BIN"
-    echo "Oniro emulator installed. Run 'oniro-emulator' to start."
+    echo "Oniro emulator installed. Run 'onirobuilder emulator' to start."
 }
 
 add_env_to_shell_profile() {
@@ -275,7 +268,7 @@ case "$COMMAND" in
         usage
         ;;
     emulator)
-        "$CMD_PATH/bin/oniro-emulator" "$@"
+        cd "$(dirname "$EMULATOR_BIN")" && "$EMULATOR_BIN" "$@"
         ;;
     *)
         echo "Unknown command: $COMMAND"
