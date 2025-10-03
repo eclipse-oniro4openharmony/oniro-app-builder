@@ -25,7 +25,7 @@ setup_cmd_tools() {
     mkdir -p "$CMD_PATH"
 
     # extract oh-command-line-tools
-    curl -L "https://repo.huaweicloud.com/harmonyos/ohpm/5.0.5/commandline-tools-linux-x64-5.0.5.310.zip" -o /tmp/oh-command-line-tools.zip
+    curl -L "https://repo.huaweicloud.com/harmonyos/ohpm/5.1.0/commandline-tools-linux-x64-5.1.0.840.zip" -o /tmp/oh-command-line-tools.zip
     unzip /tmp/oh-command-line-tools.zip -d /tmp/oh-command-line-tools
     mv /tmp/oh-command-line-tools/command-line-tools/* "$CMD_PATH"
     rm -rf /tmp/oh-command-line-tools
