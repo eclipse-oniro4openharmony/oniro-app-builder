@@ -86,7 +86,7 @@ jobs:
           sudo chown -R $USER:$USER "$TOOLCHAINS_DIR"
 
           # Download emulator images
-          EMULATOR_URL="https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/download/v1.0.0/oniro_emulator.zip"
+          EMULATOR_URL="https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/latest/download/oniro_emulator.zip"
           EMULATOR_DIR="$GITHUB_WORKSPACE/emulator"
           mkdir -p "$EMULATOR_DIR"
           TMP_ZIP="/tmp/oniro_emulator.zip"
