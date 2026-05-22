@@ -1,0 +1,124 @@
+# Copyright (C) 2025 Huawei Inc.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Reusable workflow: sign and build a downloaded OpenHarmony project, then
+# upload the signed .hap and the toolchains (hdc, etc.) as artifacts.
+#
+# Consumes an artifact uploaded by another job containing the project tree at
+# the artifact root. Produces:
+#   - <hap_artifact>:       the signed .hap (single file)
+#   - <toolchains_artifact>: cmd-tools/toolchains subtree (for the emulator job)
+
+name: Build app
+
+on:
+  workflow_call:
+    inputs:
+      project_artifact:
+        type: string
+        required: true
+        description: Name of an existing artifact containing the project tree.
+      sdk_version:
+        type: string
+        default: '6.1'
+      hap_artifact:
+        type: string
+        default: built-hap
+      toolchains_artifact:
+        type: string
+        default: toolchains
+    outputs:
+      hap_file:
+        description: Filename of the signed .hap produced by the build.
+        value: ${{ jobs.build.outputs.hap_file }}
+      hap_artifact:
+        description: Artifact name carrying the signed .hap.
+        value: ${{ inputs.hap_artifact }}
+      toolchains_artifact:
+        description: Artifact name carrying the SDK toolchains (hdc + friends).
+        value: ${{ inputs.toolchains_artifact }}
+
+jobs:
+  build:
+    runs-on: oniro-runner
+    outputs:
+      hap_file: ${{ steps.locate.outputs.hap_file }}
+    steps:
+      - name: Checkout repository (for the CLI sources)
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Java (for hap-sign-tool)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openjdk-17-jre-headless
+
+      - name: Build the oniro-app CLI from source
+        run: |
+          npm ci
+          npm run build
+          npm install -g ./packages/cli
+
+      - name: Cache OpenHarmony SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/setup-ohos-sdk
+          key: ohos-sdk-${{ runner.os }}-${{ inputs.sdk_version }}
+
+      - name: Install OpenHarmony SDK
+        run: oniro-app sdk install ${{ inputs.sdk_version }}
+
+      - name: Cache command-line tools
+        uses: actions/cache@v4
+        with:
+          path: ~/command-line-tools
+          key: ohos-cmdtools-${{ runner.os }}
+
+      - name: Install command-line tools
+        run: oniro-app cmdtools install
+
+      - name: Download project under test
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.project_artifact }}
+          path: project
+
+      - name: Sign and build app
+        working-directory: ${{ github.workspace }}/project
+        run: |
+          oniro-app sign
+          oniro-app build
+
+      - name: Locate signed HAP
+        id: locate
+        working-directory: ${{ github.workspace }}/project
+        run: |
+          HAP_PATH=$(find entry/build -name '*-signed.hap' | head -1)
+          if [ -z "$HAP_PATH" ]; then
+            echo "::error::No signed .hap found under entry/build" && exit 1
+          fi
+          echo "Found: $HAP_PATH"
+          echo "hap_file=$(basename "$HAP_PATH")" >> "$GITHUB_OUTPUT"
+          mkdir -p "$GITHUB_WORKSPACE/build-output"
+          cp "$HAP_PATH" "$GITHUB_WORKSPACE/build-output/"
+
+      - name: Upload signed HAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.hap_artifact }}
+          path: build-output
+
+      - name: Upload toolchains
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.toolchains_artifact }}
+          path: ~/command-line-tools/sdk/default/openharmony/toolchains

@@ -1,0 +1,84 @@
+# Copyright (C) 2025 Huawei Inc.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Reusable workflow: scaffold an OpenHarmony project via `oniro-app create`
+# and upload it as an artifact for downstream workflows to consume.
+#
+# This isolates the `create` command exercise from build + emulator concerns,
+# so a project can also be supplied to the build workflow directly (e.g.
+# checked in to a repo) without going through scaffold.
+
+name: Scaffold app
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        type: string
+        default: SampleApp
+      bundle_name:
+        type: string
+        default: com.example.sampleapp
+      sdk_api:
+        type: string
+        default: '23'
+      template:
+        type: string
+        default: EmptyAbility
+      module_name:
+        type: string
+        default: ''
+      project_artifact:
+        type: string
+        default: scaffolded-app
+    outputs:
+      project_name:
+        description: Folder name of the scaffolded project (matches input.project_name).
+        value: ${{ inputs.project_name }}
+      project_artifact:
+        description: Name of the uploaded artifact containing the scaffolded project.
+        value: ${{ inputs.project_artifact }}
+
+jobs:
+  scaffold:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Build the oniro-app CLI from source
+        run: |
+          npm ci
+          npm run build
+          npm install -g ./packages/cli
+
+      - name: Scaffold project from template
+        run: |
+          MODULE_ARG=""
+          if [ -n "${{ inputs.module_name }}" ]; then
+            MODULE_ARG="--module ${{ inputs.module_name }}"
+          fi
+          oniro-app create \
+            --name "${{ inputs.project_name }}" \
+            --bundle "${{ inputs.bundle_name }}" \
+            --location "$GITHUB_WORKSPACE" \
+            --sdk "${{ inputs.sdk_api }}" \
+            --template "${{ inputs.template }}" \
+            $MODULE_ARG
+
+      - name: Upload scaffolded project
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.project_artifact }}
+          path: ${{ inputs.project_name }}
+          include-hidden-files: true

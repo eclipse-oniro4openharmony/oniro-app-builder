@@ -1,0 +1,43 @@
+{
+  "name": "@oniroproject/core",
+  "version": "0.0.0",
+  "description": "Shared library for Oniro/OpenHarmony app development tooling: SDK install, build, sign, emulator, hdc, project scaffolding.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eclipse-oniro4openharmony/oniro-app-builder.git",
+    "directory": "packages/core"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "follow-redirects": "^1.15.9",
+    "json5": "^2.2.3",
+    "node-stream-zip": "^1.15.0",
+    "tar": "^7.4.3"
+  },
+  "devDependencies": {
+    "@types/follow-redirects": "^1.14.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

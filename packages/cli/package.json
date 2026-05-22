@@ -1,0 +1,33 @@
+{
+  "name": "@oniroproject/oniro-app",
+  "version": "0.0.0",
+  "description": "Cross-platform CLI for Oniro/OpenHarmony application development.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eclipse-oniro4openharmony/oniro-app-builder.git",
+    "directory": "packages/cli"
+  },
+  "type": "module",
+  "bin": {
+    "oniro-app": "./dist/oniro-app.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "pretest": "npm run build",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@oniroproject/core": "0.0.0",
+    "commander": "^12.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
