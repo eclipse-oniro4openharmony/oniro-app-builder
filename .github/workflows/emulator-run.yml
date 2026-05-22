@@ -5,9 +5,12 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-# Reusable workflow: download a signed .hap + the SDK toolchains, start the
-# Oniro QEMU emulator headless, install + launch the app via hdc, and capture
-# a VNC screenshot. The screenshot is uploaded as an artifact.
+# Reusable workflow: download a signed .hap + the SDK toolchains, install and
+# launch the Oniro emulator via the oniro-app CLI, install + launch the app via
+# hdc, and capture a VNC screenshot.
+#
+# All cross-platform emulator concerns (picking run.sh vs run.bat, detaching,
+# log redirection, bounded hdc wait) live in the CLI itself.
 
 name: Run app on Oniro Emulator
 
@@ -17,15 +20,12 @@ on:
       hap_artifact:
         type: string
         required: true
-        description: Name of the artifact carrying the signed .hap.
       toolchains_artifact:
         type: string
         required: true
-        description: Name of the artifact carrying the SDK toolchains (must include hdc).
       hap_file:
         type: string
         required: true
-        description: Filename of the signed .hap inside the hap_artifact.
       bundle_name:
         type: string
         required: true
@@ -35,11 +35,36 @@ on:
       screenshot_artifact:
         type: string
         default: emulator-screenshot
+      hdc_wait_seconds:
+        type: number
+        default: 300
 
 jobs:
   emulator:
-    runs-on: oniro-runner
+    # Pinned to ubuntu-22.04 because Ubuntu Noble's qemu-system-x86 (8.2+)
+    # ships without the slirp/user netdev backend the bundled launcher relies
+    # on for hdc port forwarding. continue-on-error is set because some
+    # GitHub-hosted runners additionally block QEMU from binding the hostfwd
+    # rule — an infrastructure constraint outside the CLI. The scaffold and
+    # build jobs already validate the rest of the end-to-end flow.
+    runs-on: ubuntu-22.04
+    continue-on-error: true
     steps:
+      - name: Checkout repository (for the CLI sources)
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Build the oniro-app CLI from source
+        run: |
+          npm ci
+          npm run build
+          npm install -g ./packages/cli
+
       - name: Download signed HAP
         uses: actions/download-artifact@v4
         with:
@@ -52,84 +77,76 @@ jobs:
           name: ${{ inputs.toolchains_artifact }}
           path: toolchains
 
-      - name: Run Oniro Emulator and Capture Screenshot
+      - name: Install host emulator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb tigervnc-viewer imagemagick qemu-system-x86
+
+      - name: Install Oniro emulator
+        run: oniro-app emulator install
+
+      - name: CI host prep (hdc + USB stub + KVM permissions)
+        run: |
+          TOOLCHAINS_DIR="$GITHUB_WORKSPACE/toolchains"
+          echo "$TOOLCHAINS_DIR" >> "$GITHUB_PATH"
+          sudo chmod +x "$TOOLCHAINS_DIR"/hdc
+          sudo chown -R "$USER:$USER" "$TOOLCHAINS_DIR"
+          # HDC server uses libusb to enumerate /dev/bus/usb; CI runners have
+          # no USB subsystem, so fake the directory to initialize hdc cleanly.
+          sudo mkdir -p /dev/bus/usb/001
+          sudo mknod /dev/bus/usb/001/001 c 189 0 2>/dev/null || true
+          sudo chmod 666 /dev/bus/usb/001/001
+          # Relax KVM device permissions so the bundled launcher can use it.
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+
+      - name: Start emulator and wait for hdc
+        run: |
+          oniro-app emulator start \
+            --headless \
+            --log "$GITHUB_WORKSPACE/qemu.log" \
+            --wait-for-hdc ${{ inputs.hdc_wait_seconds }}
+
+      - name: Install and launch app
         env:
           HAP_FILE: ${{ inputs.hap_file }}
           BUNDLE_NAME: ${{ inputs.bundle_name }}
           ENTRY_ABILITY: ${{ inputs.entry_ability }}
         run: |
-          set -x
-
-          sudo apt-get update && sudo apt-get install -y xvfb tigervnc-viewer imagemagick qemu-system
-
-          TOOLCHAINS_DIR="$GITHUB_WORKSPACE/toolchains"
-          export PATH="$TOOLCHAINS_DIR:$PATH"
-          sudo chmod +x "$TOOLCHAINS_DIR"/hdc
-          sudo chown -R $USER:$USER "$TOOLCHAINS_DIR"
-
-          EMULATOR_URL="https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/latest/download/oniro_emulator.zip"
-          EMULATOR_DIR="$GITHUB_WORKSPACE/emulator"
-          mkdir -p "$EMULATOR_DIR"
-          TMP_ZIP="/tmp/oniro_emulator.zip"
-          curl -L "$EMULATOR_URL" -o "$TMP_ZIP"
-          unzip -o "$TMP_ZIP" -d "$EMULATOR_DIR"
-
-          cd "$EMULATOR_DIR/images"
-
-          sudo qemu-system-x86_64 -machine q35 -smp 6 -m 4096M -boot c -nographic -vga none \
-            -device virtio-gpu-pci,xres=360,yres=720 -display none -vnc :1 \
-            -rtc base=utc,clock=host -initrd ramdisk.img -kernel bzImage \
-            -drive file=updater.img,if=virtio,media=disk,format=raw,index=0 \
-            -drive file=system.img,if=virtio,media=disk,format=raw,index=1 \
-            -drive file=vendor.img,if=virtio,media=disk,format=raw,index=2 \
-            -drive file=sys_prod.img,if=virtio,media=disk,format=raw,index=3 \
-            -drive file=chip_prod.img,if=virtio,media=disk,format=raw,index=4 \
-            -drive file=userdata.img,if=virtio,media=disk,format=raw,index=5 \
-            -append "ip=dhcp loglevel=4 console=ttyS0,115200 init=init root=/dev/ram0 rw  ohos.boot.hardware=virt default_boot_device=10007000.virtio_mmio sn=8823456789 ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required" \
-            -netdev user,id=net0,hostfwd=tcp::55555-:55555 -device virtio-net-pci,netdev=net0 \
-            -serial tcp::3333,server,nowait \
-            > qemu.log 2>&1 &
-          QEMU_PID=$!
-          echo "QEMU started with PID $QEMU_PID"
-
-          # HDC server uses libusb to enumerate /dev/bus/usb; CI runner has no USB subsystem,
-          # so fake the directory to initialize hdc cleanly.
-          sudo mkdir -p /dev/bus/usb/001
-          sudo mknod /dev/bus/usb/001/001 c 189 0
-          sudo chmod 666 /dev/bus/usb/001/001
-
-          while true; do
-            OUT=$(hdc start -r && hdc tconn 127.0.0.1:55555 2>&1)
-            if echo "$OUT" | grep -q "Connect OK"; then
-              echo "HDC connected."
-              break
-            fi
-            echo "Waiting for HDC connection..."
-            sleep 5
-          done
-
-          echo "Waiting for the device to be ready..."
-          sleep 60
-
-          echo "Installing and starting app..."
           hdc install "$GITHUB_WORKSPACE/hap/$HAP_FILE"
-          hdc shell aa start -a "$ENTRY_ABILITY" -b "$BUNDLE_NAME" || true
-          sleep 60
+          hdc shell aa start -a "$ENTRY_ABILITY" -b "$BUNDLE_NAME"
+          # Give the app a moment to draw its first frame.
+          sleep 20
 
-          echo "Attempting to capture VNC screenshot..."
+      - name: Capture VNC screenshot
+        run: |
           xvfb-run --auto-servernum --server-args='-screen 0 360x720x24' bash -c '
-            vncviewer -viewonly 127.0.0.1:1 &
+            vncviewer -viewonly 127.0.0.1:0 &
             VNC_PID=$!
             sleep 5
-            import -window root emulator_screenshot.png
+            import -window root "'"$GITHUB_WORKSPACE"'/emulator_screenshot.png"
             kill $VNC_PID || true
           '
-          ls -lh
-          kill $QEMU_PID || true
-        continue-on-error: true
+          ls -lh "$GITHUB_WORKSPACE/emulator_screenshot.png"
+
+      - name: Stop emulator
+        if: always()
+        run: oniro-app emulator stop || true
+
+      - name: Upload emulator log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-log
+          path: qemu.log
+          if-no-files-found: ignore
 
       - name: Upload Emulator Screenshot
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.screenshot_artifact }}
-          path: emulator/images/emulator_screenshot.png
+          path: emulator_screenshot.png
+          if-no-files-found: ignore
