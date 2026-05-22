@@ -29,12 +29,22 @@ export function registerEmulatorCommand(program: Command): void {
 
   emu
     .command('start')
-    .description('Start the emulator and (by default) wait for hdc to connect.')
-    .option('--no-wait', 'Return as soon as the emulator process is launched, without waiting for hdc.')
-    .action(async (opts: { wait: boolean }) => {
+    .description('Start the Oniro emulator via the bundled launcher (run.sh / run.bat). Detaches so the CLI can exit while the emulator keeps running.')
+    .option('--headless', 'Launch headless (VNC + telnet serial, no local window). Required in CI.')
+    .option('--log <path>', 'Redirect launcher stdout/stderr to this file. Defaults to discarding output.')
+    .option('--wait-for-hdc <seconds>', 'Wait up to N seconds for hdc to connect. 0 = do not wait.', (v) => parseInt(v, 10), 0)
+    .option('--connect <host:port>', 'Override the launcher\'s hdc port-forward bind address. Pass 0.0.0.0:55555 on hosts where QEMU refuses to bind 127.0.0.1 (some CI runners).')
+    .action(async (opts: { headless?: boolean; log?: string; waitForHdc: number; connect?: string }) => {
       const { config, logger } = getRuntime();
-      await startEmulator({ config, logger, waitForHdc: opts.wait });
-      logger.info('Emulator started.');
+      await startEmulator({
+        config,
+        logger,
+        headless: opts.headless === true,
+        logFile: opts.log,
+        waitForHdcSeconds: opts.waitForHdc,
+        connect: opts.connect,
+      });
+      logger.info('Emulator start command complete.');
     });
 
   emu
