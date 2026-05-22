@@ -4,29 +4,50 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-name: Trigger Sample App Build
+# End-to-end smoke test for the oniro-app CLI. Chains three reusable workflows:
+#
+#   scaffold-app.yml   →   build-app.yml   →   emulator-run.yml
+#       create                 sign+build           install+launch on QEMU
+#
+# Each reusable workflow can also be called independently — e.g. a user repo
+# could skip the scaffold step and call `build-app.yml` against a checked-in
+# project artifact directly.
+
+name: Trigger End-to-End App Test
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [main, dev]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  call-build-test-app:
-    uses: ./.github/workflows/build-test-app.yml
+  scaffold:
+    uses: ./.github/workflows/scaffold-app.yml
     with:
-      app_dir: sample_app
-      build_path: entry/build/default/outputs/default
-      artifact_name: sample_app_outputs
-      hap_file: entry-default-signed.hap
-      bundle_name: com.example.helloworld
+      project_name: SampleApp
+      bundle_name: com.example.sampleapp
+      sdk_api: '23'
+      template: EmptyAbility
+      project_artifact: scaffolded-app
+
+  build:
+    needs: scaffold
+    uses: ./.github/workflows/build-app.yml
+    with:
+      project_artifact: ${{ needs.scaffold.outputs.project_artifact }}
+      sdk_version: '6.1'
+      hap_artifact: built-hap
+      toolchains_artifact: toolchains
+
+  emulator:
+    needs: build
+    uses: ./.github/workflows/emulator-run.yml
+    with:
+      hap_artifact: ${{ needs.build.outputs.hap_artifact }}
+      toolchains_artifact: ${{ needs.build.outputs.toolchains_artifact }}
+      hap_file: ${{ needs.build.outputs.hap_file }}
+      bundle_name: com.example.sampleapp
       entry_ability: EntryAbility

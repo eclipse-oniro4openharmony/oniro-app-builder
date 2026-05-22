@@ -1,0 +1,6 @@
+{
+  "id": "EmptyAbility",
+  "label": "Empty Ability",
+  "description": "Minimal OpenHarmony (ArkTS/ArkUI) application with a single entry ability (HelloWorld-style starter).",
+  "defaultModuleName": "entry"
+}

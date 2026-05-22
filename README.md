@@ -1,129 +1,147 @@
 # Oniro App Builder
 
-Oniro App Builder provides a Dockerized tool and a `.deb` package for building Oniro/OpenHarmony applications.
+Cross-platform tooling for Oniro/OpenHarmony app development. This monorepo ships two npm packages:
 
-## Features
-- Pre-configured environment for Oniro/OpenHarmony ArkTS applications.
-- Dockerized solution for consistent builds.
-- `.deb` package for easy installation of tools and SDK setup.
-- `onirobuilder` executable for managing SDK, build, signing, and emulator commands.
+- **`@oniroproject/core`** — vscode-agnostic library wrapping SDK install, build, sign, emulator, hdc, and project scaffolding.
+- **`@oniroproject/oniro-app`** — the `oniro-app` CLI built on top of the core. Non-interactive by design: every command takes explicit flags, results go to stdout, progress/logs go to stderr, and exit codes reflect success/failure.
 
-## Getting Started
+The CLI runs on Linux, macOS, and Windows. Anything in the OpenHarmony app-development inner loop (SDK install → sign → build → install on device → launch) can be driven from `oniro-app`; nothing in this repo touches firmware or device images.
 
-### Install Oniro App Builder
-Download the latest `.deb` package from the [GitHub Releases](https://github.com/eclipse-oniro4openharmony/oniro-app-builder/releases) page or from the CI workflow artifacts, then install it:
+## Install
+
+Requires Node.js 20+ and (for `oniro-app sign`) a JDK on PATH (`java` / `keytool`).
 
 ```bash
-$ sudo dpkg -i onirobuilder.deb
-$ sudo apt-get install -fy  # Fix missing dependencies if needed
+$ npm install -g @oniroproject/oniro-app
+$ oniro-app --help
 ```
 
-### Initialize the Environment
-Run the following command to install the OpenHarmony SDK, required tools, and Oniro emulator:
+## CLI usage
+
+```text
+oniro-app sdk install <version> [--force]     Install an OpenHarmony SDK
+oniro-app sdk list [--json]                   List known SDKs (installed flag included)
+oniro-app sdk remove <api>                    Remove an installed SDK by API level
+oniro-app cmdtools install [--force]          Install hvigorw/ohpm/hdc command-line tools
+oniro-app cmdtools status [--json]            Report cmd-tools install state + version
+oniro-app cmdtools remove                     Delete the cmd-tools install
+oniro-app emulator install [--force]          Install the QEMU-based Oniro emulator
+oniro-app emulator start [--no-wait]          Start the emulator (waits for hdc by default)
+oniro-app emulator stop                       Kill running emulator processes
+oniro-app emulator connect [--address <a>]    Attempt hdc connect
+oniro-app emulator remove                     Delete the emulator install
+oniro-app sign [project-dir]                  Generate signing configs + write build-profile.json5
+oniro-app build [project-dir] [--product <p>] [--module <m>] [--mode <m>] [--task <t>]
+oniro-app app install [project-dir] [--hap <p>]  Install the signed .hap on device/emulator via hdc
+oniro-app app launch  [project-dir] [--module <m>]  Launch the app via hdc
+oniro-app create --name <n> --bundle <b> --location <d> --sdk <api>
+                 [--template <id>] [--module <m>] [--overwrite]
+oniro-app templates list [--json]             List bundled project templates
+```
+
+Every install command is idempotent (skips if already installed) and takes `--force` to reinstall.
+
+### Configuration
+
+The CLI reads paths and URLs from environment variables. All are optional; defaults match the layout used historically by this project.
+
+| Variable                       | Default                            | Purpose                              |
+| ------------------------------ | ---------------------------------- | ------------------------------------ |
+| `ONIRO_SDK_ROOT_DIR`           | `~/setup-ohos-sdk`                 | SDK install root                     |
+| `ONIRO_CMD_TOOLS_PATH`         | `~/command-line-tools`             | Command-line tools install root      |
+| `ONIRO_EMULATOR_DIR`           | `~/oniro-emulator`                 | Emulator install root                |
+| `ONIRO_HAP_PATH`               | `entry/build/.../entry-default-signed.hap` | Path used by `app install` (relative to project)  |
+| `ONIRO_CMD_TOOLS_URL_LINUX`    | Huawei mirror, x64 5.1.0.840       | Override the Linux cmd-tools URL     |
+| `ONIRO_CMD_TOOLS_URL_WINDOWS`  | (unset — see note below)           | Self-hosted Windows cmd-tools URL    |
+| `ONIRO_CMD_TOOLS_URL_MAC`      | (unset — see note below)           | Self-hosted macOS cmd-tools URL      |
+| `ONIRO_EMULATOR_URL`           | Latest oniro_emulator.zip          | Emulator download URL                |
+| `ONIRO_DEBUG`                  | unset                              | Set to `1` for full stack traces     |
+
+`${userHome}` inside any of these values is expanded to the current user's home directory.
+
+**Command-line tools on Windows / macOS.** The Huawei mirror only publishes a Linux build of the OpenHarmony command-line tools. On Windows and macOS you must either:
+
+1. Download the ZIP manually from the Huawei developer portal and install it:
+   ```bash
+   $ oniro-app cmdtools install --from-zip path/to/commandline-tools-<platform>.zip
+   ```
+2. Host the archive yourself and set `ONIRO_CMD_TOOLS_URL_WINDOWS` / `ONIRO_CMD_TOOLS_URL_MAC` so `oniro-app cmdtools install` can fetch it automatically.
+
+## Typical workflow
 
 ```bash
-$ onirobuilder init
+$ oniro-app sdk install 6.1
+$ oniro-app cmdtools install
+$ oniro-app create --name HelloOniro --bundle com.example.hello \
+                   --location ~/projects --sdk 23
+$ cd ~/projects/HelloOniro
+$ oniro-app sign
+$ oniro-app build
+$ oniro-app emulator install
+$ oniro-app emulator start
+$ oniro-app app install
+$ oniro-app app launch
 ```
 
-- Use `--sdk-version <version>` to specify the SDK version (default: 5.0.0).
-- Use `--no-env` to skip modifying your shell profile.
+## Docker
 
-### Build an Application
-Navigate to your application project and run:
+The repo ships a Dockerfile that produces a self-contained image with the CLI + SDK + cmd-tools pre-installed:
 
 ```bash
-$ onirobuilder build
+$ docker build --build-arg ONIRO_SDK_VERSION=6.1 -t oniro-app .
+$ docker run --rm -v $(pwd):/workspace oniro-app build     # or sign / sdk list / app install ...
 ```
 
-The output files will be in the `output` directory.
-
-### Signing a HAP Package
-To generate the HAP signing certificates and profile, run:
+Drop into an interactive shell if you want to inspect the environment:
 
 ```bash
-$ onirobuilder sign
+$ docker run --rm -it -v $(pwd):/workspace --entrypoint bash oniro-app
 ```
 
-This updates the `build-profile.json5` file with the new signing configs.
+The image bakes the SDK and command-line tools into `/opt/oniro/` and exports `ONIRO_SDK_ROOT_DIR` / `ONIRO_CMD_TOOLS_PATH` to point at them — overridable at `docker run` time via `-e`.
 
-### Using the Oniro Emulator
-The Oniro emulator is installed during `onirobuilder init`. To start the emulator:
+## Repo layout
+
+```
+packages/
+├── core/      # @oniroproject/core — shared library (no vscode deps)
+└── cli/       # @oniroproject/oniro-app — the oniro-app binary, ships templates/
+Dockerfile     # container image: node:20-slim + JDK + oniro-app + SDK preinstall
+.github/workflows/
+├── ci.yml              # cross-OS matrix for the CLI's own typecheck/build/test + docker build
+├── scaffold-app.yml    # reusable: `oniro-app create` → upload project as artifact
+├── build-app.yml       # reusable: download project → sign + build → upload signed .hap + toolchains
+├── emulator-run.yml    # reusable: download .hap + toolchains → install + launch in QEMU → screenshot
+└── test-sample-app.yml # orchestrator: chains the three reusable workflows on push/PR
+```
+
+## Development
 
 ```bash
-$ onirobuilder emulator [args...]
+$ npm install
+$ npm run build       # builds both packages
+$ npm test            # runs vitest suites
+$ npm run typecheck
 ```
 
-Any extra arguments are passed to the emulator.
+The CLI can be exercised directly during development with `node packages/cli/dist/oniro-app.js <subcommand>`, or globally via `npm install -g ./packages/cli` after the first build.
 
-## Using Docker
-Alternatively, you can use the Dockerized environment:
+## CI
 
-### Prerequisites
-Ensure [Docker](https://docs.docker.com/get-docker/) is installed.
+[`ci.yml`](.github/workflows/ci.yml) runs the inner loop (typecheck, build, unit tests) on Linux, macOS, and Windows for every push and PR — the cross-platform contract is enforced there.
 
-1. Build the Docker image:
+End-to-end CI is split into three composable reusable workflows, chained by [`test-sample-app.yml`](.github/workflows/test-sample-app.yml):
 
-    ```bash
-    $ docker build -t oniro-app-builder .
-    ```
+1. **[`scaffold-app.yml`](.github/workflows/scaffold-app.yml)** — runs `oniro-app create` against the bundled `EmptyAbility` template and uploads the project tree as an artifact. Inputs: `project_name`, `bundle_name`, `sdk_api`, `template`, `module_name`, `project_artifact`.
+2. **[`build-app.yml`](.github/workflows/build-app.yml)** — downloads any project artifact (it doesn't have to come from `scaffold-app.yml`; a checked-in project would work too), installs the SDK + cmd-tools (cached across runs), signs and builds, uploads the resulting `.hap` and toolchains. Outputs: `hap_file`, `hap_artifact`, `toolchains_artifact`.
+3. **[`emulator-run.yml`](.github/workflows/emulator-run.yml)** — downloads the `.hap` and toolchains artifacts, launches the QEMU-based Oniro emulator headless, installs and launches the app via hdc, captures a VNC screenshot.
 
-2. Build an application:
-
-    ```bash
-    $ docker run --rm -v $(pwd):/workspace oniro-app-builder build
-    ```
-
-3. Access the container's shell:
-
-    ```bash
-    $ docker run --rm -it -v $(pwd):/workspace --entrypoint bash oniro-app-builder
-    ```
-
-### Dockerfile Overview
-The Dockerfile provides a complete environment for building Oniro/OpenHarmony ArkTS applications:
-1. Uses `ubuntu:22.04` as the base image.
-2. Installs dependencies (`curl`, `unzip`, `python3`, `nodejs`, etc.).
-3. Installs the `.deb` package containing `onirobuilder`.
-4. Runs `onirobuilder init` to set up the environment.
-5. Sets `/workspace` as the working directory.
-6. Builds the application and outputs artifacts to the `output` directory.
-
-## Build and Test Sample App with Oniro Emulator
-
-This repository includes a [GitHub Actions workflow](.github/workflows/build-test-app.yml) that automates building, signing, and testing a sample OpenHarmony application using the Oniro build system and emulator.
-
-It consists of two main jobs: `build` and `emulator`.
-
-#### Build Job
-
-Runs in a Docker container with the Oniro build environment that has already been initialized with `onirobuilder init`.
-
-Steps:
-
-1. **Checkout Repository** – Retrieves source code.
-2. **Build and Sign App** – Uses `onirobuilder` to sign and build the app located in `sample_app`.
-3. **Upload Build Artifacts** – Stores the built app outputs and toolchains as artifacts for later use.
-
-#### Emulator Job
-
-Runs the built app in a headless Oniro emulator to validate functionality.
-
-Steps:
-
-1. **Download Artifacts** – Retrieves the built app and toolchains.
-2. **Start Emulator** – Runs QEMU-based Oniro emulator using official images.
-3. **Connect with HDC** – Initializes device communication using the `hdc` CLI.
-4. **Install & Launch App** – Installs the signed `.hap` file and launches the entry ability.
-5. **Capture Screenshot** – Takes a screenshot of the emulator screen via VNC.
-6. **Upload Screenshot** – Saves emulator output for inspection.
-
-### Artifacts Generated
-
-* `sample_app_outputs`: Compiled and signed `.hap` app package
-* `emulator-screenshot`: Screenshot of the app running in the emulator
+Each step exercises one logical concern of the CLI (create / sign+build / install+launch), so a failure in one stage points at one CLI command instead of a giant monolithic job. Final artifacts: `scaffolded-app`, `built-hap`, `toolchains`, `emulator-screenshot`.
 
 ## Contribution
-Contributions are welcome! Create a pull request or open an issue for suggestions or issues.
+
+Pull requests and issues welcome.
 
 ## License
-Licensed under [Apache License 2.0](LICENSE).
+
+Apache License 2.0 — see [LICENSE](LICENSE).

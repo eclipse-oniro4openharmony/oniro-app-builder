@@ -1,0 +1,30 @@
+{
+  "name": "oniro-app-builder",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Monorepo for the Oniro/OpenHarmony app development toolchain (@oniroproject/core, @oniroproject/oniro-app CLI).",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "npm run build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.9",
+    "@types/node": "20.x",
+    "tsup": "^8.3.0",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
