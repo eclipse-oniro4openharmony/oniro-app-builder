@@ -1,3 +1,7 @@
 export { createMaterial, encryptPwd, decryptPwd, getKey } from './encryptKey.js';
-export { generateSigningConfigs } from './generateSigningConfigs.js';
-export type { GenerateSigningConfigsOptions } from './generateSigningConfigs.js';
+export {
+  generateSigningConfigs,
+  APL_VALUES,
+  APP_FEATURE_VALUES,
+} from './generateSigningConfigs.js';
+export type { GenerateSigningConfigsOptions, Apl, AppFeature } from './generateSigningConfigs.js';

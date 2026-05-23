@@ -8,11 +8,32 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 
+/** Ability Privilege Level written into the profile's `bundle-info.apl`. */
+export type Apl = 'normal' | 'system_basic' | 'system_core';
+
+/** App feature written into the profile's `bundle-info.app-feature`. */
+export type AppFeature = 'hos_normal_app' | 'hos_system_app';
+
+export const APL_VALUES: readonly Apl[] = ['normal', 'system_basic', 'system_core'];
+export const APP_FEATURE_VALUES: readonly AppFeature[] = ['hos_normal_app', 'hos_system_app'];
+
 export interface GenerateSigningConfigsOptions {
   /** Absolute path to the OpenHarmony project (the folder containing build-profile.json5). */
   projectDir: string;
   /** Absolute path to the OS-specific SDK home (the folder containing API-version subfolders). */
   sdkHome: string;
+  /**
+   * APL level to write into the profile's `bundle-info.apl`. Defaults to `'normal'`.
+   * Apps requesting permissions above `normal` (e.g. `ohos.permission.GET_WIFI_INFO_INTERNAL`)
+   * need `system_basic` or `system_core` — otherwise `bm install` fails with
+   * `grant request permissions failed`.
+   */
+  apl?: Apl;
+  /**
+   * App feature to write into `bundle-info.app-feature`. Defaults to `'hos_normal_app'`
+   * when `apl='normal'`, otherwise `'hos_system_app'`.
+   */
+  appFeature?: AppFeature;
   /** Optional logger; defaults to no-op. */
   logger?: Logger;
 }
@@ -31,8 +52,24 @@ function copyFilesToProject(
   fs.copyFileSync(paths.unsignedProfileTemplate, path.join(signaturesDir, 'UnsgnedReleasedProfileTemplate.json'));
 }
 
-function modifyProfileTemplate(projectDir: string, logger: Logger): void {
-  logger.info('[sign] Modifying profile template with project bundle name...');
+/**
+ * Pick the app-feature value: explicit override wins; otherwise `hos_normal_app` for
+ * apl=normal, `hos_system_app` for system_basic/system_core.
+ * @internal exposed for tests.
+ */
+export function resolveAppFeature(apl: Apl, override?: AppFeature): AppFeature {
+  if (override) return override;
+  return apl === 'normal' ? 'hos_normal_app' : 'hos_system_app';
+}
+
+/** @internal exposed for tests. */
+export function modifyProfileTemplate(
+  projectDir: string,
+  apl: Apl,
+  appFeature: AppFeature,
+  logger: Logger,
+): void {
+  logger.info(`[sign] Modifying profile template (apl=${apl}, app-feature=${appFeature})...`);
   const appJsonPath = path.join(projectDir, 'AppScope/app.json5');
   const profileTemplatePath = path.join(projectDir, 'signatures/UnsgnedReleasedProfileTemplate.json');
   const profileCertFilePath = path.join(projectDir, 'signatures/OpenHarmonyProfileRelease.pem');
@@ -48,7 +85,14 @@ function modifyProfileTemplate(projectDir: string, logger: Logger): void {
     throw new OniroError(`Error parsing ${appJsonPath}: ${(e as Error).message}`, e);
   }
 
-  let profileTemplate: { 'bundle-info'?: { 'bundle-name'?: string; 'distribution-certificate'?: string } };
+  let profileTemplate: {
+    'bundle-info'?: {
+      'bundle-name'?: string;
+      'distribution-certificate'?: string;
+      apl?: string;
+      'app-feature'?: string;
+    };
+  };
   try {
     profileTemplate = JSON.parse(fs.readFileSync(profileTemplatePath, 'utf-8'));
   } catch (e) {
@@ -63,6 +107,8 @@ function modifyProfileTemplate(projectDir: string, logger: Logger): void {
   }
 
   profileTemplate['bundle-info']['bundle-name'] = appJson.app.bundleName;
+  profileTemplate['bundle-info']['apl'] = apl;
+  profileTemplate['bundle-info']['app-feature'] = appFeature;
 
   const certContent = fs.readFileSync(profileCertFilePath, 'utf-8');
   const certs = certContent.split('-----END CERTIFICATE-----');
@@ -165,6 +211,16 @@ function prepareMaterialDirectory(projectDir: string, logger: Logger): void {
 export function generateSigningConfigs(options: GenerateSigningConfigsOptions): void {
   const { projectDir, sdkHome } = options;
   const logger = options.logger ?? noopLogger;
+  const apl: Apl = options.apl ?? 'normal';
+  if (!APL_VALUES.includes(apl)) {
+    throw new OniroError(`Invalid apl '${apl}'. Expected one of: ${APL_VALUES.join(', ')}.`);
+  }
+  const appFeature: AppFeature = resolveAppFeature(apl, options.appFeature);
+  if (!APP_FEATURE_VALUES.includes(appFeature)) {
+    throw new OniroError(
+      `Invalid appFeature '${appFeature}'. Expected one of: ${APP_FEATURE_VALUES.join(', ')}.`,
+    );
+  }
 
   const sdkVersion = detectProjectSdkVersion(projectDir, logger);
   if (!sdkVersion) {
@@ -187,7 +243,7 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
 
   logger.info('[sign] Starting signing configuration generation...');
   copyFilesToProject(projectDir, paths, logger);
-  modifyProfileTemplate(projectDir, logger);
+  modifyProfileTemplate(projectDir, apl, appFeature, logger);
   generateP7bFile(projectDir, paths, logger);
   prepareMaterialDirectory(projectDir, logger);
   updateBuildProfile(projectDir, logger);

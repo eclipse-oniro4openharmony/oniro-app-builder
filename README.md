@@ -30,7 +30,8 @@ oniro-app emulator start [--no-wait]          Start the emulator (waits for hdc 
 oniro-app emulator stop                       Kill running emulator processes
 oniro-app emulator connect [--address <a>]    Attempt hdc connect
 oniro-app emulator remove                     Delete the emulator install
-oniro-app sign [project-dir]                  Generate signing configs + write build-profile.json5
+oniro-app sign [project-dir] [--apl <level>] [--app-feature <feature>]
+                                              Generate signing configs + write build-profile.json5
 oniro-app build [project-dir] [--product <p>] [--module <m>] [--mode <m>] [--task <t>]
 oniro-app app install [project-dir] [--hap <p>]  Install the signed .hap on device/emulator via hdc
 oniro-app app launch  [project-dir] [--module <m>]  Launch the app via hdc
@@ -66,6 +67,18 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
    $ oniro-app cmdtools install --from-zip path/to/commandline-tools-<platform>.zip
    ```
 2. Host the archive yourself and set `ONIRO_CMD_TOOLS_URL_WINDOWS` / `ONIRO_CMD_TOOLS_URL_MAC` so `oniro-app cmdtools install` can fetch it automatically.
+
+### Signing apps that need system permissions
+
+`oniro-app sign` defaults to `--apl normal` / `--app-feature hos_normal_app`, which is fine for ordinary apps. Apps that request permissions above `normal` (anything with `system_basic` or `system_core` availability — e.g. `ohos.permission.GET_WIFI_INFO_INTERNAL`, `ohos.permission.ACCESS_PIN_AUTH`) need a higher APL, otherwise `bm install` fails with `grant request permissions failed`.
+
+```bash
+$ oniro-app sign --apl system_basic           # implies --app-feature hos_system_app
+$ oniro-app sign --apl system_core            # implies --app-feature hos_system_app
+$ oniro-app sign --apl system_basic --app-feature hos_normal_app  # explicit override
+```
+
+The generated profile uses the SDK's bundled development cert (`issuer=pki_internal`) and inherits the SDK's validity window — suitable for local/dev installs, not for distribution. Running `sign` rewrites the `signingConfigs` block of `build-profile.json5` (other keys are preserved).
 
 ## Typical workflow
 
