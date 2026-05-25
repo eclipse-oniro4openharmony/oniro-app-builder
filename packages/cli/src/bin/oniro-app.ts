@@ -9,7 +9,8 @@ import { registerAppCommand } from '../commands/app.js';
 import { registerCreateCommand } from '../commands/create.js';
 import { registerTemplatesCommand } from '../commands/templates.js';
 
-const CLI_VERSION = '0.0.0';
+declare const __CLI_VERSION__: string;
+const CLI_VERSION = __CLI_VERSION__;
 
 function buildProgram(): Command {
   const program = new Command()
