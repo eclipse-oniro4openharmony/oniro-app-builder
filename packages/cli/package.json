@@ -1,6 +1,6 @@
 {
   "name": "@oniroproject/oniro-app",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Cross-platform CLI for Oniro/OpenHarmony application development.",
   "license": "Apache-2.0",
   "repository": {
@@ -24,7 +24,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@oniroproject/core": "0.5.0",
+    "@oniroproject/core": "0.6.0",
     "commander": "^12.1.0"
   },
   "engines": {
