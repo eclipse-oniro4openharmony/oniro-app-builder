@@ -1,4 +1,5 @@
-export const VERSION = '0.0.0';
+declare const __PKG_VERSION__: string;
+export const VERSION = __PKG_VERSION__;
 
 export * from './ports/index.js';
 export * from './sdk/index.js';
