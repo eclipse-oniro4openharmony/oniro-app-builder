@@ -1,5 +1,11 @@
 # @oniroproject/core
 
+## 0.6.1
+
+### Patch Changes
+
+- a7a4437: Add a package README so each npm landing page shows install and usage info instead of "no readme data". No code changes.
+
 ## 0.6.0
 
 ### Minor Changes

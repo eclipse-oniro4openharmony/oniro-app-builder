@@ -1,5 +1,13 @@
 # @oniroproject/oniro-app
 
+## 0.6.1
+
+### Patch Changes
+
+- a7a4437: Add a package README so each npm landing page shows install and usage info instead of "no readme data". No code changes.
+- Updated dependencies [a7a4437]
+  - @oniroproject/core@0.6.1
+
 ## 0.6.0
 
 ### Minor Changes
