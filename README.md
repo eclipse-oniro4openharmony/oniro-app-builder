@@ -30,7 +30,7 @@ oniro-app emulator start [--no-wait]          Start the emulator (waits for hdc 
 oniro-app emulator stop                       Kill running emulator processes
 oniro-app emulator connect [--address <a>]    Attempt hdc connect
 oniro-app emulator remove                     Delete the emulator install
-oniro-app sign [project-dir] [--apl <level>] [--app-feature <feature>]
+oniro-app sign [project-dir] [--apl <level>] [--app-feature <feature>] [--acls <list>]
                                               Generate signing configs + write build-profile.json5
 oniro-app build [project-dir] [--product <p>] [--module <m>] [--mode <m>] [--task <t>]
 oniro-app app install [project-dir] [--hap <p>]  Install the signed .hap on device/emulator via hdc
@@ -77,6 +77,17 @@ $ oniro-app sign --apl system_basic           # implies --app-feature hos_system
 $ oniro-app sign --apl system_core            # implies --app-feature hos_system_app
 $ oniro-app sign --apl system_basic --app-feature hos_normal_app  # explicit override
 ```
+
+When `--apl` is `system_basic` or `system_core`, the HAP signing key automatically switches from `openharmony application profile release` to `OpenHarmony Application Release`, and the profile's `distribution-certificate` is set to the matching CA-signed `OpenHarmony Application Release` leaf (shipped as a code resource — the SDK only bundles the Profile Release chain). The change matches the convention used by every preinstalled OpenHarmony system app's `signature/` directory and is required to get past BMS's parse-profile-prop check on install.
+
+Some privileged permissions (e.g. `ohos.permission.REBOOT`, `ohos.permission.INJECT_INPUT_EVENT`, `ohos.permission.CAPTURE_SCREEN`) must additionally appear in the profile's `acls.allowed-acls`. Pass them via `--acls`:
+
+```bash
+$ oniro-app sign --apl system_core \
+    --acls ohos.permission.REBOOT,ohos.permission.INJECT_INPUT_EVENT
+```
+
+The `signingConfigs` block written to `build-profile.json5` mirrors the names used by the project's `products[*].signingConfig` (e.g. `applications/standard/systemui` uses `release`, `launcher` uses `default`). If the project has no products section, `default` is used.
 
 The generated profile uses the SDK's bundled development cert (`issuer=pki_internal`) and inherits the SDK's validity window — suitable for local/dev installs, not for distribution. Running `sign` rewrites the `signingConfigs` block of `build-profile.json5` (other keys are preserved).
 

@@ -5,6 +5,8 @@ import * as path from 'node:path';
 import {
   modifyProfileTemplate,
   resolveAppFeature,
+  pickSigningKind,
+  detectSigningConfigNames,
 } from '../src/sign/generateSigningConfigs.js';
 import { generateSigningConfigs } from '../src/sign/index.js';
 import { OniroError } from '../src/ports/errors.js';
@@ -15,6 +17,13 @@ interface BundleInfo {
   'app-feature'?: string;
   'bundle-name'?: string;
   'distribution-certificate'?: string;
+}
+
+const FAKE_CERT_PROFILE_LEAF = 'FAKECERT-PROFILE-LEAF';
+const FAKE_CERT_APPLICATION_LEAF = 'FAKECERT-APPLICATION-LEAF';
+
+function wrap(body: string): string {
+  return `-----BEGIN CERTIFICATE-----\n${body}\n-----END CERTIFICATE-----`;
 }
 
 function writeProjectSignaturesFixture(projectDir: string): void {
@@ -33,15 +42,27 @@ function writeProjectSignaturesFixture(projectDir: string): void {
         apl: 'normal',
         'app-feature': 'hos_normal_app',
       },
+      acls: {
+        'allowed-acls': [''],
+      },
     }),
   );
 
-  // OpenHarmonyProfileRelease.pem is a chain — the production code extracts
-  // the third certificate, so we need at least three END markers.
-  const cert = '-----BEGIN CERTIFICATE-----\nFAKECERT\n-----END CERTIFICATE-----';
+  // OpenHarmonyProfileRelease.pem is a 3-cert chain; the third cert is the
+  // Profile Release leaf (what gets written as distribution-certificate for
+  // apl=normal). We use distinct sentinel bodies so tests can assert which
+  // chain the third-cert was pulled from.
   fs.writeFileSync(
     path.join(projectDir, 'signatures', 'OpenHarmonyProfileRelease.pem'),
-    `${cert}\n${cert}\n${cert}\n`,
+    `${wrap('ROOT')}\n${wrap('CA')}\n${wrap(FAKE_CERT_PROFILE_LEAF)}\n`,
+  );
+
+  // OpenHarmonyApplication.cer mirrors the same shape but with the Application
+  // Release leaf as the third cert. Production copies this from the embedded
+  // resource via copyFilesToProject; here we fake it directly.
+  fs.writeFileSync(
+    path.join(projectDir, 'signatures', 'OpenHarmonyApplication.cer'),
+    `${wrap('ROOT')}\n${wrap('CA')}\n${wrap(FAKE_CERT_APPLICATION_LEAF)}\n`,
   );
 }
 
@@ -53,6 +74,18 @@ function readBundleInfo(projectDir: string): BundleInfo {
     ),
   ) as { 'bundle-info': BundleInfo };
   return profile['bundle-info'];
+}
+
+function readProfile(projectDir: string): {
+  'bundle-info': BundleInfo;
+  acls?: { 'allowed-acls'?: string[] };
+} {
+  return JSON.parse(
+    fs.readFileSync(
+      path.join(projectDir, 'signatures', 'UnsgnedReleasedProfileTemplate.json'),
+      'utf-8',
+    ),
+  );
 }
 
 describe('resolveAppFeature', () => {
@@ -71,6 +104,20 @@ describe('resolveAppFeature', () => {
   it('respects an explicit override even when it disagrees with the default', () => {
     expect(resolveAppFeature('system_basic', 'hos_normal_app')).toBe('hos_normal_app');
     expect(resolveAppFeature('normal', 'hos_system_app')).toBe('hos_system_app');
+  });
+});
+
+describe('pickSigningKind', () => {
+  it('uses profile-release for apl=normal', () => {
+    expect(pickSigningKind('normal')).toBe('profile-release');
+  });
+
+  it('uses application-release for apl=system_basic', () => {
+    expect(pickSigningKind('system_basic')).toBe('application-release');
+  });
+
+  it('uses application-release for apl=system_core', () => {
+    expect(pickSigningKind('system_core')).toBe('application-release');
   });
 });
 
@@ -115,6 +162,102 @@ describe('modifyProfileTemplate', () => {
     const info = readBundleInfo(projectDir);
     expect(info.apl).not.toBe('normal');
     expect(info['app-feature']).not.toBe('hos_normal_app');
+  });
+
+  it('pulls distribution-certificate from OpenHarmonyProfileRelease.pem for apl=normal', () => {
+    modifyProfileTemplate(projectDir, 'normal', 'hos_normal_app', noopLogger);
+    const info = readBundleInfo(projectDir);
+    expect(info['distribution-certificate']).toContain(FAKE_CERT_PROFILE_LEAF);
+    expect(info['distribution-certificate']).not.toContain(FAKE_CERT_APPLICATION_LEAF);
+  });
+
+  it('pulls distribution-certificate from OpenHarmonyApplication.cer for system_basic', () => {
+    modifyProfileTemplate(projectDir, 'system_basic', 'hos_system_app', noopLogger);
+    const info = readBundleInfo(projectDir);
+    expect(info['distribution-certificate']).toContain(FAKE_CERT_APPLICATION_LEAF);
+    expect(info['distribution-certificate']).not.toContain(FAKE_CERT_PROFILE_LEAF);
+  });
+
+  it('pulls distribution-certificate from OpenHarmonyApplication.cer for system_core', () => {
+    modifyProfileTemplate(projectDir, 'system_core', 'hos_system_app', noopLogger);
+    const info = readBundleInfo(projectDir);
+    expect(info['distribution-certificate']).toContain(FAKE_CERT_APPLICATION_LEAF);
+  });
+
+  it('writes allowed-acls when acls option is provided', () => {
+    modifyProfileTemplate(projectDir, 'system_basic', 'hos_system_app', noopLogger, {
+      acls: ['ohos.permission.REBOOT', 'ohos.permission.INJECT_INPUT_EVENT'],
+    });
+    const profile = readProfile(projectDir);
+    expect(profile.acls?.['allowed-acls']).toEqual([
+      'ohos.permission.REBOOT',
+      'ohos.permission.INJECT_INPUT_EVENT',
+    ]);
+  });
+
+  it('leaves allowed-acls untouched when acls option is omitted', () => {
+    modifyProfileTemplate(projectDir, 'normal', 'hos_normal_app', noopLogger);
+    const profile = readProfile(projectDir);
+    // Fixture's initial value, preserved.
+    expect(profile.acls?.['allowed-acls']).toEqual(['']);
+  });
+
+  it('writes an empty allowed-acls when acls option is an empty array', () => {
+    modifyProfileTemplate(projectDir, 'system_basic', 'hos_system_app', noopLogger, {
+      acls: [],
+    });
+    const profile = readProfile(projectDir);
+    expect(profile.acls?.['allowed-acls']).toEqual([]);
+  });
+});
+
+describe('detectSigningConfigNames', () => {
+  let projectDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-detect-names-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it('returns ["default"] when build-profile.json5 does not exist', () => {
+    expect(detectSigningConfigNames(projectDir)).toEqual(['default']);
+  });
+
+  it('returns ["default"] when products section is missing', () => {
+    fs.writeFileSync(path.join(projectDir, 'build-profile.json5'), JSON.stringify({ app: {} }));
+    expect(detectSigningConfigNames(projectDir)).toEqual(['default']);
+  });
+
+  it('returns the single product signingConfig name when present', () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'build-profile.json5'),
+      JSON.stringify({ app: { products: [{ name: 'default', signingConfig: 'release' }] } }),
+    );
+    expect(detectSigningConfigNames(projectDir)).toEqual(['release']);
+  });
+
+  it('returns the union of distinct signingConfig names in declaration order', () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'build-profile.json5'),
+      JSON.stringify({
+        app: {
+          products: [
+            { name: 'p1', signingConfig: 'release' },
+            { name: 'p2', signingConfig: 'default' },
+            { name: 'p3', signingConfig: 'release' }, // dedup
+          ],
+        },
+      }),
+    );
+    expect(detectSigningConfigNames(projectDir)).toEqual(['release', 'default']);
+  });
+
+  it('falls back to ["default"] on malformed JSON5', () => {
+    fs.writeFileSync(path.join(projectDir, 'build-profile.json5'), '{ not valid');
+    expect(detectSigningConfigNames(projectDir)).toEqual(['default']);
   });
 });
 

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import JSON5 from 'json5';
 import { encryptPwd, createMaterial } from './encryptKey.js';
+import { OPEN_HARMONY_APPLICATION_CERT } from './applicationCert.js';
 import { detectProjectSdkVersion } from '../sdk/detectProjectSdk.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
@@ -16,6 +17,45 @@ export type AppFeature = 'hos_normal_app' | 'hos_system_app';
 
 export const APL_VALUES: readonly Apl[] = ['normal', 'system_basic', 'system_core'];
 export const APP_FEATURE_VALUES: readonly AppFeature[] = ['hos_normal_app', 'hos_system_app'];
+
+/**
+ * Which signing key pairs with the chosen `apl`.
+ *
+ * - `'profile-release'` — the **OpenHarmony Application Profile Release** key.
+ *   Default for apl=normal. Matches the cert chain that ships with the SDK
+ *   (`OpenHarmonyProfileRelease.pem`). What `hvigor` uses for ordinary apps.
+ *
+ * - `'application-release'` — the **OpenHarmony Application Release** key.
+ *   Required for apl=system_basic|system_core. BMS's parse-profile-prop check
+ *   rejects HAPs whose `distribution-certificate` subject is "Application
+ *   Profile Release" when the HAP requests permissions above its apl. The
+ *   matching cert chain (`OpenHarmonyApplication.cer`) is not shipped in the
+ *   SDK, so we ship it ourselves under `applicationCert.ts`.
+ */
+export type SigningKind = 'profile-release' | 'application-release';
+
+/** @internal exposed for tests. */
+export function pickSigningKind(apl: Apl): SigningKind {
+  return apl === 'normal' ? 'profile-release' : 'application-release';
+}
+
+interface SigningKindConfig {
+  /** keystore alias used by hvigor's SignHap task. */
+  hapKeyAlias: string;
+  /** filename of the cert chain inside `signatures/` referenced by build-profile.json5 `certpath`. */
+  certBasename: string;
+}
+
+const SIGNING_KIND_CONFIG: Record<SigningKind, SigningKindConfig> = {
+  'profile-release': {
+    hapKeyAlias: 'openharmony application profile release',
+    certBasename: 'OpenHarmonyProfileRelease.pem',
+  },
+  'application-release': {
+    hapKeyAlias: 'OpenHarmony Application Release',
+    certBasename: 'OpenHarmonyApplication.cer',
+  },
+};
 
 export interface GenerateSigningConfigsOptions {
   /** Absolute path to the OpenHarmony project (the folder containing build-profile.json5). */
@@ -34,6 +74,13 @@ export interface GenerateSigningConfigsOptions {
    * when `apl='normal'`, otherwise `'hos_system_app'`.
    */
   appFeature?: AppFeature;
+  /**
+   * Permission names to write into the profile's `acls.allowed-acls`. Required for
+   * apps that request permissions above their `apl` (e.g. a system_basic app
+   * requesting `ohos.permission.CAPTURE_SCREEN`). When omitted, the template's
+   * existing `allowed-acls` is left alone.
+   */
+  acls?: string[];
   /** Optional logger; defaults to no-op. */
   logger?: Logger;
 }
@@ -41,6 +88,7 @@ export interface GenerateSigningConfigsOptions {
 function copyFilesToProject(
   projectDir: string,
   paths: { keystore: string; profileCert: string; unsignedProfileTemplate: string },
+  kind: SigningKind,
   logger: Logger,
 ): void {
   logger.info('[sign] Copying signing material into project...');
@@ -50,6 +98,13 @@ function copyFilesToProject(
   fs.copyFileSync(paths.keystore, path.join(signaturesDir, 'OpenHarmony.p12'));
   fs.copyFileSync(paths.profileCert, path.join(signaturesDir, 'OpenHarmonyProfileRelease.pem'));
   fs.copyFileSync(paths.unsignedProfileTemplate, path.join(signaturesDir, 'UnsgnedReleasedProfileTemplate.json'));
+
+  if (kind === 'application-release') {
+    fs.writeFileSync(
+      path.join(signaturesDir, 'OpenHarmonyApplication.cer'),
+      OPEN_HARMONY_APPLICATION_CERT,
+    );
+  }
 }
 
 /**
@@ -62,17 +117,32 @@ export function resolveAppFeature(apl: Apl, override?: AppFeature): AppFeature {
   return apl === 'normal' ? 'hos_normal_app' : 'hos_system_app';
 }
 
+/**
+ * Read the third certificate (the leaf) from a 3-cert PEM chain. The chain is
+ * stored root → intermediate → leaf, so the distribution-certificate we want
+ * is the third block.
+ */
+function extractLeafCertificate(chainPath: string): string {
+  const certContent = fs.readFileSync(chainPath, 'utf-8');
+  const parts = certContent.split('-----END CERTIFICATE-----');
+  if (parts.length < 3) {
+    throw new OniroError(`${chainPath} does not contain enough certificates.`);
+  }
+  return parts[2]!.trim() + '\n-----END CERTIFICATE-----\n';
+}
+
 /** @internal exposed for tests. */
 export function modifyProfileTemplate(
   projectDir: string,
   apl: Apl,
   appFeature: AppFeature,
   logger: Logger,
+  options: { kind?: SigningKind; acls?: string[] } = {},
 ): void {
-  logger.info(`[sign] Modifying profile template (apl=${apl}, app-feature=${appFeature})...`);
+  const kind = options.kind ?? pickSigningKind(apl);
+  logger.info(`[sign] Modifying profile template (apl=${apl}, app-feature=${appFeature}, kind=${kind})...`);
   const appJsonPath = path.join(projectDir, 'AppScope/app.json5');
   const profileTemplatePath = path.join(projectDir, 'signatures/UnsgnedReleasedProfileTemplate.json');
-  const profileCertFilePath = path.join(projectDir, 'signatures/OpenHarmonyProfileRelease.pem');
 
   if (!fs.existsSync(appJsonPath)) {
     throw new OniroError(`${appJsonPath} does not exist.`);
@@ -92,6 +162,7 @@ export function modifyProfileTemplate(
       apl?: string;
       'app-feature'?: string;
     };
+    acls?: { 'allowed-acls'?: string[] };
   };
   try {
     profileTemplate = JSON.parse(fs.readFileSync(profileTemplatePath, 'utf-8'));
@@ -110,13 +181,17 @@ export function modifyProfileTemplate(
   profileTemplate['bundle-info']['apl'] = apl;
   profileTemplate['bundle-info']['app-feature'] = appFeature;
 
-  const certContent = fs.readFileSync(profileCertFilePath, 'utf-8');
-  const certs = certContent.split('-----END CERTIFICATE-----');
-  if (certs.length < 3) {
-    throw new OniroError(`${profileCertFilePath} does not contain enough certificates.`);
+  const distCertChainPath = path.join(
+    projectDir,
+    'signatures',
+    SIGNING_KIND_CONFIG[kind].certBasename,
+  );
+  profileTemplate['bundle-info']['distribution-certificate'] = extractLeafCertificate(distCertChainPath);
+
+  if (options.acls !== undefined) {
+    profileTemplate.acls = profileTemplate.acls ?? {};
+    profileTemplate.acls['allowed-acls'] = options.acls;
   }
-  const thirdCert = certs[2]!.trim() + '\n-----END CERTIFICATE-----\n';
-  profileTemplate['bundle-info']['distribution-certificate'] = thirdCert;
 
   fs.writeFileSync(profileTemplatePath, JSON.stringify(profileTemplate, null, 2));
 }
@@ -131,6 +206,9 @@ function generateP7bFile(
   const profileTemplatePath = path.join(signaturesDir, 'UnsgnedReleasedProfileTemplate.json');
   const outputProfilePath = path.join(signaturesDir, 'app1-profile.p7b');
 
+  // The profile itself is always signed by the Profile Release key, regardless
+  // of the HAP signing kind. The profile's `distribution-certificate` field
+  // (set by modifyProfileTemplate) is what tells BMS which cert will sign the HAP.
   const args = [
     '-jar', paths.signTool,
     'sign-profile',
@@ -155,7 +233,37 @@ function generateP7bFile(
   }
 }
 
-function updateBuildProfile(projectDir: string, logger: Logger): void {
+/**
+ * Read all `products[*].signingConfig` names from the project's build-profile.json5.
+ * Returns the unique names in declaration order. Falls back to `['default']` when
+ * the file is missing or has no products.
+ * @internal exposed for tests.
+ */
+export function detectSigningConfigNames(projectDir: string): string[] {
+  const buildProfilePath = path.join(projectDir, 'build-profile.json5');
+  if (!fs.existsSync(buildProfilePath)) return ['default'];
+
+  let parsed: { app?: { products?: Array<{ signingConfig?: unknown }> } };
+  try {
+    parsed = JSON5.parse(fs.readFileSync(buildProfilePath, 'utf-8'));
+  } catch {
+    return ['default'];
+  }
+
+  const products = parsed.app?.products;
+  if (!Array.isArray(products) || products.length === 0) return ['default'];
+
+  const names: string[] = [];
+  for (const product of products) {
+    const name = product.signingConfig;
+    if (typeof name === 'string' && name.length > 0 && !names.includes(name)) {
+      names.push(name);
+    }
+  }
+  return names.length > 0 ? names : ['default'];
+}
+
+function updateBuildProfile(projectDir: string, kind: SigningKind, logger: Logger): void {
   logger.info('[sign] Writing signing configs into build-profile.json5...');
   const materialDir = path.join(projectDir, 'signatures', 'material');
   const buildProfilePath = path.join(projectDir, 'build-profile.json5');
@@ -172,21 +280,23 @@ function updateBuildProfile(projectDir: string, logger: Logger): void {
     }
   }
 
+  const { hapKeyAlias, certBasename } = SIGNING_KIND_CONFIG[kind];
+  const configNames = detectSigningConfigNames(projectDir);
+  logger.info(`[sign] Writing signingConfigs entries: ${configNames.join(', ')}`);
+
   buildProfile.app = buildProfile.app ?? {};
-  buildProfile.app.signingConfigs = [
-    {
-      name: 'default',
-      material: {
-        certpath: './signatures/OpenHarmonyProfileRelease.pem',
-        storePassword: encryptedStorePassword,
-        keyAlias: 'openharmony application profile release',
-        keyPassword: encryptedKeyPassword,
-        profile: './signatures/app1-profile.p7b',
-        signAlg: 'SHA256withECDSA',
-        storeFile: './signatures/OpenHarmony.p12',
-      },
+  buildProfile.app.signingConfigs = configNames.map((name) => ({
+    name,
+    material: {
+      certpath: `./signatures/${certBasename}`,
+      storePassword: encryptedStorePassword,
+      keyAlias: hapKeyAlias,
+      keyPassword: encryptedKeyPassword,
+      profile: './signatures/app1-profile.p7b',
+      signAlg: 'SHA256withECDSA',
+      storeFile: './signatures/OpenHarmony.p12',
     },
-  ];
+  }));
 
   // Intentionally strict JSON (not JSON5) — keeps the file readable by VS Code's JSON parser.
   fs.writeFileSync(buildProfilePath, JSON.stringify(buildProfile, null, 2));
@@ -241,11 +351,13 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
     unsignedProfileTemplate: path.join(sdkPath, 'toolchains/lib/UnsgnedReleasedProfileTemplate.json'),
   };
 
+  const kind = pickSigningKind(apl);
+
   logger.info('[sign] Starting signing configuration generation...');
-  copyFilesToProject(projectDir, paths, logger);
-  modifyProfileTemplate(projectDir, apl, appFeature, logger);
+  copyFilesToProject(projectDir, paths, kind, logger);
+  modifyProfileTemplate(projectDir, apl, appFeature, logger, { kind, acls: options.acls });
   generateP7bFile(projectDir, paths, logger);
   prepareMaterialDirectory(projectDir, logger);
-  updateBuildProfile(projectDir, logger);
+  updateBuildProfile(projectDir, kind, logger);
   logger.info('[sign] Signing configuration generated successfully.');
 }
