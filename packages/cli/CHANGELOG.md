@@ -1,5 +1,18 @@
 # @oniroproject/oniro-app
 
+## 0.6.2
+
+### Patch Changes
+
+- Fix signing of apps that request privileged (system_basic/system_core) permissions.
+
+  - Route system_basic/system_core through the OpenHarmony **Application Release** key/cert chain (BMS rejects HAPs signed with the SDK's _Profile_ Release cert once an apl-elevated permission is requested).
+  - New `--acls <list>` flag on `oniro-app sign` to populate the profile's `acls.allowed-acls`; omitting it leaves the existing template value untouched (`apl=normal` default unchanged).
+  - `updateBuildProfile()` now preserves per-product `signingConfig` names from `build-profile.json5` instead of forcing `"default"`, so system-app source trees (e.g. `systemui` using `signingConfig: "release"`) work without manual renaming.
+
+- Updated dependencies
+  - @oniroproject/core@0.6.2
+
 ## 0.6.1
 
 ### Patch Changes

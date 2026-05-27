@@ -1,6 +1,6 @@
 {
   "name": "@oniroproject/core",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Shared library for Oniro/OpenHarmony app development tooling: SDK install, build, sign, emulator, hdc, project scaffolding.",
   "license": "Apache-2.0",
   "repository": {
