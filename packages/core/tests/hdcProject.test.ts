@@ -83,4 +83,45 @@ describe('getMainAbility', () => {
     );
     expect(() => getMainAbility(projectDir)).toThrow(/mainElement not found/);
   });
+
+  function writeModule(module: unknown): void {
+    fs.mkdirSync(path.join(projectDir, 'entry', 'src', 'main'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, 'entry', 'src', 'main', 'module.json5'),
+      JSON.stringify({ module }),
+    );
+  }
+
+  it('falls back to the first visible ability when mainElement is absent', () => {
+    writeModule({
+      abilities: [
+        { name: 'BackgroundAbility', visible: false },
+        { name: 'VisibleAbility', visible: true },
+      ],
+    });
+    expect(getMainAbility(projectDir)).toBe('VisibleAbility');
+  });
+
+  it('falls back to the first ability when none are marked visible', () => {
+    writeModule({ abilities: [{ name: 'OnlyAbility' }] });
+    expect(getMainAbility(projectDir)).toBe('OnlyAbility');
+  });
+
+  it('prefers mainElement over abilities[] when both are present', () => {
+    writeModule({ mainElement: 'MainAbility', abilities: [{ name: 'OtherAbility', visible: true }] });
+    expect(getMainAbility(projectDir)).toBe('MainAbility');
+  });
+
+  it('selects an explicitly named ability', () => {
+    writeModule({
+      mainElement: 'MainAbility',
+      abilities: [{ name: 'MainAbility', visible: true }, { name: 'SettingsAbility', visible: true }],
+    });
+    expect(getMainAbility(projectDir, 'entry', 'SettingsAbility')).toBe('SettingsAbility');
+  });
+
+  it('throws when the explicitly named ability does not exist', () => {
+    writeModule({ mainElement: 'MainAbility', abilities: [{ name: 'MainAbility' }] });
+    expect(() => getMainAbility(projectDir, 'entry', 'NopeAbility')).toThrow(/not found/);
+  });
 });
