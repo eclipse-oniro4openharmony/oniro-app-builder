@@ -18,6 +18,14 @@ export type AppFeature = 'hos_normal_app' | 'hos_system_app';
 export const APL_VALUES: readonly Apl[] = ['normal', 'system_basic', 'system_core'];
 export const APP_FEATURE_VALUES: readonly AppFeature[] = ['hos_normal_app', 'hos_system_app'];
 
+/** Keystore passwords. These must match the keystore in use. */
+export interface SigningPasswords {
+  store: string;
+  key: string;
+}
+
+const DEFAULT_PASSWORDS: SigningPasswords = { store: '123456', key: '123456' };
+
 /**
  * Which signing key pairs with the chosen `apl`.
  *
@@ -81,6 +89,18 @@ export interface GenerateSigningConfigsOptions {
    * existing `allowed-acls` is left alone.
    */
   acls?: string[];
+  /**
+   * Keystore passwords written into the profile sign step and the build-profile
+   * signingConfigs. Defaults to `'123456'` (the SDK's bundled OpenHarmony.p12
+   * password). Only override when supplying a matching custom keystore.
+   */
+  passwords?: SigningPasswords;
+  /**
+   * Override the bundled application cert chain (application-release kind only).
+   * When set, this file is copied to `signatures/OpenHarmonyApplication.cer`
+   * instead of the inlined cert. May also be sourced from `config.applicationCertPath`.
+   */
+  applicationCertPath?: string;
   /** Optional logger; defaults to no-op. */
   logger?: Logger;
 }
@@ -90,6 +110,7 @@ function copyFilesToProject(
   paths: { keystore: string; profileCert: string; unsignedProfileTemplate: string },
   kind: SigningKind,
   logger: Logger,
+  applicationCertPath?: string,
 ): void {
   logger.info('[sign] Copying signing material into project...');
   const signaturesDir = path.join(projectDir, 'signatures');
@@ -100,10 +121,12 @@ function copyFilesToProject(
   fs.copyFileSync(paths.unsignedProfileTemplate, path.join(signaturesDir, 'UnsgnedReleasedProfileTemplate.json'));
 
   if (kind === 'application-release') {
-    fs.writeFileSync(
-      path.join(signaturesDir, 'OpenHarmonyApplication.cer'),
-      OPEN_HARMONY_APPLICATION_CERT,
-    );
+    const dest = path.join(signaturesDir, 'OpenHarmonyApplication.cer');
+    if (applicationCertPath) {
+      fs.copyFileSync(applicationCertPath, dest);
+    } else {
+      fs.writeFileSync(dest, OPEN_HARMONY_APPLICATION_CERT);
+    }
   }
 }
 
@@ -200,6 +223,7 @@ function generateP7bFile(
   projectDir: string,
   paths: { signTool: string; profileCert: string; keystore: string },
   logger: Logger,
+  passwords: SigningPasswords,
 ): void {
   logger.info('[sign] Generating P7b profile via hap-sign-tool...');
   const signaturesDir = path.join(projectDir, 'signatures');
@@ -219,8 +243,8 @@ function generateP7bFile(
     '-inFile', profileTemplatePath,
     '-keystoreFile', paths.keystore,
     '-outFile', outputProfilePath,
-    '-keyPwd', '123456',
-    '-keystorePwd', '123456',
+    '-keyPwd', passwords.key,
+    '-keystorePwd', passwords.store,
   ];
 
   try {
@@ -263,13 +287,13 @@ export function detectSigningConfigNames(projectDir: string): string[] {
   return names.length > 0 ? names : ['default'];
 }
 
-function updateBuildProfile(projectDir: string, kind: SigningKind, logger: Logger): void {
+function updateBuildProfile(projectDir: string, kind: SigningKind, logger: Logger, passwords: SigningPasswords): void {
   logger.info('[sign] Writing signing configs into build-profile.json5...');
   const materialDir = path.join(projectDir, 'signatures', 'material');
   const buildProfilePath = path.join(projectDir, 'build-profile.json5');
 
-  const encryptedStorePassword = encryptPwd('123456', materialDir);
-  const encryptedKeyPassword = encryptPwd('123456', materialDir);
+  const encryptedStorePassword = encryptPwd(passwords.store, materialDir);
+  const encryptedKeyPassword = encryptPwd(passwords.key, materialDir);
 
   let buildProfile: { app?: { signingConfigs?: unknown[] } } = { app: {} };
   if (fs.existsSync(buildProfilePath)) {
@@ -352,12 +376,13 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
   };
 
   const kind = pickSigningKind(apl);
+  const passwords = options.passwords ?? DEFAULT_PASSWORDS;
 
   logger.info('[sign] Starting signing configuration generation...');
-  copyFilesToProject(projectDir, paths, kind, logger);
+  copyFilesToProject(projectDir, paths, kind, logger, options.applicationCertPath);
   modifyProfileTemplate(projectDir, apl, appFeature, logger, { kind, acls: options.acls });
-  generateP7bFile(projectDir, paths, logger);
+  generateP7bFile(projectDir, paths, logger, passwords);
   prepareMaterialDirectory(projectDir, logger);
-  updateBuildProfile(projectDir, kind, logger);
+  updateBuildProfile(projectDir, kind, logger, passwords);
   logger.info('[sign] Signing configuration generated successfully.');
 }

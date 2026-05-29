@@ -8,6 +8,7 @@ export {
 } from './generateSigningConfigs.js';
 export type {
   GenerateSigningConfigsOptions,
+  SigningPasswords,
   Apl,
   AppFeature,
   SigningKind,
