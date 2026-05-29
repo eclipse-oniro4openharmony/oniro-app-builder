@@ -1,28 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { exec, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { ConfigProvider } from '../ports/config.js';
 import { defaultPaths } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
-import { noopLogger } from '../ports/logger.js';
+import { noopLogger, scopedLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 import { getHdcPath } from '../sdk/paths.js';
+import { hdcExec, ensureOk } from './exec.js';
 import { getBundleName, getMainAbility } from './project.js';
-
-function execPromise(cmd: string, logger: Logger): Promise<void> {
-  return new Promise((resolve, reject) => {
-    exec(cmd, (error, stdout, stderr) => {
-      if (stdout?.trim()) logger.info(`[hdc] ${stdout.trim()}`);
-      if (stderr?.trim()) logger.warn(`[hdc] ${stderr.trim()}`);
-      if (error) {
-        logger.error(`[hdc] ${error.message}`);
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
-  });
-}
 
 export interface InstallAppOptions {
   config: ConfigProvider;
@@ -36,7 +22,7 @@ export interface InstallAppOptions {
 }
 
 export async function installApp(opts: InstallAppOptions): Promise<void> {
-  const logger = opts.logger ?? noopLogger;
+  const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
   const relativeHapPath = opts.hapPath ?? opts.config.get('hapPath', defaultPaths.hapPath);
   const hapPath = path.isAbsolute(relativeHapPath) ? relativeHapPath : path.join(opts.projectDir, relativeHapPath);
 
@@ -44,8 +30,10 @@ export async function installApp(opts: InstallAppOptions): Promise<void> {
     throw new OniroError(`HAP file not found at: ${hapPath}. Build and sign the app first.`);
   }
 
-  const hdc = getHdcPath(opts.config);
-  await execPromise(`"${hdc}" install "${hapPath}"`, logger);
+  const result = await hdcExec({ config: opts.config, args: ['install', hapPath], timeoutMs: 300_000 });
+  if (result.stdout.trim()) logger.info(result.stdout.trim());
+  if (result.stderr.trim()) logger.warn(result.stderr.trim());
+  ensureOk(result, `hdc install ${hapPath}`);
 }
 
 export interface LaunchAppOptions {
@@ -57,11 +45,18 @@ export interface LaunchAppOptions {
 }
 
 export async function launchApp(opts: LaunchAppOptions): Promise<void> {
-  const logger = opts.logger ?? noopLogger;
+  const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
   const bundleName = getBundleName(opts.projectDir);
   const mainAbility = getMainAbility(opts.projectDir, opts.moduleName);
-  const hdc = getHdcPath(opts.config);
-  await execPromise(`"${hdc}" shell aa start -a ${mainAbility} -b ${bundleName}`, logger);
+  // Pass ability/bundle as discrete argv elements (shell:false), never interpolated
+  // into a host shell string — this is the injection fix vs the old `aa start -a ${x}`.
+  const result = await hdcExec({
+    config: opts.config,
+    args: ['shell', 'aa', 'start', '-a', mainAbility, '-b', bundleName],
+  });
+  if (result.stdout.trim()) logger.info(result.stdout.trim());
+  if (result.stderr.trim()) logger.warn(result.stderr.trim());
+  ensureOk(result, `hdc shell aa start -a ${mainAbility} -b ${bundleName}`);
 }
 
 export interface RunningProcess {

@@ -1,29 +1,15 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { exec, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { CancelledError, OniroError } from '../ports/errors.js';
-import { getEmulatorDir, getHdcPath } from '../sdk/paths.js';
+import { getEmulatorDir } from '../sdk/paths.js';
+import { hdcExec, runProcess } from '../hdc/exec.js';
 
 const PID_FILE = path.join(os.tmpdir(), 'oniro_emulator.pid');
-
-function execPromise(cmd: string, cwd: string | undefined, logger: Logger): Promise<void> {
-  return new Promise((resolve, reject) => {
-    exec(cmd, { cwd }, (error, stdout, stderr) => {
-      if (stdout?.trim()) logger.info(`[emulator] ${stdout.trim()}`);
-      if (stderr?.trim()) logger.warn(`[emulator] ${stderr.trim()}`);
-      if (error) {
-        logger.error(`[emulator] ${error.message}`);
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
-  });
-}
 
 /**
  * Try to connect hdc to the emulator. Resolves true on success, false otherwise.
@@ -33,15 +19,11 @@ export async function attemptHdcConnection(
   address = '127.0.0.1:55555',
   logger: Logger = noopLogger,
 ): Promise<boolean> {
-  const hdc = getHdcPath(config);
   try {
-    await execPromise(`"${hdc}" start -r`, undefined, logger);
-    await execPromise(`"${hdc}" tconn ${address}`, undefined, logger);
-    return await new Promise<boolean>((resolve) => {
-      exec(`"${hdc}" list targets`, (_error, stdout) => {
-        resolve(stdout?.includes(address) ?? false);
-      });
-    });
+    await hdcExec({ config, args: ['start', '-r'], logger });
+    await hdcExec({ config, args: ['tconn', address], logger });
+    const targets = await hdcExec({ config, args: ['list', 'targets'], logger });
+    return targets.stdout.includes(address);
   } catch (err) {
     logger.warn(`hdc connection attempt failed: ${(err as Error).message}`);
     return false;
@@ -274,13 +256,15 @@ export async function stopEmulator(logger: Logger = noopLogger): Promise<void> {
     }
   }
 
-  const killCmd = os.platform() === 'win32'
-    ? 'taskkill /IM qemu-system-x86_64.exe /F'
-    : 'pkill -f qemu-system-x86_64';
+  // pkill / taskkill exit non-zero when nothing matched — runProcess resolves on any
+  // exit code, so we simply ignore that. The try/catch only guards a missing binary.
+  const [killCmd, ...killArgs] = os.platform() === 'win32'
+    ? ['taskkill', '/IM', 'qemu-system-x86_64.exe', '/F']
+    : ['pkill', '-f', 'qemu-system-x86_64'];
   try {
-    await execPromise(killCmd, undefined, logger);
-  } catch {
-    // pkill / taskkill return non-zero when nothing matched — that's fine.
+    await runProcess({ command: killCmd!, args: killArgs, logger });
+  } catch (err) {
+    logger.warn(`[emulator] could not run ${killCmd}: ${(err as Error).message}`);
   }
 
   fs.rm(PID_FILE, { force: true }, (err) => {
