@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
-import { CmdToolsNotInstalledError, OniroError } from '../ports/errors.js';
+import { CancelledError, CmdToolsNotInstalledError, OniroError } from '../ports/errors.js';
 import { getHvigorwPath, getOhosBaseSdkHome, getCmdToolsPath } from '../sdk/paths.js';
 
 export interface RunHvigorwOptions {
@@ -20,6 +20,13 @@ export interface RunHvigorwOptions {
   task?: string;
   /** Extra raw args appended after the standard ones. */
   extraArgs?: readonly string[];
+  /**
+   * Build modules in parallel. Default `true`. Pass `false` to add `--no-parallel`
+   * for projects that require serial builds.
+   */
+  parallel?: boolean;
+  /** Abort the build; rejects with CancelledError and kills the hvigorw process. */
+  abortSignal?: AbortSignal;
   logger?: Logger;
   /**
    * Optional callback for each stdout/stderr chunk, lets callers stream output
@@ -30,6 +37,28 @@ export interface RunHvigorwOptions {
 
 export interface RunHvigorwResult {
   exitCode: number;
+}
+
+/**
+ * Build the hvigorw argv. Pure (no I/O) so it is unit-testable. `--no-parallel`
+ * is added ONLY when `parallel === false` — builds are parallel by default.
+ */
+export function buildHvigorwArgs(opts: {
+  task?: string;
+  product?: string;
+  module?: string;
+  buildMode?: string;
+  parallel?: boolean;
+  extraArgs?: readonly string[];
+}): string[] {
+  const args: string[] = [opts.task ?? 'assembleHap', '--mode', 'module'];
+  args.push('-p', `product=${opts.product ?? 'default'}`);
+  if (opts.module) args.push('-p', `module=${opts.module}`);
+  if (opts.buildMode) args.push('-p', `buildMode=${opts.buildMode}`);
+  args.push('--stacktrace', '--no-daemon');
+  if (opts.parallel === false) args.push('--no-parallel');
+  if (opts.extraArgs?.length) args.push(...opts.extraArgs);
+  return args;
 }
 
 /**
@@ -48,12 +77,7 @@ export function runHvigorw(opts: RunHvigorwOptions): Promise<RunHvigorwResult> {
   }
 
   const hvigorw = getHvigorwPath(config, projectDir);
-  const args: string[] = [opts.task ?? 'assembleHap', '--mode', 'module'];
-  args.push('-p', `product=${opts.product ?? 'default'}`);
-  if (opts.module) args.push('-p', `module=${opts.module}`);
-  if (opts.buildMode) args.push('-p', `buildMode=${opts.buildMode}`);
-  args.push('--stacktrace', '--no-parallel', '--no-daemon');
-  if (opts.extraArgs?.length) args.push(...opts.extraArgs);
+  const args = buildHvigorwArgs(opts);
 
   // Ensure hvigorw is executable on POSIX (project-local copies often aren't after a fresh clone).
   if (process.platform !== 'win32') {
@@ -66,8 +90,26 @@ export function runHvigorw(opts: RunHvigorwOptions): Promise<RunHvigorwResult> {
   };
 
   return new Promise((resolve, reject) => {
+    if (opts.abortSignal?.aborted) {
+      reject(new CancelledError('hvigorw build cancelled.'));
+      return;
+    }
     logger.info(`[build] ${hvigorw} ${args.join(' ')}`);
     const child = spawn(hvigorw, args, { cwd: projectDir, env, shell: false });
+    let settled = false;
+    const cleanup = (): void => opts.abortSignal?.removeEventListener('abort', onAbort);
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+      reject(new CancelledError('hvigorw build cancelled.'));
+    };
+    opts.abortSignal?.addEventListener('abort', onAbort, { once: true });
     child.stdout.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       opts.onOutput?.(text, 'stdout');
@@ -78,8 +120,16 @@ export function runHvigorw(opts: RunHvigorwOptions): Promise<RunHvigorwResult> {
       opts.onOutput?.(text, 'stderr');
       logger.warn(text.trimEnd());
     });
-    child.on('error', (err) => reject(new OniroError(`Failed to start hvigorw: ${err.message}`, err)));
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new OniroError(`Failed to start hvigorw: ${err.message}`, err));
+    });
     child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       const exitCode = code ?? 1;
       if (exitCode === 0) resolve({ exitCode });
       else reject(new OniroError(`hvigorw exited with code ${exitCode}`));
