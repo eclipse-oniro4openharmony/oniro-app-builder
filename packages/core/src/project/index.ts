@@ -3,6 +3,7 @@ export * from './templates.js';
 export * from './createScaffold.js';
 export * from './listModules.js';
 export * from './abilities.js';
+export * from './prepareSigning.js';
 export {
   readJson5File,
   writeJson5File,
