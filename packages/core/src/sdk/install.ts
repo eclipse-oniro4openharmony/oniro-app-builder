@@ -37,7 +37,8 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
   const logger = opts.logger ?? noopLogger;
 
   const { filename, osFolder, strip } = getSdkFilename(version);
-  const downloadUrl = `${OHOS_URL_BASE}/${version}-Release/${filename}`;
+  const urlBase = config.get('sdkUrlBase', OHOS_URL_BASE);
+  const downloadUrl = `${urlBase}/${version}-Release/${filename}`;
   const sha256Url = `${downloadUrl}.sha256`;
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-sdk-'));

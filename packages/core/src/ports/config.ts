@@ -13,7 +13,13 @@ export type ConfigKey =
   | 'cmdToolsUrlLinux'
   | 'cmdToolsUrlWindows'
   | 'cmdToolsUrlMac'
-  | 'emulatorUrl';
+  | 'emulatorUrl'
+  // Base URL for OpenHarmony SDK release downloads. Defaults to the Huawei mirror
+  // (`OHOS_URL_BASE`); override to point at a private/CI mirror.
+  | 'sdkUrlBase'
+  // Optional path to an external application-cert chain that overrides the bundled
+  // `OpenHarmonyApplication.cer` during signing. Empty/unset → use the bundled cert.
+  | 'applicationCertPath';
 
 export interface ConfigProvider {
   /**
