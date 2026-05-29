@@ -9,3 +9,4 @@ export * from './emulator/index.js';
 export * from './hdc/index.js';
 export * from './build/index.js';
 export * from './project/index.js';
+export * from './device/index.js';
