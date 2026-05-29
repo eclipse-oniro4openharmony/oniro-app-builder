@@ -14,7 +14,10 @@ describe('oniro-app --help / --version', () => {
   it('--help exits 0 and lists every top-level command', () => {
     const r = runCli(['--help']);
     expect(r.status).toBe(0);
-    for (const cmd of ['sdk', 'cmdtools', 'emulator', 'build', 'sign', 'app', 'create', 'templates']) {
+    for (const cmd of [
+      'sdk', 'cmdtools', 'emulator', 'build', 'sign', 'app', 'create', 'templates',
+      'reboot', 'wait', 'watch', 'screenshot', 'dump', 'devices', 'file', 'lint', 'input', 'gesture',
+    ]) {
       expect(r.stdout).toContain(cmd);
     }
   });
@@ -103,6 +106,50 @@ describe('oniro-app create validation', () => {
     ]);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/Invalid (bundle )?name|Invalid --bundle/i);
+  });
+});
+
+describe('oniro-app device-loop command validation (no device)', () => {
+  it('wait with no condition flag errors out', () => {
+    const r = runCli(['wait']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/Specify one of --log|--boot|--bundle/);
+  });
+
+  it('dump rejects an unknown target', () => {
+    const r = runCli(['dump', 'bogus']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/Unknown dump target/);
+  });
+
+  it('app apply requires --bundle', () => {
+    const r = runCli(['app', 'apply', '/tmp']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/bundle/);
+  });
+
+  it('input requires --type', () => {
+    const r = runCli(['input']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/type/);
+  });
+});
+
+describe('oniro-app sign --bootstrap (no device, no java)', () => {
+  it('is a no-op when signing material is already present', () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-cli-presign-'));
+    try {
+      fs.mkdirSync(path.join(proj, 'signatures'), { recursive: true });
+      fs.writeFileSync(
+        path.join(proj, 'build-profile.json5'),
+        JSON.stringify({ app: { signingConfigs: [{ name: 'default' }] } }),
+      );
+      const r = runCli(['sign', '--bootstrap', proj]);
+      expect(r.status).toBe(0);
+      expect(r.stderr).toMatch(/already present/);
+    } finally {
+      fs.rmSync(proj, { recursive: true, force: true });
+    }
   });
 });
 

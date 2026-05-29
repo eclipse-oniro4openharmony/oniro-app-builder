@@ -8,6 +8,15 @@ import { registerSignCommand } from '../commands/sign.js';
 import { registerAppCommand } from '../commands/app.js';
 import { registerCreateCommand } from '../commands/create.js';
 import { registerTemplatesCommand } from '../commands/templates.js';
+import { registerRebootCommand } from '../commands/reboot.js';
+import { registerWaitCommand } from '../commands/wait.js';
+import { registerWatchCommand } from '../commands/watch.js';
+import { registerScreenshotCommand } from '../commands/screenshot.js';
+import { registerDumpCommand } from '../commands/dump.js';
+import { registerDevicesCommand } from '../commands/devices.js';
+import { registerFileCommand } from '../commands/file.js';
+import { registerLintCommand } from '../commands/lint.js';
+import { registerInputCommand } from '../commands/input.js';
 
 declare const __CLI_VERSION__: string;
 const CLI_VERSION = __CLI_VERSION__;
@@ -32,6 +41,15 @@ function buildProgram(): Command {
   registerAppCommand(program);
   registerCreateCommand(program);
   registerTemplatesCommand(program);
+  registerRebootCommand(program);
+  registerWaitCommand(program);
+  registerWatchCommand(program);
+  registerScreenshotCommand(program);
+  registerDumpCommand(program);
+  registerDevicesCommand(program);
+  registerFileCommand(program);
+  registerLintCommand(program);
+  registerInputCommand(program);
 
   return program;
 }

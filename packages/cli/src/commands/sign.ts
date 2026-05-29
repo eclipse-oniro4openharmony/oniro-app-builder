@@ -4,9 +4,11 @@ import {
   APL_VALUES,
   APP_FEATURE_VALUES,
   generateSigningConfigs,
+  prepareSigning,
   getOhosBaseSdkHome,
   type Apl,
   type AppFeature,
+  type SigningPasswords,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 
@@ -48,13 +50,42 @@ export function registerSignCommand(program: Command): void {
         'Comma-separated permission names to write into the profile\'s acls.allowed-acls. Required for apps that request permissions above their apl (e.g. a system_basic app requesting ohos.permission.CAPTURE_SCREEN). Example: --acls ohos.permission.REBOOT,ohos.permission.INJECT_INPUT_EVENT',
       ).argParser(parseAclsList),
     )
+    .option('--bootstrap', 'No-op if signing material is already present; otherwise generate it.')
+    .option('--store-password <pwd>', 'Keystore store password (default 123456 — the SDK keystore password).')
+    .option('--key-password <pwd>', 'Keystore key password (default 123456 — the SDK keystore password).')
     .action(
       (
         projectDir: string | undefined,
-        opts: { apl: Apl; appFeature?: AppFeature; acls?: string[] },
+        opts: {
+          apl: Apl;
+          appFeature?: AppFeature;
+          acls?: string[];
+          bootstrap?: boolean;
+          storePassword?: string;
+          keyPassword?: string;
+        },
       ) => {
         const { config, logger } = getRuntime();
         const dir = path.resolve(projectDir ?? process.cwd());
+        const passwords: SigningPasswords | undefined =
+          opts.storePassword || opts.keyPassword
+            ? { store: opts.storePassword ?? '123456', key: opts.keyPassword ?? '123456' }
+            : undefined;
+
+        if (opts.bootstrap) {
+          const result = prepareSigning({
+            config,
+            projectDir: dir,
+            apl: opts.apl,
+            appFeature: opts.appFeature,
+            acls: opts.acls,
+            passwords,
+            logger,
+          });
+          logger.info(result.source === 'present' ? 'Signing material already present.' : 'Signing configs generated.');
+          return;
+        }
+
         const sdkHome = getOhosBaseSdkHome(config);
         logger.info(`Generating signing configs in ${dir} using SDK at ${sdkHome}...`);
         generateSigningConfigs({
@@ -63,6 +94,7 @@ export function registerSignCommand(program: Command): void {
           apl: opts.apl,
           appFeature: opts.appFeature,
           acls: opts.acls,
+          passwords,
           logger,
         });
         logger.info('Signing configs generated.');
