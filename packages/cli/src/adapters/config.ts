@@ -14,6 +14,8 @@ const ENV_VAR_BY_KEY: Record<ConfigKey, string> = {
   cmdToolsUrlWindows: 'ONIRO_CMD_TOOLS_URL_WINDOWS',
   cmdToolsUrlMac: 'ONIRO_CMD_TOOLS_URL_MAC',
   emulatorUrl: 'ONIRO_EMULATOR_URL',
+  sdkUrlBase: 'ONIRO_SDK_URL_BASE',
+  applicationCertPath: 'ONIRO_APPLICATION_CERT_PATH',
 };
 
 /**

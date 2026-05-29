@@ -49,11 +49,13 @@ export async function installEmulator(opts: InstallEmulatorOptions): Promise<voi
 }
 
 /**
- * Heuristic: emulator is considered installed if `images/run.sh` is present.
- * On Windows-only emulator builds (when they exist) this may not apply.
+ * Heuristic: the emulator is considered installed if either bundled launcher
+ * (`images/run.sh` or `images/run.bat`) is present, so a Windows-only build is
+ * detected too.
  */
 export function isEmulatorInstalled(config: ConfigProvider): boolean {
-  return fs.existsSync(path.join(getEmulatorDir(config), 'images', 'run.sh'));
+  const imagesDir = path.join(getEmulatorDir(config), 'images');
+  return fs.existsSync(path.join(imagesDir, 'run.sh')) || fs.existsSync(path.join(imagesDir, 'run.bat'));
 }
 
 export function removeEmulator(config: ConfigProvider): void {
