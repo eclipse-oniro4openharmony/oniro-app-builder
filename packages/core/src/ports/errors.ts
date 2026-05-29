@@ -39,3 +39,19 @@ export class CancelledError extends OniroError {
     this.name = 'CancelledError';
   }
 }
+
+/**
+ * A spawned command ran to completion but exited non-zero. Lets callers
+ * distinguish "the tool ran and failed" from "the tool could not be spawned"
+ * (a missing binary surfaces as an OniroError / CmdToolsNotInstalledError).
+ */
+export class CommandFailedError extends OniroError {
+  constructor(
+    public readonly command: string,
+    public readonly exitCode: number,
+    public readonly stderr: string,
+  ) {
+    super(`Command failed (exit ${exitCode}): ${command}${stderr ? `\n${stderr}` : ''}`);
+    this.name = 'CommandFailedError';
+  }
+}
