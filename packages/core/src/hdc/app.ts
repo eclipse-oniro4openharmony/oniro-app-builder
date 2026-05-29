@@ -7,7 +7,7 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger, scopedLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 import { getHdcPath } from '../sdk/paths.js';
-import { hdcExec, ensureOk } from './exec.js';
+import { hdcExec, shell, ensureOk } from './exec.js';
 import { getBundleName, getMainAbility } from './project.js';
 
 export interface InstallAppOptions {
@@ -21,7 +21,17 @@ export interface InstallAppOptions {
   logger?: Logger;
 }
 
-export async function installApp(opts: InstallAppOptions): Promise<void> {
+export interface InstallAppResult {
+  installed: boolean;
+  /** Bundle name read from the project's AppScope/app.json5, or '' if unavailable. */
+  bundleName: string;
+  /** The resolved absolute HAP path that was installed. */
+  hapPath: string;
+  /** Combined stdout+stderr from the install, trimmed. */
+  output: string;
+}
+
+export async function installApp(opts: InstallAppOptions): Promise<InstallAppResult> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
   const relativeHapPath = opts.hapPath ?? opts.config.get('hapPath', defaultPaths.hapPath);
   const hapPath = path.isAbsolute(relativeHapPath) ? relativeHapPath : path.join(opts.projectDir, relativeHapPath);
@@ -34,6 +44,14 @@ export async function installApp(opts: InstallAppOptions): Promise<void> {
   if (result.stdout.trim()) logger.info(result.stdout.trim());
   if (result.stderr.trim()) logger.warn(result.stderr.trim());
   ensureOk(result, `hdc install ${hapPath}`);
+
+  let bundleName = '';
+  try {
+    bundleName = getBundleName(opts.projectDir);
+  } catch {
+    // bundleName is informational; a HAP from a project without AppScope still installs.
+  }
+  return { installed: true, bundleName, hapPath, output: `${result.stdout}${result.stderr}`.trim() };
 }
 
 export interface LaunchAppOptions {
@@ -41,13 +59,15 @@ export interface LaunchAppOptions {
   projectDir: string;
   /** Override the module name if it isn't the default `entry`. */
   moduleName?: string;
+  /** Explicit ability to launch; defaults to the module's mainElement / first visible ability. */
+  abilityName?: string;
   logger?: Logger;
 }
 
 export async function launchApp(opts: LaunchAppOptions): Promise<void> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
   const bundleName = getBundleName(opts.projectDir);
-  const mainAbility = getMainAbility(opts.projectDir, opts.moduleName);
+  const mainAbility = getMainAbility(opts.projectDir, opts.moduleName, opts.abilityName);
   // Pass ability/bundle as discrete argv elements (shell:false), never interpolated
   // into a host shell string — this is the injection fix vs the old `aa start -a ${x}`.
   const result = await hdcExec({
@@ -137,4 +157,58 @@ export async function findAppProcessId(config: ConfigProvider, projectDir: strin
   const bundleName = getBundleName(projectDir);
   const result = await listRunningProcesses(config, { targetProcessName: bundleName, logger });
   return result as string;
+}
+
+export interface BundleOptions {
+  config: ConfigProvider;
+  bundle: string;
+  deviceSerial?: string;
+  timeoutMs?: number;
+  logger?: Logger;
+}
+
+/**
+ * Non-throwing companion to {@link listRunningProcesses}: resolve the running
+ * process for a bundle via `pidof`, or `null` when it isn't running. Suitable
+ * for "is X running?" checks (e.g. the pre/post-install pid comparison in
+ * applyChanges).
+ */
+export async function findRunningProcess(opts: BundleOptions): Promise<RunningProcess | null> {
+  const safe = opts.bundle.replace(/'/g, `'\\''`);
+  const res = await shell({
+    config: opts.config,
+    command: `pidof '${safe}'`,
+    deviceSerial: opts.deviceSerial,
+    timeoutMs: opts.timeoutMs ?? 10_000,
+    logger: opts.logger,
+  });
+  const pid = res.stdout.trim().split(/\s+/).filter(Boolean)[0];
+  if (res.code !== 0 || !pid || !/^\d+$/.test(pid)) return null;
+  return { pid, name: opts.bundle };
+}
+
+/** Uninstall an app by bundle name (`hdc uninstall <bundle>`). */
+export async function uninstallApp(opts: BundleOptions): Promise<void> {
+  const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
+  const res = await hdcExec({
+    config: opts.config,
+    args: ['uninstall', opts.bundle],
+    deviceSerial: opts.deviceSerial,
+    timeoutMs: opts.timeoutMs ?? 120_000,
+  });
+  if (res.stdout.trim()) logger.info(res.stdout.trim());
+  if (res.stderr.trim()) logger.warn(res.stderr.trim());
+  ensureOk(res, `hdc uninstall ${opts.bundle}`);
+}
+
+/** Force-stop an app (`hdc shell aa force-stop <bundle>`). */
+export async function forceStop(opts: BundleOptions): Promise<void> {
+  const res = await shell({
+    config: opts.config,
+    command: `aa force-stop ${opts.bundle}`,
+    deviceSerial: opts.deviceSerial,
+    timeoutMs: opts.timeoutMs ?? 30_000,
+    logger: opts.logger,
+  });
+  ensureOk(res, `hdc shell aa force-stop ${opts.bundle}`);
 }
