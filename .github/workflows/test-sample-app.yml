@@ -40,14 +40,13 @@ jobs:
       project_artifact: ${{ needs.scaffold.outputs.project_artifact }}
       sdk_version: '6.1'
       hap_artifact: built-hap
-      toolchains_artifact: toolchains
 
   emulator:
-    needs: build
+    needs: [scaffold, build]
     uses: ./.github/workflows/emulator-run.yml
     with:
+      project_artifact: ${{ needs.scaffold.outputs.project_artifact }}
       hap_artifact: ${{ needs.build.outputs.hap_artifact }}
-      toolchains_artifact: ${{ needs.build.outputs.toolchains_artifact }}
       hap_file: ${{ needs.build.outputs.hap_file }}
       bundle_name: com.example.sampleapp
       entry_ability: EntryAbility

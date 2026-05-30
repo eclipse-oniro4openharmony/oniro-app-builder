@@ -5,13 +5,15 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-# Reusable workflow: sign and build a downloaded OpenHarmony project, then
-# upload the signed .hap and the toolchains (hdc, etc.) as artifacts.
+# Reusable workflow: sign and build a downloaded OpenHarmony project, verifying the
+# toolchain/sign/lint command surface along the way, then upload the signed .hap.
 #
-# Consumes an artifact uploaded by another job containing the project tree at
-# the artifact root. Produces:
-#   - <hap_artifact>:       the signed .hap (single file)
-#   - <toolchains_artifact>: cmd-tools/toolchains subtree (for the emulator job)
+# Consumes an artifact uploaded by another job containing the project tree at the
+# artifact root. Produces:
+#   - <hap_artifact>: the signed .hap (single file)
+#
+# The emulator job installs its own command-line tools, so no toolchains artifact is
+# shipped from here anymore.
 
 name: Build app
 
@@ -28,9 +30,6 @@ on:
       hap_artifact:
         type: string
         default: built-hap
-      toolchains_artifact:
-        type: string
-        default: toolchains
     outputs:
       hap_file:
         description: Filename of the signed .hap produced by the build.
@@ -38,9 +37,6 @@ on:
       hap_artifact:
         description: Artifact name carrying the signed .hap.
         value: ${{ inputs.hap_artifact }}
-      toolchains_artifact:
-        description: Artifact name carrying the SDK toolchains (hdc + friends).
-        value: ${{ inputs.toolchains_artifact }}
 
 jobs:
   build:
@@ -86,17 +82,32 @@ jobs:
       - name: Install command-line tools
         run: oniro-app cmdtools install
 
+      - name: Verify toolchain is installed (sdk list / cmdtools status)
+        run: |
+          oniro-app sdk list --json
+          oniro-app cmdtools status --json
+
       - name: Download project under test
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.project_artifact }}
           path: project
 
-      - name: Sign and build app
+      - name: Sign the project (sign, then verify --bootstrap is a no-op)
         working-directory: ${{ github.workspace }}/project
         run: |
           oniro-app sign
-          oniro-app build
+          oniro-app sign --bootstrap
+
+      - name: Lint the project (lint)
+        # Codelinter findings set a non-zero exit; surface them without failing the build.
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}/project
+        run: oniro-app lint
+
+      - name: Build the app (build)
+        working-directory: ${{ github.workspace }}/project
+        run: oniro-app build
 
       - name: Locate signed HAP
         id: locate
@@ -116,9 +127,3 @@ jobs:
         with:
           name: ${{ inputs.hap_artifact }}
           path: build-output
-
-      - name: Upload toolchains
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.toolchains_artifact }}
-          path: ~/command-line-tools/sdk/default/openharmony/toolchains

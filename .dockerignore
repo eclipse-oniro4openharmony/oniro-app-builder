@@ -1,0 +1,12 @@
+# Keep the Docker build context lean and reproducible for ./Dockerfile: npm ci
+# regenerates node_modules and tsup regenerates dist inside the image, so host
+# copies of those (and VCS/editor cruft) must never leak into the build context.
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.github
+*.log
+.changeset/*.md
+.claude
