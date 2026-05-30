@@ -64,6 +64,16 @@ export interface LaunchAppOptions {
   logger?: Logger;
 }
 
+/**
+ * `aa start` exits 0 even when the launch is refused — a locked screen
+ * (`Error Code:10106102`), a missing ability, a permission denial, etc. The failure
+ * only shows up in its output. Returns the offending text when the output indicates a
+ * failed launch, or null when it looks like a success.
+ */
+export function detectAaStartFailure(output: string): string | null {
+  return /failed to start ability|Error Code:\s*\d|Error Message:/i.test(output) ? output.trim() : null;
+}
+
 export async function launchApp(opts: LaunchAppOptions): Promise<void> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
   const bundleName = getBundleName(opts.projectDir);
@@ -77,6 +87,12 @@ export async function launchApp(opts: LaunchAppOptions): Promise<void> {
   if (result.stdout.trim()) logger.info(result.stdout.trim());
   if (result.stderr.trim()) logger.warn(result.stderr.trim());
   ensureOk(result, `hdc shell aa start -a ${mainAbility} -b ${bundleName}`);
+  // `aa start` reports launch failures in its output, not its exit code — surface them
+  // instead of silently reporting success.
+  const failure = detectAaStartFailure(`${result.stdout}\n${result.stderr}`);
+  if (failure) {
+    throw new OniroError(`Failed to launch ${bundleName} (${mainAbility}): ${failure}`);
+  }
 }
 
 export interface RunningProcess {
