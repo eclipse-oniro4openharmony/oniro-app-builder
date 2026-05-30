@@ -64,6 +64,9 @@ jobs:
       LAUNCHER_BUNDLE: ${{ inputs.launcher_bundle }}
       PROJECT: ${{ github.workspace }}/project
       HAP: ${{ github.workspace }}/hap/${{ inputs.hap_file }}
+      # hdc address of the emulator. Passed explicitly to `reboot` so the post-reboot
+      # wait reconnects the TCP target (hdc does not auto-reconnect TCP across a reboot).
+      DEVICE: 127.0.0.1:55555
     steps:
       - name: Checkout repository (for the CLI sources)
         uses: actions/checkout@v4
@@ -130,7 +133,7 @@ jobs:
         run: oniro-app emulator start --headless --log "$GITHUB_WORKSPACE/qemu.log" --wait-for-hdc ${{ inputs.hdc_wait_seconds }}
 
       - name: Verify hdc connection (emulator connect)
-        run: oniro-app emulator connect --address 127.0.0.1:55555
+        run: oniro-app emulator connect --address "$DEVICE"
 
       - name: List devices (devices --json)
         run: |
@@ -158,19 +161,30 @@ jobs:
       - name: Wait for the app to be running (wait --bundle)
         run: oniro-app wait --bundle "$BUNDLE" --timeout 30000
 
-      - name: Re-apply HAP and verify the process took it (app apply)
-        continue-on-error: true
-        run: oniro-app app apply "$PROJECT" --bundle "$BUNDLE" --hap "$HAP" --json
+      # Capture BEFORE `app apply` below: apply runs `hdc install -r`, which kills the
+      # running app and does not relaunch it — so a screenshot taken after apply shows
+      # the launcher, not the app.
+      - name: Capture screenshot of the running app (screenshot)
+        run: |
+          # wait --bundle only proves the process has a pid; the compositor may need a
+          # beat to bring the ability window to the front. Poll the UI tree until the
+          # app owns a window, then capture — so the shot shows the app, not the launcher.
+          for i in $(seq 1 15); do
+            if oniro-app dump layout 2>/dev/null | grep -q "$BUNDLE"; then
+              echo "App $BUNDLE is in the foreground."
+              break
+            fi
+            echo "Waiting for $BUNDLE to reach the foreground (attempt $i)..."
+            sleep 1
+          done
+          oniro-app screenshot -o "$GITHUB_WORKSPACE/emulator_screenshot.jpeg"
 
-      - name: Capture screenshot (screenshot)
-        run: oniro-app screenshot -o "$GITHUB_WORKSPACE/emulator_screenshot.jpeg"
+      - name: Dump UI layout of the running app (dump layout)
+        run: oniro-app dump layout > "$GITHUB_WORKSPACE/layout.json"
 
       - name: Capture screenshot burst (screenshot --burst)
         continue-on-error: true
         run: oniro-app screenshot --burst 3 --interval 100 -o "$GITHUB_WORKSPACE/burst.jpeg"
-
-      - name: Dump UI layout (dump layout)
-        run: oniro-app dump layout > "$GITHUB_WORKSPACE/layout.json"
 
       - name: Watch logs for a window (watch --log)
         continue-on-error: true
@@ -196,6 +210,12 @@ jobs:
         continue-on-error: true
         run: oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":350,"t":250},{"x":200,"y":200,"t":450}]'
 
+      # Destructive: `app apply` reinstalls via `hdc install -r`, terminating the running
+      # process — hence it runs after the capture/input steps above.
+      - name: Re-apply HAP and verify the process took it (app apply)
+        continue-on-error: true
+        run: oniro-app app apply "$PROJECT" --bundle "$BUNDLE" --hap "$HAP" --json
+
       - name: File send/recv round-trip (file send / file recv)
         run: |
           echo "oniro device verification" > sendme.txt
@@ -212,7 +232,9 @@ jobs:
 
       - name: Reboot and wait for the launcher (reboot)
         continue-on-error: true
-        run: oniro-app reboot --mode system --wait-bundle "$LAUNCHER_BUNDLE" --timeout 300000
+        # --device makes the target a TCP serial so the post-reboot wait reconnects via
+        # `hdc tconn` (hdc does not auto-reconnect TCP sessions across a reboot).
+        run: oniro-app reboot --mode system --wait-bundle "$LAUNCHER_BUNDLE" --device "$DEVICE" --timeout 300000
 
       - name: Stop emulator
         if: always()
