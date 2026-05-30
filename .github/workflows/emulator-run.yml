@@ -5,50 +5,65 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-# Reusable workflow: download a signed .hap + the SDK toolchains, install and
-# launch the Oniro emulator via the oniro-app CLI, install + launch the app via
-# hdc, and capture a VNC screenshot.
+# Reusable workflow: bring up the Oniro emulator and verify the full on-device
+# `oniro-app` command surface against it — connect, devices, app install/launch/apply,
+# screenshot (+ burst), dump layout, log watch/wait, input + gesture, file send/recv,
+# app stop/uninstall, and reboot. Every command is its own named step so the CI run
+# reads as a step-by-step checklist.
 #
-# All cross-platform emulator concerns (picking run.sh vs run.bat, detaching,
-# log redirection, bounded hdc wait) live in the CLI itself.
+# Self-contained for reuse: it builds the CLI, installs the command-line tools (for
+# hdc) and the emulator itself, then drives everything through `oniro-app`. It consumes
+# the scaffolded project (for bundle/ability resolution) and the signed .hap produced
+# upstream — nothing else.
 
-name: Run app on Oniro Emulator
+name: Verify device commands on Oniro Emulator
 
 on:
   workflow_call:
     inputs:
+      project_artifact:
+        type: string
+        required: true
+        description: Artifact with the scaffolded project tree (bundle/ability metadata).
       hap_artifact:
         type: string
         required: true
-      toolchains_artifact:
-        type: string
-        required: true
+        description: Artifact containing the signed .hap.
       hap_file:
         type: string
         required: true
+        description: Filename of the signed .hap within hap_artifact.
       bundle_name:
         type: string
         required: true
       entry_ability:
         type: string
         required: true
-      screenshot_artifact:
+      launcher_bundle:
         type: string
-        default: emulator-screenshot
+        default: com.ohos.launcher
+        description: Home/launcher bundle to wait for after reboot.
+      device_artifacts:
+        type: string
+        default: emulator-device-artifacts
+        description: Name of the uploaded artifact bundle (screenshot, burst, layout, logs).
       hdc_wait_seconds:
         type: number
-        default: 300
+        default: 420
 
 jobs:
   emulator:
-    # Pinned to ubuntu-22.04 because Ubuntu Noble's qemu-system-x86 (8.2+)
-    # ships without the slirp/user netdev backend the bundled launcher relies
-    # on for hdc port forwarding. continue-on-error is set because some
-    # GitHub-hosted runners additionally block QEMU from binding the hostfwd
-    # rule — an infrastructure constraint outside the CLI. The scaffold and
-    # build jobs already validate the rest of the end-to-end flow.
-    runs-on: ubuntu-22.04
-    continue-on-error: true
+    # oniro-runner is a provisioned OpenHarmony host with KVM, so the emulator boots
+    # reliably here. That removes the reasons emulator runs were previously pinned to
+    # ubuntu-22.04 (qemu slirp backend) and marked continue-on-error (hostfwd blocked
+    # on GitHub-hosted runners).
+    runs-on: oniro-runner
+    env:
+      BUNDLE: ${{ inputs.bundle_name }}
+      ENTRY_ABILITY: ${{ inputs.entry_ability }}
+      LAUNCHER_BUNDLE: ${{ inputs.launcher_bundle }}
+      PROJECT: ${{ github.workspace }}/project
+      HAP: ${{ github.workspace }}/hap/${{ inputs.hap_file }}
     steps:
       - name: Checkout repository (for the CLI sources)
         uses: actions/checkout@v4
@@ -65,88 +80,160 @@ jobs:
           npm run build
           npm install -g ./packages/cli
 
+      - name: Cache command-line tools
+        uses: actions/cache@v4
+        with:
+          path: ~/command-line-tools
+          key: ohos-cmdtools-${{ runner.os }}
+
+      - name: Install command-line tools (provides hdc)
+        run: oniro-app cmdtools install
+
+      - name: Put hdc on PATH
+        run: echo "$HOME/command-line-tools/sdk/default/openharmony/toolchains" >> "$GITHUB_PATH"
+
+      - name: Ensure emulator host dependencies
+        # No-op when already present on the runner. qemu runs the emulator;
+        # libatomic1 is a runtime dependency of the hdc binary.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 libatomic1
+
+      - name: Download scaffolded project
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.project_artifact }}
+          path: project
+
       - name: Download signed HAP
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.hap_artifact }}
           path: hap
 
-      - name: Download toolchains
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ inputs.toolchains_artifact }}
-          path: toolchains
-
-      - name: Install host emulator dependencies
+      - name: Host prep (USB stub + KVM permissions)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            xvfb tigervnc-viewer imagemagick qemu-system-x86
+          # hdc enumerates USB via libusb; a headless runner may have no USB subsystem,
+          # so fake one node to let the hdc server initialize cleanly.
+          if [ ! -d /dev/bus/usb ]; then
+            sudo mkdir -p /dev/bus/usb/001
+            sudo mknod /dev/bus/usb/001/001 c 189 0 2>/dev/null || true
+            sudo chmod 666 /dev/bus/usb/001/001 || true
+          fi
+          # Relax KVM permissions only if not already accessible to this user.
+          if [ -e /dev/kvm ] && [ ! -w /dev/kvm ]; then sudo chmod 666 /dev/kvm || true; fi
 
       - name: Install Oniro emulator
         run: oniro-app emulator install
 
-      - name: CI host prep (hdc + USB stub + KVM permissions)
-        run: |
-          TOOLCHAINS_DIR="$GITHUB_WORKSPACE/toolchains"
-          echo "$TOOLCHAINS_DIR" >> "$GITHUB_PATH"
-          sudo chmod +x "$TOOLCHAINS_DIR"/hdc
-          sudo chown -R "$USER:$USER" "$TOOLCHAINS_DIR"
-          # HDC server uses libusb to enumerate /dev/bus/usb; CI runners have
-          # no USB subsystem, so fake the directory to initialize hdc cleanly.
-          sudo mkdir -p /dev/bus/usb/001
-          sudo mknod /dev/bus/usb/001/001 c 189 0 2>/dev/null || true
-          sudo chmod 666 /dev/bus/usb/001/001
-          # Relax KVM device permissions so the bundled launcher can use it.
-          if [ -e /dev/kvm ]; then
-            sudo chmod 666 /dev/kvm
-          fi
+      - name: Start emulator (headless) and wait for hdc
+        run: oniro-app emulator start --headless --log "$GITHUB_WORKSPACE/qemu.log" --wait-for-hdc ${{ inputs.hdc_wait_seconds }}
 
-      - name: Start emulator and wait for hdc
-        run: |
-          oniro-app emulator start \
-            --headless \
-            --log "$GITHUB_WORKSPACE/qemu.log" \
-            --wait-for-hdc ${{ inputs.hdc_wait_seconds }}
+      - name: Verify hdc connection (emulator connect)
+        run: oniro-app emulator connect --address 127.0.0.1:55555
 
-      - name: Install and launch app
-        env:
-          HAP_FILE: ${{ inputs.hap_file }}
-          BUNDLE_NAME: ${{ inputs.bundle_name }}
-          ENTRY_ABILITY: ${{ inputs.entry_ability }}
+      - name: List devices (devices --json)
         run: |
-          hdc install "$GITHUB_WORKSPACE/hap/$HAP_FILE"
-          hdc shell aa start -a "$ENTRY_ABILITY" -b "$BUNDLE_NAME"
-          # Give the app a moment to draw its first frame.
-          sleep 20
+          oniro-app devices --json | tee devices.json
+          grep -q '"serial"' devices.json
 
-      - name: Capture VNC screenshot
+      - name: Wait for boot (wait --boot)
+        run: oniro-app wait --boot --timeout 120000
+
+      - name: Unlock screen (wake + swipe)
+        continue-on-error: true
         run: |
-          xvfb-run --auto-servernum --server-args='-screen 0 360x720x24' bash -c '
-            vncviewer -viewonly 127.0.0.1:0 &
-            VNC_PID=$!
-            sleep 5
-            import -window root "'"$GITHUB_WORKSPACE"'/emulator_screenshot.png"
-            kill $VNC_PID || true
-          '
-          ls -lh "$GITHUB_WORKSPACE/emulator_screenshot.png"
+          # The emulator boots with the keyguard up; aa start is refused on a locked
+          # screen. Wake the display and swipe up to dismiss the keyguard before launch.
+          hdc shell power-shell wakeup || true
+          oniro-app input --type swipe --x 200 --y 650 --x2 200 --y2 150 --speed 600 || true
+          sleep 2
+
+      - name: Install app (app install)
+        run: oniro-app app install "$PROJECT" --hap "$HAP"
+
+      - name: Launch app (app launch)
+        run: oniro-app app launch "$PROJECT" --ability "$ENTRY_ABILITY"
+
+      - name: Wait for the app to be running (wait --bundle)
+        run: oniro-app wait --bundle "$BUNDLE" --timeout 30000
+
+      - name: Re-apply HAP and verify the process took it (app apply)
+        continue-on-error: true
+        run: oniro-app app apply "$PROJECT" --bundle "$BUNDLE" --hap "$HAP" --json
+
+      - name: Capture screenshot (screenshot)
+        run: oniro-app screenshot -o "$GITHUB_WORKSPACE/emulator_screenshot.jpeg"
+
+      - name: Capture screenshot burst (screenshot --burst)
+        continue-on-error: true
+        run: oniro-app screenshot --burst 3 --interval 100 -o "$GITHUB_WORKSPACE/burst.jpeg"
+
+      - name: Dump UI layout (dump layout)
+        run: oniro-app dump layout > "$GITHUB_WORKSPACE/layout.json"
+
+      - name: Watch logs for a window (watch --log)
+        continue-on-error: true
+        run: oniro-app watch --log '.' --for 3000 --json > "$GITHUB_WORKSPACE/watch.json"
+
+      - name: Wait for a log line (wait --log)
+        continue-on-error: true
+        run: oniro-app wait --log '.' --bundle "$BUNDLE" --timeout 8000 --json
+
+      - name: Inject UI input — click / swipe / key / text (input)
+        continue-on-error: true
+        run: |
+          oniro-app input --type click --x 200 --y 400
+          oniro-app input --type doubleClick --x 200 --y 400
+          oniro-app input --type longClick --x 200 --y 400
+          oniro-app input --type swipe --x 200 --y 600 --x2 200 --y2 200 --speed 600
+          oniro-app input --type drag --x 120 --y 300 --x2 320 --y2 300 --speed 400
+          oniro-app input --type fling --x 200 --y 600 --x2 200 --y2 200 --speed 800
+          oniro-app input --type keyEvent --key Home
+          oniro-app input --type inputText --text oniroci
+
+      - name: Inject multi-waypoint gesture (gesture)
+        continue-on-error: true
+        run: oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":350,"t":250},{"x":200,"y":200,"t":450}]'
+
+      - name: File send/recv round-trip (file send / file recv)
+        run: |
+          echo "oniro device verification" > sendme.txt
+          oniro-app file send sendme.txt /data/local/tmp/oniro_ci.txt
+          oniro-app file recv /data/local/tmp/oniro_ci.txt recvd.txt
+          diff sendme.txt recvd.txt
+
+      - name: Stop the app (app stop)
+        continue-on-error: true
+        run: oniro-app app stop "$BUNDLE"
+
+      - name: Uninstall the app (app uninstall)
+        run: oniro-app app uninstall "$BUNDLE"
+
+      - name: Reboot and wait for the launcher (reboot)
+        continue-on-error: true
+        run: oniro-app reboot --mode system --wait-bundle "$LAUNCHER_BUNDLE" --timeout 300000
 
       - name: Stop emulator
         if: always()
         run: oniro-app emulator stop || true
 
-      - name: Upload emulator log on failure
-        if: failure()
+      - name: Upload device artifacts (screenshot, burst, layout, logs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.device_artifacts }}
+          path: |
+            emulator_screenshot.jpeg
+            burst-*.jpeg
+            layout.json
+            watch.json
+          if-no-files-found: ignore
+
+      - name: Upload emulator log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: emulator-log
           path: qemu.log
-          if-no-files-found: ignore
-
-      - name: Upload Emulator Screenshot
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.screenshot_artifact }}
-          path: emulator_screenshot.png
           if-no-files-found: ignore
