@@ -225,13 +225,17 @@ Specify exactly one of `--log`, `--boot`, or `--bundle`.
 
 #### `screenshot` — capture the screen as a JPEG
 
-Writes raw JPEG bytes to a file (no grid overlay — that lives in the MCP layer).
+Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP screenshot (downscaled + grid overlay). `--contact-sheet` captures a burst (default 8 frames) into one tiled sheet and prints per-frame diffs (0..1) on stdout — one image instead of N, pointing you at the frame where something changed.
 
 | Flag | Description |
 | --- | --- |
 | `-o, --output <file>` | Output path (default `screenshot.jpeg`). |
-| `--burst <count>` | Capture N frames; writes `<base>-<i><ext>`. |
+| `--grid` | Downscale to `--max-dim` and overlay a 10x10 grid (axes 0.0–1.0) for picking tap coordinates. |
+| `--max-dim <px>` | Longest-side cap for `--grid` / `--contact-sheet` (256–4096, default `1024`). On its own, downscales without a grid. |
+| `--contact-sheet` | Capture a burst and composite it into one tiled image with per-frame change diffs. |
+| `--burst <count>` | Capture N frames; writes `<base>-<i><ext>` (or sets the `--contact-sheet` frame count). |
 | `--interval <ms>` | Delay between burst frames (default `50`). |
+| `--json` | With `--contact-sheet`, emit the full result object as JSON on stdout. |
 | `--device <serial>` | Target device serial. |
 
 #### `dump` — dump device state as JSON
@@ -274,7 +278,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log`, `watch`, `lint`, `app apply`, `build`) accept `--json`; `dump` always emits JSON; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log`, `watch`, `lint`, `app apply`, `build`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` always emits JSON; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). Set `ONIRO_DEBUG=1` to also print full stack traces.
 
