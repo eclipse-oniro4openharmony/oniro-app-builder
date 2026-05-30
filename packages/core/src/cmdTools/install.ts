@@ -11,6 +11,7 @@ import { OniroError, UnsupportedPlatformError } from '../ports/errors.js';
 import { getCmdToolsPath } from '../sdk/paths.js';
 import { downloadFile } from '../sdk/download.js';
 import { extractZipWithProgress } from '../sdk/extract.js';
+import { movePath } from '../sdk/move.js';
 
 /**
  * Resolve the per-platform download URL for the OpenHarmony command-line tools.
@@ -114,7 +115,7 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
       const dest = path.join(CMD_PATH, entry);
       if (fs.statSync(src).isDirectory()) {
         if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-        fs.renameSync(src, dest);
+        movePath(src, dest);
       } else {
         fs.copyFileSync(src, dest);
       }

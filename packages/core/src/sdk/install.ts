@@ -11,6 +11,7 @@ import { getSdkFilename } from './platform.js';
 import { getSdkRootDir } from './paths.js';
 import { downloadFile, verifySha256 } from './download.js';
 import { extractTarball, extractZipWithProgress } from './extract.js';
+import { movePath } from './move.js';
 
 export interface InstallSdkOptions {
   config: ConfigProvider;
@@ -109,7 +110,7 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
     if (fs.existsSync(sdkInstallDir)) {
       fs.rmSync(sdkInstallDir, { recursive: true, force: true });
     }
-    fs.renameSync(osContentPath, sdkInstallDir);
+    movePath(osContentPath, sdkInstallDir);
     progress?.report({ message: 'Finalizing installation...', increment: 3 });
 
     progress?.report({ message: 'Cleaning up...', increment: 0 });
