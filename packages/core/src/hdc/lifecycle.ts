@@ -1,7 +1,7 @@
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger, scopedLogger } from '../ports/logger.js';
-import { shell } from './exec.js';
+import { hdcExec, shell } from './exec.js';
 import { paramSet } from './param.js';
 import { findRunningProcess } from './app.js';
 import { waitForCondition } from './wait.js';
@@ -13,6 +13,30 @@ async function isReachable(config: ConfigProvider, deviceSerial?: string): Promi
     return res.code === 0 && res.stdout.includes('oniro_ping');
   } catch {
     return false;
+  }
+}
+
+/**
+ * A TCP/network hdc target — "host:port", e.g. the emulator's `127.0.0.1:55555`.
+ * USB serials (e.g. `emulator-5554`) have no `:port` suffix.
+ */
+const TCP_SERIAL_RE = /^.+:\d+$/;
+
+/**
+ * Re-establish the hdc connection to a TCP target, best-effort. hdc auto-reconnects
+ * a USB device when it re-enumerates, but a TCP target must be reconnected explicitly
+ * with `hdc tconn` after the session drops — which is exactly what a reboot does, so
+ * without this a post-reboot `waitForBundle`/`waitForBoot` polls a dead socket until it
+ * times out. A no-op for USB serials or when no serial is given, so it is safe to call
+ * before every poll; failure is swallowed (the device may still be down, and the probe
+ * that follows reports not-ready so we simply poll again).
+ */
+async function reconnectIfTcp(config: ConfigProvider, deviceSerial: string | undefined, logger: Logger): Promise<void> {
+  if (!deviceSerial || !TCP_SERIAL_RE.test(deviceSerial)) return;
+  try {
+    await hdcExec({ config, args: ['tconn', deviceSerial], timeoutMs: 5_000, logger });
+  } catch {
+    /* still down — the following probe reports not-ready and we poll again */
   }
 }
 
@@ -33,8 +57,12 @@ export async function waitForBundle(opts: WaitForBundleOptions): Promise<void> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
   const timeoutMs = opts.timeoutMs ?? 180_000;
   await waitForCondition({
-    probe: async () =>
-      (await findRunningProcess({ config: opts.config, bundle: opts.bundle, deviceSerial: opts.deviceSerial, timeoutMs: 8_000 })) !== null,
+    probe: async () => {
+      await reconnectIfTcp(opts.config, opts.deviceSerial, logger);
+      return (
+        (await findRunningProcess({ config: opts.config, bundle: opts.bundle, deviceSerial: opts.deviceSerial, timeoutMs: 8_000 })) !== null
+      );
+    },
     timeoutMs,
     pollMs: 2_000,
     abortSignal: opts.abortSignal,
@@ -63,6 +91,7 @@ export async function waitForBoot(opts: WaitForBootOptions): Promise<void> {
   const timeoutMs = opts.timeoutMs ?? 180_000;
   await waitForCondition({
     probe: async () => {
+      await reconnectIfTcp(opts.config, opts.deviceSerial, logger);
       if (!(await isReachable(opts.config, opts.deviceSerial))) return false;
       if (!opts.untilPidOf) return true;
       return (
@@ -98,6 +127,9 @@ export interface RebootOptions {
  *
  * When `waitForBundle` is set (system mode), waits for the device to drop and
  * come back with the bundle running — so it doesn't return on the pre-reboot pid.
+ * A TCP target (e.g. an emulator at `127.0.0.1:55555`) is reconnected via
+ * `hdc tconn` during that wait, since hdc does not auto-reconnect TCP sessions
+ * across a reboot the way it does USB devices — pass the address as `deviceSerial`.
  */
 export async function reboot(opts: RebootOptions): Promise<void> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
