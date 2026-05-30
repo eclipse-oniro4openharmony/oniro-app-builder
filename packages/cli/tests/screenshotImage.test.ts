@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 import { buildGridSvg, renderWithGrid, buildContactSheet, frameDiffs } from '../src/lib/screenshotImage.js';
+
+// sharp's first SVG composite pays a librsvg/native cold-start that can exceed
+// vitest's 5s default on slow CI runners (observed flaky on windows-latest).
+// Give the image tests headroom so the cold start doesn't time them out.
+vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 });
 
 const solidJpeg = (w: number, h: number, r: number, g: number, b: number): Promise<Buffer> =>
   sharp({ create: { width: w, height: h, channels: 3, background: { r, g, b } } })
