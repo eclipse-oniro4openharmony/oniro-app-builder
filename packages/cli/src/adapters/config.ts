@@ -8,6 +8,7 @@ import type { ConfigKey, ConfigProvider } from '@oniroproject/core';
 const ENV_VAR_BY_KEY: Record<ConfigKey, string> = {
   sdkRootDir: 'ONIRO_SDK_ROOT_DIR',
   cmdToolsPath: 'ONIRO_CMD_TOOLS_PATH',
+  hdcPath: 'ONIRO_HDC',
   emulatorDir: 'ONIRO_EMULATOR_DIR',
   hapPath: 'ONIRO_HAP_PATH',
   cmdToolsUrlLinux: 'ONIRO_CMD_TOOLS_URL_LINUX',

@@ -8,6 +8,7 @@ import * as path from 'node:path';
 export type ConfigKey =
   | 'sdkRootDir'
   | 'cmdToolsPath'
+  | 'hdcPath'
   | 'emulatorDir'
   | 'hapPath'
   | 'cmdToolsUrlLinux'
