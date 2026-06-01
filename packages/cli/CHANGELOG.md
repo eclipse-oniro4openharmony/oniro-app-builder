@@ -1,5 +1,11 @@
 # @oniroproject/oniro-app
 
+## 0.8.0
+
+### Minor Changes
+
+- e9e80fe: Add a `NativeCpp` project template — an ArkTS + Native C++ (N-API) starter with a CMake-built native library. Selectable via `oniro-app create --template NativeCpp` and listed by `oniro-app templates list`.
+
 ## 0.7.0
 
 ### Minor Changes
