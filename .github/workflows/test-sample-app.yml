@@ -10,6 +10,9 @@
 #   scaffold-app.yml   →   build-app.yml   →   emulator-run.yml
 #       create                 sign+build           install+launch on QEMU
 #
+# A second, parallel scaffold→build chain verifies the NativeCpp template (ArkTS +
+# Native C++ via CMake/N-API) scaffolds and builds.
+#
 # Each reusable workflow can also be called independently — e.g. a user repo
 # could skip the scaffold step and call `build-app.yml` against a checked-in
 # project artifact directly.
@@ -50,3 +53,23 @@ jobs:
       hap_file: ${{ needs.build.outputs.hap_file }}
       bundle_name: com.example.sampleapp
       entry_ability: EntryAbility
+
+  # Parallel chain: verify the NativeCpp template scaffolds and builds (native C++ via
+  # CMake/N-API). Build success is the gate; emulator launch is already exercised by the
+  # EmptyAbility chain above and omitted here to keep runner time down.
+  scaffold-nativecpp:
+    uses: ./.github/workflows/scaffold-app.yml
+    with:
+      project_name: NativeCppSample
+      bundle_name: com.example.nativecppsample
+      sdk_api: '23'
+      template: NativeCpp
+      project_artifact: scaffolded-nativecpp
+
+  build-nativecpp:
+    needs: scaffold-nativecpp
+    uses: ./.github/workflows/build-app.yml
+    with:
+      project_artifact: ${{ needs.scaffold-nativecpp.outputs.project_artifact }}
+      sdk_version: '6.1'
+      hap_artifact: built-hap-nativecpp
