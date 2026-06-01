@@ -55,9 +55,14 @@ export function getOhpmPath(config: ConfigProvider): string {
 }
 
 /**
- * Resolve the hdc binary path inside the SDK toolchains tree.
+ * Resolve the hdc binary. An explicit `hdcPath` override (config key / `ONIRO_HDC`
+ * env var) wins — point it at a wrapper/proxy hdc when the device is not directly
+ * attached here (e.g. a remote device behind an SSH-tunnel `hdc` wrapper). When
+ * unset, fall back to the hdc bundled in the SDK toolchains tree.
  */
 export function getHdcPath(config: ConfigProvider): string {
+  const override = config.get('hdcPath', '');
+  if (override) return override;
   const base = path.join(getCmdToolsPath(config), 'sdk', 'default', 'openharmony', 'toolchains');
   if (os.platform() === 'win32') {
     return pickExisting([
