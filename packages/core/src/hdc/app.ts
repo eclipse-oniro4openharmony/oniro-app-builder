@@ -56,11 +56,19 @@ export async function installApp(opts: InstallAppOptions): Promise<InstallAppRes
 
 export interface LaunchAppOptions {
   config: ConfigProvider;
-  projectDir: string;
-  /** Override the module name if it isn't the default `entry`. */
+  /** Project mode: resolve bundle + main ability from the project. Required unless `bundleName` is given. */
+  projectDir?: string;
+  /**
+   * Bundle mode: launch an already-installed app directly by bundle name (no
+   * project needed). When set, `projectDir` is ignored. If `abilityName` is
+   * omitted, the main ability is resolved from the device via `bm dump -n`.
+   */
+  bundleName?: string;
+  /** Override the module name if it isn't the default `entry` (project mode). */
   moduleName?: string;
-  /** Explicit ability to launch; defaults to the module's mainElement / first visible ability. */
+  /** Explicit ability to launch; defaults to the module's mainElement / first visible ability (project mode) or the installed bundle's main ability (bundle mode). */
   abilityName?: string;
+  deviceSerial?: string;
   logger?: Logger;
 }
 
@@ -74,15 +82,82 @@ export function detectAaStartFailure(output: string): string | null {
   return /failed to start ability|Error Code:\s*\d|Error Message:/i.test(output) ? output.trim() : null;
 }
 
+/**
+ * Parse the main ability of an installed bundle from `bm dump -n <bundle>`
+ * output. Pure/testable. The output is a bundle-name prefix line followed by a
+ * JSON blob; we take the entry module's `mainElementName` (fallback
+ * `mainAbility`), or the first module that declares one. Returns null when the
+ * bundle isn't installed or the output is unparseable.
+ */
+export function parseMainAbilityFromBmDump(stdout: string): string | null {
+  const start = stdout.indexOf('{');
+  if (start < 0) return null;
+  let info: { hapModuleInfos?: Array<{ mainElementName?: string; mainAbility?: string; moduleType?: number | string }> };
+  try {
+    info = JSON.parse(stdout.slice(start));
+  } catch {
+    return null;
+  }
+  const mods = Array.isArray(info?.hapModuleInfos) ? info.hapModuleInfos : [];
+  const abilityOf = (m: { mainElementName?: string; mainAbility?: string }): string | undefined =>
+    (m?.mainElementName || m?.mainAbility) || undefined;
+  const isEntry = (m: { moduleType?: number | string }): boolean =>
+    m?.moduleType === 1 || m?.moduleType === '1' || m?.moduleType === 'entry';
+  const entry = mods.find((m) => isEntry(m) && abilityOf(m));
+  const any = mods.find((m) => abilityOf(m));
+  return (entry && abilityOf(entry)) || (any && abilityOf(any)) || null;
+}
+
+/** Resolve an installed bundle's main ability off the device via `bm dump -n`. */
+async function resolveInstalledMainAbility(opts: {
+  config: ConfigProvider;
+  bundle: string;
+  deviceSerial?: string;
+  logger?: Logger;
+}): Promise<string> {
+  const res = await shell({
+    config: opts.config,
+    command: `bm dump -n ${opts.bundle}`,
+    deviceSerial: opts.deviceSerial,
+    timeoutMs: 15_000,
+    logger: opts.logger,
+  });
+  const ability = parseMainAbilityFromBmDump(res.stdout);
+  if (!ability) {
+    throw new OniroError(
+      `Could not determine the main ability for installed bundle ${opts.bundle} ` +
+        `(is it installed?). Pass an explicit ability instead.`,
+    );
+  }
+  return ability;
+}
+
 export async function launchApp(opts: LaunchAppOptions): Promise<void> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
-  const bundleName = getBundleName(opts.projectDir);
-  const mainAbility = getMainAbility(opts.projectDir, opts.moduleName, opts.abilityName);
+  let bundleName: string;
+  let mainAbility: string;
+  if (opts.bundleName) {
+    // Bundle mode: launch an already-installed app directly (no project).
+    bundleName = opts.bundleName;
+    mainAbility =
+      opts.abilityName ??
+      (await resolveInstalledMainAbility({
+        config: opts.config,
+        bundle: bundleName,
+        deviceSerial: opts.deviceSerial,
+        logger: opts.logger,
+      }));
+  } else {
+    if (!opts.projectDir) throw new OniroError('launchApp requires either bundleName or projectDir.');
+    bundleName = getBundleName(opts.projectDir);
+    mainAbility = getMainAbility(opts.projectDir, opts.moduleName, opts.abilityName);
+  }
   // Pass ability/bundle as discrete argv elements (shell:false), never interpolated
   // into a host shell string — this is the injection fix vs the old `aa start -a ${x}`.
   const result = await hdcExec({
     config: opts.config,
     args: ['shell', 'aa', 'start', '-a', mainAbility, '-b', bundleName],
+    deviceSerial: opts.deviceSerial,
   });
   if (result.stdout.trim()) logger.info(result.stdout.trim());
   if (result.stderr.trim()) logger.warn(result.stderr.trim());

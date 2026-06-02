@@ -12,18 +12,26 @@ export interface DiscoverHapsOptions {
   maxDepth?: number;
 }
 
-/** The module folder a built HAP belongs to (first path segment under projectDir). */
-function moduleOf(projectDir: string, hapPath: string): string {
-  const rel = path.relative(projectDir, hapPath);
-  const first = rel.split(path.sep)[0];
-  return first && first !== '..' ? first : '(root)';
+/**
+ * The build module a HAP belongs to, parsed from its filename
+ * (`<module>-<target>-<buildMode>-{signed,unsigned}.hap`): the segment before
+ * the first dash. This is the build module NAME — what `--module` refers to and
+ * what hvigor stamps into the filename — which, unlike the first path segment,
+ * is robust to nested project layouts (e.g. systemui's
+ * `product/phone/<folder>/build/.../phone_gestureNavigation-...-signed.hap`,
+ * where the module folder is not a top-level directory under projectDir).
+ */
+function moduleOfHap(hapFileName: string): string {
+  const dash = hapFileName.indexOf('-');
+  return dash > 0 ? hapFileName.slice(0, dash) : hapFileName.replace(/\.hap$/i, '');
 }
 
 /**
  * Walk a project's build outputs and group `*-signed.hap` / `*-unsigned.hap`
- * by module folder. Skips `node_modules` / `oh_modules` / `.git`. Ported from
- * the proven MCP `findHaps`, extended with per-module grouping so multi-module
- * projects can install the right HAP. Empty object when nothing is built.
+ * by build module name (parsed from the HAP filename). Skips `node_modules` /
+ * `oh_modules` / `.git`. Ported from the proven MCP `findHaps`, extended with
+ * per-module grouping so multi-module projects can install the right HAP.
+ * Empty object when nothing is built.
  */
 export async function discoverHaps(opts: DiscoverHapsOptions): Promise<Record<string, ModuleHaps>> {
   const { projectDir } = opts;
@@ -39,7 +47,7 @@ export async function discoverHaps(opts: DiscoverHapsOptions): Promise<Record<st
         if (e.name === 'node_modules' || e.name === 'oh_modules' || e.name === '.git') continue;
         await walk(full, depth + 1);
       } else if (e.isFile() && e.name.endsWith('.hap')) {
-        const moduleName = moduleOf(projectDir, full);
+        const moduleName = moduleOfHap(e.name);
         const bucket = (result[moduleName] ??= { signed: [], unsigned: [] });
         if (e.name.includes('unsigned')) bucket.unsigned.push(full);
         else if (e.name.includes('signed')) bucket.signed.push(full);

@@ -31,14 +31,25 @@ export function registerAppCommand(program: Command): void {
 
   app
     .command('launch [project-dir]')
-    .description('Launch the app on the connected device/emulator via hdc.')
-    .option('--module <module>', 'Module folder name', 'entry')
-    .option('--ability <name>', 'Explicit ability to launch (defaults to the module mainElement / first visible).')
-    .action(async (projectDir: string | undefined, opts: { module: string; ability?: string }) => {
+    .description(
+      'Launch an app on the connected device/emulator. Project mode (default): resolves ' +
+        'bundle + main ability from the project. Bundle mode (--bundle): launch an ' +
+        'already-installed app by bundle name, no project needed.',
+    )
+    .option('--bundle <bundle>', 'Launch an already-installed app by bundle name (no project needed).')
+    .option('--module <module>', 'Module folder name (project mode).', 'entry')
+    .option('--ability <name>', 'Explicit ability to launch (defaults to the module mainElement in project mode, or the installed bundle main ability in --bundle mode).')
+    .option('--device <serial>', 'Target device serial.')
+    .action(async (projectDir: string | undefined, opts: { bundle?: string; module: string; ability?: string; device?: string }) => {
       const { config, logger } = getRuntime();
-      const dir = path.resolve(projectDir ?? process.cwd());
-      logger.info(`Launching app from ${dir}...`);
-      await launchApp({ config, projectDir: dir, moduleName: opts.module, abilityName: opts.ability, logger });
+      if (opts.bundle) {
+        logger.info(`Launching installed bundle ${opts.bundle}...`);
+        await launchApp({ config, bundleName: opts.bundle, abilityName: opts.ability, deviceSerial: opts.device, logger });
+      } else {
+        const dir = path.resolve(projectDir ?? process.cwd());
+        logger.info(`Launching app from ${dir}...`);
+        await launchApp({ config, projectDir: dir, moduleName: opts.module, abilityName: opts.ability, deviceSerial: opts.device, logger });
+      }
       logger.info('App launched.');
     });
 
