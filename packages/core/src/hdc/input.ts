@@ -1,7 +1,7 @@
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
-import { shell, ensureOk } from './exec.js';
+import { shellChecked, ensureRemoteOk } from './exec.js';
 
 export type InputType =
   | 'click'
@@ -73,8 +73,8 @@ export function buildInputCommand(opts: SendInputOptions): string {
 /** Inject a UI input action via `uitest uiInput` (pixel coordinates). */
 export async function sendInput(opts: SendInputOptions): Promise<void> {
   const cmd = buildInputCommand(opts);
-  const res = await shell({ config: opts.config, command: cmd, deviceSerial: opts.deviceSerial, timeoutMs: 30_000, logger: opts.logger });
-  ensureOk(res, `hdc shell ${cmd}`);
+  const res = await shellChecked({ config: opts.config, command: cmd, deviceSerial: opts.deviceSerial, timeoutMs: 30_000, logger: opts.logger });
+  ensureRemoteOk(res, `hdc shell ${cmd}`);
 }
 
 export interface Waypoint {
@@ -151,7 +151,9 @@ export function buildRawTouchCommand(events: RawTouchEvent[]): string {
   return `uinput -T ${ops.join(' ')}`;
 }
 
-function waypointsToRawEvents(waypoints: Waypoint[], holdStartMs = 0, holdEndMs = 0): RawTouchEvent[] {
+/** Expand a waypoint path (+ optional holds) into raw down/move/up events for
+ *  the `uinput` escape hatch ({@link sendRawTouch} / {@link buildRawTouchCommand}). */
+export function waypointsToRawEvents(waypoints: Waypoint[], holdStartMs = 0, holdEndMs = 0): RawTouchEvent[] {
   if (waypoints.length < 2) throw new OniroError('sendGesture requires at least two waypoints.');
   const first = waypoints[0]!;
   const events: RawTouchEvent[] = [{ type: 'down', x: first.x, y: first.y, t: 0 }];
@@ -164,26 +166,66 @@ function waypointsToRawEvents(waypoints: Waypoint[], holdStartMs = 0, holdEndMs 
   return events;
 }
 
+// `uitest uiInput swipe/drag` accepts a velocity in [200, 40000] px/s.
+const UITEST_VELOCITY_MIN = 200;
+const UITEST_VELOCITY_MAX = 40000;
+
+export interface GestureUitestOptions {
+  /** A leading press-hold; when > 0 the stroke uses `drag` (press-and-hold,
+   *  then move) instead of `swipe`. uitest has no arbitrary hold duration. */
+  holdStartMs?: number;
+}
+
 /**
- * Drive a smooth multi-waypoint path. With no holds, issues chained
- * `uitest uiInput drag` segments. When `holdStartMs`/`holdEndMs` are set, routes
- * through {@link sendRawTouch} (uinput), the only path with real press-time control.
+ * Build a single continuous `uitest uiInput` stroke for a waypoint path. Pure.
+ *
+ * uitest has no polyline or stationary-hold primitive, so the path is collapsed
+ * to first→last (gesture-nav strokes are straight lines) with the velocity
+ * derived from the total elapsed time and clamped to uitest's range. A
+ * requested `holdStartMs` maps to `drag` (which presses-and-holds before
+ * moving — uitest's nearest equivalent to a leading hold); otherwise `swipe`.
+ */
+export function buildGestureUitestCommand(waypoints: Waypoint[], opts: GestureUitestOptions = {}): string {
+  if (waypoints.length < 2) throw new OniroError('sendGesture requires at least two waypoints.');
+  const a = waypoints[0]!;
+  const b = waypoints[waypoints.length - 1]!;
+  const dist = Math.hypot(b.x - a.x, b.y - a.y);
+  const dtMs = b.t - a.t;
+  const op = (opts.holdStartMs ?? 0) > 0 ? 'drag' : 'swipe';
+  let cmd = `uitest uiInput ${op} ${a.x} ${a.y} ${b.x} ${b.y}`;
+  if (dtMs > 0 && dist > 0) {
+    const v = Math.round(dist / (dtMs / 1000));
+    cmd += ` ${Math.max(UITEST_VELOCITY_MIN, Math.min(UITEST_VELOCITY_MAX, v))}`;
+  }
+  return cmd;
+}
+
+/**
+ * Drive a swipe-style gesture via a single continuous `uitest uiInput` stroke —
+ * the MMI-injection path that `inputMonitor`-based services (gesture-nav,
+ * systemui overlays) actually observe. Preferred over raw `uinput`, whose
+ * kernel virtual-device events do not reach `inputMonitor` on some native-boot
+ * devices (and whose multi-op form some on-device `uinput` builds reject).
+ *
+ * uitest has no polyline or stationary-hold primitive: a multi-waypoint path is
+ * collapsed to first→last, `holdStartMs` maps to `drag` (press-hold-then-move),
+ * and `holdEndMs` has no equivalent (ignored). For true press-time control use
+ * {@link sendRawTouch} (raw `uinput`) — accepting the device caveats above.
  */
 export async function sendGesture(opts: SendGestureOptions): Promise<void> {
-  const wantsHold = (opts.holdStartMs ?? 0) > 0 || (opts.holdEndMs ?? 0) > 0;
-  if (wantsHold) {
-    await sendRawTouch({
-      config: opts.config,
-      events: waypointsToRawEvents(opts.waypoints, opts.holdStartMs, opts.holdEndMs),
-      deviceSerial: opts.deviceSerial,
-      logger: opts.logger,
-    });
-    return;
+  if ((opts.holdEndMs ?? 0) > 0) {
+    opts.logger?.warn(
+      'sendGesture: hold-end has no uitest equivalent and is ignored; use sendRawTouch for a trailing hold.',
+    );
   }
-  for (const cmd of buildGestureCommands(opts.waypoints)) {
-    const res = await shell({ config: opts.config, command: cmd, deviceSerial: opts.deviceSerial, timeoutMs: 30_000, logger: opts.logger });
-    ensureOk(res, `hdc shell ${cmd}`);
+  if (opts.waypoints.length > 2) {
+    opts.logger?.debug(
+      `sendGesture: ${opts.waypoints.length} waypoints collapsed to first→last (uitest has no polyline path).`,
+    );
   }
+  const cmd = buildGestureUitestCommand(opts.waypoints, { holdStartMs: opts.holdStartMs });
+  const res = await shellChecked({ config: opts.config, command: cmd, deviceSerial: opts.deviceSerial, timeoutMs: 30_000, logger: opts.logger });
+  ensureRemoteOk(res, `hdc shell ${cmd}`);
 }
 
 /**
@@ -193,9 +235,15 @@ export async function sendGesture(opts: SendGestureOptions): Promise<void> {
  * WARNING: uinput's gesture form `uinput -T -g x1 y1 x2 y2 [press] [total]`
  * silently no-ops if `press < 500ms` or `total - press < 500ms` ("press time is
  * out of range" — it runs nothing). Keep press and post-press windows ≥ 500ms.
+ *
+ * DEVICE CAVEAT: on some native-boot devices these kernel-`uinput` events never
+ * reach MMI `inputMonitor` services (gesture-nav, systemui), and some on-device
+ * `uinput` builds reject the multi-op `-d/-m/-u` form with "wrong number of
+ * parameters". Prefer {@link sendGesture} (uitest) for those; this path now
+ * surfaces such failures instead of silently succeeding.
  */
 export async function sendRawTouch(opts: SendRawTouchOptions): Promise<void> {
   const cmd = buildRawTouchCommand(opts.events);
-  const res = await shell({ config: opts.config, command: cmd, deviceSerial: opts.deviceSerial, timeoutMs: 30_000, logger: opts.logger });
-  ensureOk(res, `hdc shell ${cmd}`);
+  const res = await shellChecked({ config: opts.config, command: cmd, deviceSerial: opts.deviceSerial, timeoutMs: 30_000, logger: opts.logger });
+  ensureRemoteOk(res, `hdc shell ${cmd}`);
 }

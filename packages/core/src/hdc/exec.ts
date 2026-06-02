@@ -173,3 +173,49 @@ export function ensureOk(result: HdcExecResult, command: string): HdcExecResult 
   }
   return result;
 }
+
+/** Matches the exit-code marker {@link shellChecked} appends. */
+const REMOTE_RC_RE = /__ONIRO_RC=(-?\d+)__/g;
+
+/**
+ * Parse the exit-code marker appended by {@link shellChecked}. Pure/testable.
+ * Returns the remote exit code plus stdout with every marker occurrence
+ * stripped, or `null` when no marker is present (the command was killed/timed
+ * out, or the device shell never reached the trailing `echo`).
+ */
+export function parseRemoteExit(stdout: string): { code: number; stdout: string } | null {
+  let code: number | null = null;
+  for (const m of stdout.matchAll(REMOTE_RC_RE)) code = Number(m[1]);
+  if (code === null) return null;
+  return { code, stdout: stdout.replace(REMOTE_RC_RE, '').replace(/[ \t\r\n]+$/, '') };
+}
+
+/**
+ * Like {@link shell}, but recovers the REMOTE command's exit status.
+ *
+ * `hdc shell "<cmd>"` reports hdc's OWN exit code (≈ always 0) regardless of
+ * whether `<cmd>` succeeded on the device — so on-device failures (`uinput`
+ * rejecting its args, a `bm install` error, a missing binary) otherwise look
+ * like success. We append an exit-code marker, parse it back out, and report
+ * it as `code`, with the marker stripped from stdout. Pair with
+ * {@link ensureRemoteOk} to throw on a non-zero remote exit.
+ */
+export async function shellChecked(opts: HdcShellOptions): Promise<HdcExecResult> {
+  const { command, ...rest } = opts;
+  const res = await hdcExec({ ...rest, args: ['shell', `${command}; echo "__ONIRO_RC=$?__"`] });
+  const parsed = parseRemoteExit(res.stdout);
+  if (!parsed) return res; // marker missing — fall back to hdc's own exit code
+  return { code: parsed.code, stdout: parsed.stdout, stderr: res.stderr };
+}
+
+/**
+ * Throw a typed {@link CommandFailedError} on a non-zero result, preferring
+ * stderr but falling back to stdout for the detail — device tools like
+ * `uinput`/`uitest` print their errors to stdout, not stderr.
+ */
+export function ensureRemoteOk(result: HdcExecResult, command: string): HdcExecResult {
+  if (result.code !== 0) {
+    throw new CommandFailedError(command, result.code, result.stderr.trim() || result.stdout.trim());
+  }
+  return result;
+}

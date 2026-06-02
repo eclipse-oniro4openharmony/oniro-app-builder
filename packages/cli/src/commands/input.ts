@@ -60,8 +60,8 @@ export function registerInputCommand(program: Command): void {
     .command('gesture')
     .description('Inject a multi-waypoint gesture. Waypoints are pixel JSON: [{"x":..,"y":..,"t":..}].')
     .requiredOption('--waypoints <json>', 'JSON array of {x,y,t} pixel waypoints (t = ms from start).')
-    .option('--hold-start <ms>', 'Hold at the first point before moving (routes via uinput).')
-    .option('--hold-end <ms>', 'Hold at the last point before lifting (routes via uinput).')
+    .option('--hold-start <ms>', 'Leading press-hold before moving (best-effort: uses `uitest drag`).')
+    .option('--hold-end <ms>', 'Trailing hold before lifting (no uitest equivalent; ignored).')
     .option('--device <serial>', 'Target device serial.')
     .action(async (opts: GestureOpts) => {
       const { config, logger } = getRuntime();

@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { scopedLogger, type Logger } from '../src/ports/logger.js';
 import { CommandFailedError, CancelledError, OniroError } from '../src/ports/errors.js';
-import { runProcess, hdcExec, shell, ensureOk } from '../src/hdc/exec.js';
+import { runProcess, hdcExec, shell, ensureOk, parseRemoteExit, ensureRemoteOk } from '../src/hdc/exec.js';
 import { staticConfig } from '../src/ports/config.js';
 import { installApp, launchApp } from '../src/hdc/app.js';
 
@@ -31,6 +31,40 @@ describe('scopedLogger', () => {
     scoped.warn('w');
     scoped.error('e');
     expect(lines).toEqual(['debug:[hdc] d', 'info:[hdc] i', 'warn:[hdc] w', 'error:[hdc] e']);
+  });
+});
+
+describe('parseRemoteExit', () => {
+  it('recovers a zero remote exit and strips the marker', () => {
+    expect(parseRemoteExit('hello world\n__ONIRO_RC=0__\n')).toEqual({ code: 0, stdout: 'hello world' });
+  });
+
+  it('recovers a non-zero remote exit (the case hdc would otherwise mask)', () => {
+    expect(parseRemoteExit('touch down 8 820\nwrong number of parameters:24\n__ONIRO_RC=2__')).toEqual({
+      code: 2,
+      stdout: 'touch down 8 820\nwrong number of parameters:24',
+    });
+  });
+
+  it('returns null when no marker is present (timeout/kill)', () => {
+    expect(parseRemoteExit('partial output, no marker')).toBeNull();
+  });
+
+  it('takes the last marker when several are present', () => {
+    expect(parseRemoteExit('a__ONIRO_RC=1__b__ONIRO_RC=3__')).toEqual({ code: 3, stdout: 'ab' });
+  });
+});
+
+describe('ensureRemoteOk', () => {
+  it('throws with stdout detail when stderr is empty (device tools log to stdout)', () => {
+    expect(() => ensureRemoteOk({ code: 2, stdout: 'wrong number of parameters:24', stderr: '' }, 'hdc shell uinput')).toThrow(
+      /wrong number of parameters/,
+    );
+  });
+
+  it('passes a zero exit through unchanged', () => {
+    const r = { code: 0, stdout: 'ok', stderr: '' };
+    expect(ensureRemoteOk(r, 'cmd')).toBe(r);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildInputCommand, buildGestureCommands, buildRawTouchCommand } from '../src/hdc/input.js';
+import { buildInputCommand, buildGestureCommands, buildRawTouchCommand, buildGestureUitestCommand } from '../src/hdc/input.js';
 import { OniroError } from '../src/ports/errors.js';
 
 describe('buildInputCommand', () => {
@@ -47,6 +47,48 @@ describe('buildGestureCommands', () => {
 
   it('throws for fewer than two waypoints', () => {
     expect(() => buildGestureCommands([{ x: 0, y: 0, t: 0 }])).toThrow(/two waypoints/);
+  });
+});
+
+describe('buildGestureUitestCommand', () => {
+  it('emits a single swipe from first→last with velocity from total time', () => {
+    expect(buildGestureUitestCommand([
+      { x: 0, y: 0, t: 0 },
+      { x: 300, y: 0, t: 600 },
+    ])).toBe('uitest uiInput swipe 0 0 300 0 500'); // 300px / 0.6s = 500 px/s
+  });
+
+  it('collapses a multi-waypoint path to first→last', () => {
+    expect(buildGestureUitestCommand([
+      { x: 0, y: 0, t: 0 },
+      { x: 50, y: 0, t: 100 },
+      { x: 300, y: 0, t: 600 },
+    ])).toBe('uitest uiInput swipe 0 0 300 0 500');
+  });
+
+  it('uses drag (press-and-hold then move) when a leading hold is requested', () => {
+    expect(buildGestureUitestCommand(
+      [{ x: 10, y: 20, t: 0 }, { x: 210, y: 20, t: 500 }],
+      { holdStartMs: 300 },
+    )).toBe('uitest uiInput drag 10 20 210 20 400'); // 200px / 0.5s = 400
+  });
+
+  it('clamps velocity into uitest range [200, 40000]', () => {
+    expect(buildGestureUitestCommand([
+      { x: 0, y: 0, t: 0 },
+      { x: 100, y: 0, t: 1000 }, // 100 px/s -> clamped up to 200
+    ])).toBe('uitest uiInput swipe 0 0 100 0 200');
+  });
+
+  it('omits velocity when elapsed time is zero', () => {
+    expect(buildGestureUitestCommand([
+      { x: 0, y: 0, t: 0 },
+      { x: 100, y: 0, t: 0 },
+    ])).toBe('uitest uiInput swipe 0 0 100 0');
+  });
+
+  it('throws for fewer than two waypoints', () => {
+    expect(() => buildGestureUitestCommand([{ x: 0, y: 0, t: 0 }])).toThrow(OniroError);
   });
 });
 
