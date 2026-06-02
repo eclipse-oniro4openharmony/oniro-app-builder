@@ -38,6 +38,19 @@ describe('discoverHaps', () => {
     expect(haps.entry!.signed[0]).toMatch(/entry-default-signed\.hap$/);
   });
 
+  it('keys by build module name (HAP filename prefix), not path segment — fixes nested layouts', async () => {
+    // systemui-style: the module lives under product/phone/<folder>/build/...,
+    // so the first path segment ("product") is NOT the module name. The build
+    // module name is the HAP filename prefix ("phone_gestureNavigation").
+    writeHap(
+      'product/phone/gestureNavigation/build/default/outputs/default/' +
+        'phone_gestureNavigation-phone_entry-default-signed.hap',
+    );
+    const haps = await discoverHaps({ projectDir });
+    expect(Object.keys(haps)).toEqual(['phone_gestureNavigation']);
+    expect(haps.phone_gestureNavigation!.signed[0]).toMatch(/phone_gestureNavigation-phone_entry-default-signed\.hap$/);
+  });
+
   it('returns {} for a project with no built HAPs', async () => {
     expect(await discoverHaps({ projectDir })).toEqual({});
   });
