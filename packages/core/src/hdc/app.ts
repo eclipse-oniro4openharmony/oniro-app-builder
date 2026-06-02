@@ -184,10 +184,16 @@ export interface BundleOptions {
 }
 
 /**
- * Non-throwing companion to {@link listRunningProcesses}: resolve the running
- * process for a bundle via `pidof`, or `null` when it isn't running. Suitable
- * for "is X running?" checks (e.g. the pre/post-install pid comparison in
- * applyChanges).
+ * Non-throwing companion to {@link listRunningProcesses}: resolve a running
+ * process for a bundle, or `null` when it isn't running. Suitable for "is X
+ * running?" checks (e.g. the pre/post-install pid comparison in applyChanges).
+ *
+ * `pidof` matches the bundle's main (UIAbility) process. When that isn't found,
+ * we fall back to `track-jpid` to also catch **extension-ability** processes,
+ * which run under a separate process name `"<bundle>:<ext>"` (e.g. a
+ * ServiceExtension, FormExtension, UIExtension or input method). Without this,
+ * "verify the running process took the change" silently reported nothing for an
+ * app whose only live process is an extension.
  */
 export async function findRunningProcess(opts: BundleOptions): Promise<RunningProcess | null> {
   const safe = opts.bundle.replace(/'/g, `'\\''`);
@@ -199,8 +205,22 @@ export async function findRunningProcess(opts: BundleOptions): Promise<RunningPr
     logger: opts.logger,
   });
   const pid = res.stdout.trim().split(/\s+/).filter(Boolean)[0];
-  if (res.code !== 0 || !pid || !/^\d+$/.test(pid)) return null;
-  return { pid, name: opts.bundle };
+  if (res.code === 0 && pid && /^\d+$/.test(pid)) return { pid, name: opts.bundle };
+
+  // Fallback: the bundle may only be alive as an extension process. track-jpid
+  // names them "<bundle>/<bundle>:<ext>" (vs bare "<bundle>" for the main).
+  try {
+    const list = await listRunningProcesses(opts.config, { timeoutMs: 1200, logger: opts.logger });
+    if (Array.isArray(list)) {
+      const mine = (name: string): boolean =>
+        name === opts.bundle || name.startsWith(`${opts.bundle}/`) || name.startsWith(`${opts.bundle}:`);
+      const match = list.find((p) => p.name === opts.bundle) ?? list.find((p) => mine(p.name));
+      if (match) return match;
+    }
+  } catch {
+    // best-effort; fall through to "not running"
+  }
+  return null;
 }
 
 /** Uninstall an app by bundle name (`hdc uninstall <bundle>`). */
