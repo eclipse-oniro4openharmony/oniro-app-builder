@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import * as path from 'node:path';
-import { installApp, launchApp, uninstallApp, forceStop, applyChanges } from '@oniroproject/core';
+import { installApp, launchApp, uninstallApp, forceStop, applyChanges, getBundleName } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 
 interface ApplyOpts {
-  bundle: string;
+  bundle?: string;
   module?: string;
   hap?: string;
   installedHap?: string;
@@ -48,7 +48,7 @@ export function registerAppCommand(program: Command): void {
       'Install a HAP and verify the running process took the change. Handles sign-info mismatch, ' +
         'asset-cache invalidation, and persistent-bundle restart.',
     )
-    .requiredOption('--bundle <bundle>', 'Bundle name to apply changes to.')
+    .option('--bundle <bundle>', 'Bundle name to apply changes to. Defaults to the bundleName in the project AppScope/app.json5.')
     .option('--module <module>', 'Module to resolve the HAP from (multi-module projects).')
     .option('--hap <path>', 'Explicit .hap path (relative to project-dir or absolute).')
     .option('--installed-hap <path>', 'Local path to the currently-installed HAP, to enable the asset-cache reboot.')
@@ -59,9 +59,10 @@ export function registerAppCommand(program: Command): void {
     .action(async (projectDir: string | undefined, opts: ApplyOpts) => {
       const { config, logger } = getRuntime();
       const dir = path.resolve(projectDir ?? process.cwd());
+      const bundle = opts.bundle ?? getBundleName(dir);
       const result = await applyChanges({
         config,
-        bundle: opts.bundle,
+        bundle,
         hapPath: opts.hap,
         projectDir: dir,
         module: opts.module,
