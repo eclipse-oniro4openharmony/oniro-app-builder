@@ -143,20 +143,44 @@ jobs:
       - name: Wait for boot (wait --boot)
         run: oniro-app wait --boot --timeout 120000
 
-      - name: Unlock screen (wake + swipe)
-        continue-on-error: true
+      - name: Wait until the device accepts launches (keyguard auto-dismiss)
         run: |
-          # The emulator boots with the keyguard up; aa start is refused on a locked
-          # screen. Wake the display and swipe up to dismiss the keyguard before launch.
+          # The emulator boots with the keyguard up, but it auto-dismisses a few seconds
+          # after boot — no swipe needed. aa start is refused while locked
+          # (Error 10106102: "screen is locked ... unlock screen failed"), so poll
+          # readiness by launching a preinstalled app (the launcher) until it succeeds.
+          # Once the launcher comes up, the screen is unlocked and the test-app launch
+          # below will not race the keyguard.
           hdc shell power-shell wakeup || true
-          oniro-app input --type swipe --x 200 --y 650 --x2 200 --y2 150 --speed 600 || true
-          sleep 2
+          for attempt in $(seq 1 20); do
+            if oniro-app app launch --bundle "$LAUNCHER_BUNDLE"; then
+              echo "Device unlocked and accepting launches (after attempt $attempt)."
+              exit 0
+            fi
+            echo "Device not ready (attempt $attempt); waiting for keyguard to auto-dismiss..."
+            hdc shell power-shell wakeup || true
+            sleep 3
+          done
+          echo "Device never accepted an app launch (keyguard still up?)." >&2
+          exit 1
 
       - name: Install app (app install)
         run: oniro-app app install "$PROJECT" --hap "$HAP"
 
       - name: Launch app (app launch)
-        run: oniro-app app launch "$PROJECT" --ability "$ENTRY_ABILITY"
+        run: |
+          # Readiness was already gated above, so launch should succeed; keep a light
+          # retry only to absorb a rare transient (e.g. the display dozing off).
+          for attempt in 1 2 3; do
+            if oniro-app app launch "$PROJECT" --ability "$ENTRY_ABILITY"; then
+              exit 0
+            fi
+            echo "::warning::Launch attempt $attempt failed; retrying..."
+            hdc shell power-shell wakeup || true
+            sleep 3
+          done
+          echo "App failed to launch after 3 attempts." >&2
+          exit 1
 
       - name: Wait for the app to be running (wait --bundle)
         run: oniro-app wait --bundle "$BUNDLE" --timeout 30000
