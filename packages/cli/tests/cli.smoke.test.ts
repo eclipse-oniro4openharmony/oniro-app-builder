@@ -122,10 +122,12 @@ describe('oniro-app device-loop command validation (no device)', () => {
     expect(r.stderr).toMatch(/Unknown dump target/);
   });
 
-  it('app apply requires --bundle', () => {
+  it('app apply errors when no bundle can be resolved', () => {
+    // --bundle is optional; it defaults to the bundleName in the project's
+    // AppScope/app.json5. With neither --bundle nor a project, apply must fail loudly.
     const r = runCli(['app', 'apply', '/tmp']);
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/bundle/);
+    expect(r.stderr).toMatch(/app\.json5|bundle/);
   });
 
   it('input requires --type', () => {
