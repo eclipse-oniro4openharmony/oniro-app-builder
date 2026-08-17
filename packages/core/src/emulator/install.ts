@@ -1,5 +1,4 @@
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ConfigProvider } from '../ports/config.js';
 import { defaultPaths } from '../ports/config.js';
@@ -9,12 +8,18 @@ import { noopLogger } from '../ports/logger.js';
 import { getEmulatorDir } from '../sdk/paths.js';
 import { downloadFile } from '../sdk/download.js';
 import { extractZipWithProgress } from '../sdk/extract.js';
+import { createTempWorkDir, resolveTmpRoot, toSpaceError } from '../sdk/tmp.js';
 
 export interface InstallEmulatorOptions {
   config: ConfigProvider;
   progress?: ProgressReporter;
   abortSignal?: AbortSignal;
   logger?: Logger;
+  /**
+   * Scratch directory for the downloaded ZIP. Overrides the `tmpDir` config key and
+   * the system temp dir — use it when the system temp dir is a small RAM-backed tmpfs.
+   */
+  tmpDir?: string;
 }
 
 /**
@@ -26,14 +31,16 @@ export async function installEmulator(opts: InstallEmulatorOptions): Promise<voi
 
   const url = config.get('emulatorUrl', defaultPaths.emulatorUrl);
   const emulatorDir = getEmulatorDir(config);
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-emulator-'));
+  const what = 'the emulator install';
+  const tmpRoot = resolveTmpRoot(config, opts.tmpDir);
+  const tmpDir = createTempWorkDir(tmpRoot, 'oniro-emulator-');
   const tmpZip = path.join(tmpDir, 'oniro_emulator.zip');
 
   try {
     fs.mkdirSync(emulatorDir, { recursive: true });
 
     progress?.report({ message: 'Downloading emulator...', increment: 0 });
-    await downloadFile({ url, dest: tmpZip, progress, abortSignal, start: 0, range: 50 });
+    await downloadFile({ url, dest: tmpZip, progress, abortSignal, start: 0, range: 50, what, tmpRoot });
 
     progress?.report({ message: 'Extracting emulator...', increment: 0 });
     await extractZipWithProgress({ zipPath: tmpZip, dest: emulatorDir, progress, start: 50, range: 45, logger });
@@ -43,6 +50,8 @@ export async function installEmulator(opts: InstallEmulatorOptions): Promise<voi
       fs.chmodSync(runSh, 0o755);
     }
     progress?.report({ message: 'Finalizing installation...', increment: 5 });
+  } catch (err) {
+    throw toSpaceError(err, tmpRoot, what);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

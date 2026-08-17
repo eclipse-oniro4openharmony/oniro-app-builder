@@ -1,5 +1,4 @@
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ConfigProvider } from '../ports/config.js';
 import type { ProgressReporter } from '../ports/progress.js';
@@ -12,6 +11,7 @@ import { getSdkRootDir } from './paths.js';
 import { downloadFile, verifySha256 } from './download.js';
 import { extractTarball, extractZipWithProgress } from './extract.js';
 import { movePath } from './move.js';
+import { createTempWorkDir, resolveTmpRoot, toSpaceError } from './tmp.js';
 
 export interface InstallSdkOptions {
   config: ConfigProvider;
@@ -20,6 +20,12 @@ export interface InstallSdkOptions {
   progress?: ProgressReporter;
   abortSignal?: AbortSignal;
   logger?: Logger;
+  /**
+   * Scratch directory for the download/extract temporaries. Overrides the `tmpDir`
+   * config key and the system temp dir — use it when the system temp dir is a small
+   * RAM-backed tmpfs.
+   */
+  tmpDir?: string;
 }
 
 /**
@@ -42,7 +48,9 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
   const downloadUrl = `${urlBase}/${version}-Release/${filename}`;
   const sha256Url = `${downloadUrl}.sha256`;
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-sdk-'));
+  const what = `the SDK ${version} install`;
+  const tmpRoot = resolveTmpRoot(config, opts.tmpDir);
+  const tmpDir = createTempWorkDir(tmpRoot, 'oniro-sdk-');
   const tarPath = path.join(tmpDir, filename);
   const sha256Path = path.join(tmpDir, `${filename}.sha256`);
   const extractDir = path.join(tmpDir, 'extract');
@@ -57,10 +65,10 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
 
   try {
     progress?.report({ message: 'Downloading SDK archive...', increment: 0 });
-    await downloadFile({ url: downloadUrl, dest: tarPath, progress, abortSignal, start: 0, range: 35 });
+    await downloadFile({ url: downloadUrl, dest: tarPath, progress, abortSignal, start: 0, range: 35, what, tmpRoot });
 
     progress?.report({ message: 'Downloading checksum...', increment: 0 });
-    await downloadFile({ url: sha256Url, dest: sha256Path, progress, abortSignal, start: 35, range: 10 });
+    await downloadFile({ url: sha256Url, dest: sha256Path, progress, abortSignal, start: 35, range: 10, what, tmpRoot });
 
     progress?.report({ message: 'Verifying checksum...', increment: 0 });
     await verifySha256(tarPath, sha256Path);
@@ -117,8 +125,9 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
     fs.rmSync(tmpDir, { recursive: true, force: true });
     progress?.report({ message: 'Cleaning up...', increment: 2 });
   } catch (err) {
-    logger.error(`SDK install failed: ${err instanceof Error ? err.message : String(err)}`);
+    const wrapped = toSpaceError(err, tmpRoot, what);
+    logger.error(`SDK install failed: ${wrapped instanceof Error ? wrapped.message : String(wrapped)}`);
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    throw err;
+    throw wrapped;
   }
 }

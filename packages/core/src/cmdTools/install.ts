@@ -12,6 +12,7 @@ import { getCmdToolsPath } from '../sdk/paths.js';
 import { downloadFile } from '../sdk/download.js';
 import { extractZipWithProgress } from '../sdk/extract.js';
 import { movePath } from '../sdk/move.js';
+import { createTempWorkDir, resolveTmpRoot, toSpaceError } from '../sdk/tmp.js';
 
 /**
  * Resolve the per-platform download URL for the OpenHarmony command-line tools.
@@ -82,6 +83,12 @@ export interface InstallCmdToolsOptions {
   logger?: Logger;
   /** Skip download and install from a local zip the caller already has. */
   localZipPath?: string;
+  /**
+   * Scratch directory for the download/extract temporaries. Overrides the `tmpDir`
+   * config key and the system temp dir — use it when the system temp dir is a small
+   * RAM-backed tmpfs.
+   */
+  tmpDir?: string;
 }
 
 /**
@@ -92,8 +99,10 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
   const { config, progress, abortSignal } = opts;
   const logger = opts.logger ?? noopLogger;
   const CMD_PATH = getCmdToolsPath(config);
+  const what = 'the command-line tools install';
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-cmdtools-'));
+  const tmpRoot = resolveTmpRoot(config, opts.tmpDir);
+  const tmpDir = createTempWorkDir(tmpRoot, 'oniro-cmdtools-');
   const zipPath = opts.localZipPath ?? path.join(tmpDir, 'oh-command-line-tools.zip');
   const extractPath = path.join(tmpDir, 'oh-command-line-tools');
 
@@ -101,7 +110,7 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
     if (!opts.localZipPath) {
       const url = getCmdToolsDownloadUrl(config);
       progress?.report({ message: 'Downloading command line tools...', increment: 0 });
-      await downloadFile({ url, dest: zipPath, progress, abortSignal, start: 0, range: 50 });
+      await downloadFile({ url, dest: zipPath, progress, abortSignal, start: 0, range: 50, what, tmpRoot });
     }
 
     progress?.report({ message: 'Extracting tools...', increment: 0 });
@@ -130,6 +139,8 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
 
     progress?.report({ message: 'Finalizing installation...', increment: 5 });
     progress?.report({ message: 'Cleaning up...', increment: 0 });
+  } catch (err) {
+    throw toSpaceError(err, tmpRoot, what);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

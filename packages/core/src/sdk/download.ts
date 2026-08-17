@@ -1,10 +1,12 @@
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { pipeline } from 'node:stream';
 import { promisify } from 'node:util';
 import followRedirects from 'follow-redirects';
 import type { ProgressReporter } from '../ports/progress.js';
 import { CancelledError, ChecksumMismatchError, OniroError } from '../ports/errors.js';
+import { ensureFreeSpace, toSpaceError } from './tmp.js';
 
 const { http, https } = followRedirects;
 const pipelineAsync = promisify(pipeline);
@@ -18,11 +20,22 @@ export interface DownloadOptions {
   start?: number;
   /** Overall progress range to consume (0..100). Default 100. */
   range?: number;
+  /** What the download is for, used in out-of-space messages. */
+  what?: string;
+  /**
+   * Configurable scratch root that `dest` lives under, if any. Out-of-space messages
+   * name it instead of the per-run subdirectory, since that is what the user can change.
+   */
+  tmpRoot?: string;
 }
 
 /**
  * Stream a remote file to disk with optional progress reporting and cancellation.
  * Follows redirects via the `follow-redirects` library.
+ *
+ * Fails fast with an `InsufficientSpaceError` when the destination filesystem cannot
+ * hold the advertised `content-length` — the common case being a system temp dir on a
+ * RAM-backed tmpfs that is far smaller than the SDK/tools archives.
  */
 export async function downloadFile(opts: DownloadOptions): Promise<void> {
   const { url, dest, progress, abortSignal } = opts;
@@ -44,9 +57,23 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
       return;
     }
 
+    const destDir = path.dirname(path.resolve(dest));
+    const what = opts.what ?? `the download of '${url}'`;
+
     const file = fs.createWriteStream(dest);
+    let activeResponse: NodeJS.ReadableStream | undefined;
+
+    // A write-stream failure (most often ENOSPC) has no other listener; without this
+    // it would surface as an unhandled 'error' event and take the process down.
+    file.on('error', (err) => {
+      try { (activeResponse as { destroy?: () => void } | undefined)?.destroy?.(); } catch {}
+      try { file.close(); } catch {}
+      fs.unlink(dest, () => {});
+      done(toSpaceError(err, opts.tmpRoot ?? destDir, what));
+    });
 
     const req = proto.get(url, (response) => {
+      activeResponse = response;
       if (response.statusCode !== 200) {
         try { response.destroy(); } catch {}
         try { file.close(); } catch {}
@@ -56,6 +83,20 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
       }
 
       const total = parseInt(response.headers['content-length'] || '0', 10);
+
+      // Refuse to start rather than filling the filesystem (or RAM, on tmpfs) first.
+      if (total > 0) {
+        try {
+          ensureFreeSpace(opts.tmpRoot ?? destDir, total, what);
+        } catch (err) {
+          try { response.destroy(); } catch {}
+          try { file.close(); } catch {}
+          fs.unlink(dest, () => {});
+          done(err);
+          return;
+        }
+      }
+
       let downloaded = 0;
       let lastOverall = Math.round(s);
 
@@ -82,7 +123,7 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
           const inc = endOverall - lastOverall;
           if (inc > 0) progress.report({ message: 'Downloading: 100%', increment: inc });
         }
-        file.close((err) => (err ? done(err) : done()));
+        file.close((err) => (err ? done(toSpaceError(err, opts.tmpRoot ?? destDir, what)) : done()));
       });
 
       abortSignal?.addEventListener('abort', () => {

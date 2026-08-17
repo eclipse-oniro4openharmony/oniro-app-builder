@@ -16,14 +16,19 @@ export function registerEmulatorCommand(program: Command): void {
     .command('install')
     .description('Download and install the Oniro emulator (QEMU-based). Skips if already installed.')
     .option('--force', 'Reinstall even if the emulator is already present.')
-    .action(async (opts: { force?: boolean }) => {
+    .option(
+      '--tmp-dir <path>',
+      'Directory for the downloaded ZIP (default: ONIRO_TMP_DIR, else the system temp dir). ' +
+        'Use a disk-backed path when the system temp dir is a small RAM-backed tmpfs.',
+    )
+    .action(async (opts: { force?: boolean; tmpDir?: string }) => {
       const { config, logger, progress } = getRuntime();
       if (isEmulatorInstalled(config) && !opts.force) {
         logger.info('Emulator already installed; pass --force to reinstall.');
         return;
       }
       logger.info('Installing Oniro emulator...');
-      await installEmulator({ config, progress, logger });
+      await installEmulator({ config, progress, logger, tmpDir: opts.tmpDir });
       logger.info('Emulator installed.');
     });
 

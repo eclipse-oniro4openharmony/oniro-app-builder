@@ -2,6 +2,7 @@ export * from './constants.js';
 export * from './platform.js';
 export * from './paths.js';
 export * from './detectProjectSdk.js';
+export * from './tmp.js';
 export * from './download.js';
 export * from './extract.js';
 export * from './list.js';

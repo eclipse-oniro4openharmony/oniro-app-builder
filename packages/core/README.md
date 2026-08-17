@@ -77,7 +77,7 @@ The injection points every frontend implements, plus their defaults.
 
 | Export | Description |
 | --- | --- |
-| `interface ConfigProvider` / `type ConfigKey` | `get(key, fallback)`. Keys: `sdkRootDir`, `cmdToolsPath`, `emulatorDir`, `hapPath`, `cmdToolsUrlLinux/Windows/Mac`, `emulatorUrl`, `sdkUrlBase`, `applicationCertPath`. |
+| `interface ConfigProvider` / `type ConfigKey` | `get(key, fallback)`. Keys: `sdkRootDir`, `cmdToolsPath`, `emulatorDir`, `hapPath`, `cmdToolsUrlLinux/Windows/Mac`, `emulatorUrl`, `tmpDir`, `sdkUrlBase`, `applicationCertPath`. |
 | `staticConfig(values?)` | An in-memory `ConfigProvider` (expands `${userHome}`). For tests and as a base for frontend impls. |
 | `defaultPaths` | The fallback values core uses when a key is unset. |
 | `interface Logger` / `noopLogger` / `consoleLogger` | 4-level logger (`debug`/`info`/`warn`/`error`). Defaults to no-op. |
@@ -88,13 +88,13 @@ The injection points every frontend implements, plus their defaults.
 
 **Errors** — all extend `OniroError` (which carries an optional `cause`):
 
-`OniroError` · `SdkNotInstalledError` · `CmdToolsNotInstalledError` · `UnsupportedPlatformError` · `ChecksumMismatchError` · `CancelledError` · `CommandFailedError` (carries `command`, `exitCode`, `stderr`).
+`OniroError` · `SdkNotInstalledError` · `CmdToolsNotInstalledError` · `UnsupportedPlatformError` · `ChecksumMismatchError` · `CancelledError` · `CommandFailedError` (carries `command`, `exitCode`, `stderr`) · `InsufficientSpaceError` (carries `dir`).
 
 ### SDK management
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `downloadAndInstallSdk` | `(InstallSdkOptions) => Promise<void>` | Download + install an SDK release into `<sdkRootDir>/<os>/<api>`, reporting progress. |
+| `downloadAndInstallSdk` | `(InstallSdkOptions) => Promise<void>` | Download + install an SDK release into `<sdkRootDir>/<os>/<api>`, reporting progress; `tmpDir` overrides the scratch directory. |
 | `getSupportedSdksForUi` | `(config) => SdkInfo[]` | Known SDKs annotated with `installed`, newest first. |
 | `getInstalledSdks` | `(config) => string[]` | Versions with at least one OS-folder install. |
 | `removeSdk` | `(config, api) => boolean` | Remove an installed SDK by API level across OS folders. |
@@ -105,13 +105,21 @@ The injection points every frontend implements, plus their defaults.
 
 **Path resolvers** (all take `config`): `getSdkRootDir`, `getOhosBaseSdkHome`, `getCmdToolsPath`, `getEmulatorDir`, `getHdcPath`, `getOhpmPath`, `getCmdToolsBin(config, name?)`, `getHvigorwPath(config, projectDir)` (prefers the project-local wrapper only when it is structurally complete, else the bundled one).
 
-**Download/archive primitives**: `downloadFile(DownloadOptions)`, `verifySha256(file, sha256File)`, `extractZipWithProgress(ExtractZipOptions)` (Zip-Slip-safe), `extractTarball(tar, dest, strip?)`.
+**Download/archive primitives**: `downloadFile(DownloadOptions)` (rejects with `InsufficientSpaceError` when the advertised `content-length` does not fit on the destination filesystem), `verifySha256(file, sha256File)`, `extractZipWithProgress(ExtractZipOptions)` (Zip-Slip-safe), `extractTarball(tar, dest, strip?)`.
+
+**Temporary space**: the installers download and extract in a scratch directory resolved as
+`options.tmpDir` → `tmpDir` config key → `os.tmpdir()` — worth overriding because the system
+temp dir is often a RAM-backed `tmpfs` too small for a multi-GB archive.
+`resolveTmpRoot(config, override?)`, `createTempWorkDir(root, prefix)`, `getFreeSpaceBytes(dir)`,
+`isRamBackedPath(dir)`, `ensureFreeSpace(dir, bytes, what)`, `isOutOfSpaceError(err)`,
+`toSpaceError(err, tmpRoot, what)` (turns an `ENOSPC` into an `InsufficientSpaceError` naming the
+directory and the remedy), `formatBytes(n)`, `TMP_DIR_HINT`.
 
 ### Command-line tools
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `installCmdTools` | `(InstallCmdToolsOptions) => Promise<void>` | Install the tools by download or from a local zip (`localZipPath`). |
+| `installCmdTools` | `(InstallCmdToolsOptions) => Promise<void>` | Install the tools by download or from a local zip (`localZipPath`); `tmpDir` overrides the scratch directory. |
 | `getCmdToolsStatus` | `(config) => CmdToolsStatus` | `{ installed, status }` (version when present). |
 | `isCmdToolsInstalled` | `(config) => boolean` | — |
 | `removeCmdTools` | `(config) => void` | Delete the install. |
@@ -135,7 +143,7 @@ The injection points every frontend implements, plus their defaults.
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `installEmulator` | `(InstallEmulatorOptions) => Promise<void>` | Download + extract the QEMU emulator into `emulatorDir`. |
+| `installEmulator` | `(InstallEmulatorOptions) => Promise<void>` | Download + extract the QEMU emulator into `emulatorDir`; `tmpDir` overrides the scratch directory. |
 | `isEmulatorInstalled` / `removeEmulator` | `(config) => boolean` / `void` | — |
 | `startEmulator` | `(StartEmulatorOptions) => Promise<void>` | Launch detached via `run.sh`/`run.bat`; optional `headless`, `logFile`, `connect`, and `waitForHdcSeconds`. |
 | `stopEmulator` | `(logger?) => Promise<void>` | Kill running emulator processes. |

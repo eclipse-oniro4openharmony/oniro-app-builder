@@ -33,6 +33,18 @@ export class ChecksumMismatchError extends OniroError {
   }
 }
 
+/**
+ * A download/extract ran out of room on the filesystem holding its scratch
+ * directory. The message is built by the caller (see `sdk/tmp.ts`) so it can name
+ * the directory, whether it is RAM-backed, and how to point elsewhere.
+ */
+export class InsufficientSpaceError extends OniroError {
+  constructor(message: string, public readonly dir: string, cause?: unknown) {
+    super(message, cause);
+    this.name = 'InsufficientSpaceError';
+  }
+}
+
 export class CancelledError extends OniroError {
   constructor(message = 'Operation cancelled.') {
     super(message);

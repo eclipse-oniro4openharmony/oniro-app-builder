@@ -15,6 +15,10 @@ export type ConfigKey =
   | 'cmdToolsUrlWindows'
   | 'cmdToolsUrlMac'
   | 'emulatorUrl'
+  // Scratch directory for download/extract temporaries. Defaults to the system temp
+  // dir, which is often a RAM-backed tmpfs too small for multi-GB archives; point
+  // this at a disk-backed directory when that bites.
+  | 'tmpDir'
   // Base URL for OpenHarmony SDK release downloads. Defaults to the Huawei mirror
   // (`OHOS_URL_BASE`); override to point at a private/CI mirror.
   | 'sdkUrlBase'

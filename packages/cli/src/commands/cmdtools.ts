@@ -10,14 +10,19 @@ export function registerCmdToolsCommand(program: Command): void {
     .description('Install the OpenHarmony command-line tools (hvigorw, ohpm, hdc). Skips if already installed.')
     .option('--from-zip <path>', 'Install from a local ZIP instead of downloading.')
     .option('--force', 'Reinstall even if the tools are already present.')
-    .action(async (opts: { fromZip?: string; force?: boolean }) => {
+    .option(
+      '--tmp-dir <path>',
+      'Directory for download/extract temporaries (default: ONIRO_TMP_DIR, else the system temp dir). ' +
+        'Use a disk-backed path when the system temp dir is a small RAM-backed tmpfs.',
+    )
+    .action(async (opts: { fromZip?: string; force?: boolean; tmpDir?: string }) => {
       const { config, logger, progress } = getRuntime();
       if (isCmdToolsInstalled(config) && !opts.force) {
         logger.info('Command-line tools already installed; pass --force to reinstall.');
         return;
       }
       logger.info('Installing OpenHarmony command-line tools...');
-      await installCmdTools({ config, progress, logger, localZipPath: opts.fromZip });
+      await installCmdTools({ config, progress, logger, localZipPath: opts.fromZip, tmpDir: opts.tmpDir });
       logger.info('Command-line tools installed.');
     });
 

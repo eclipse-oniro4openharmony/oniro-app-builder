@@ -18,7 +18,12 @@ export function registerSdkCommand(program: Command): void {
     .command('install <version>')
     .description('Download and install an OpenHarmony SDK. Skips if already installed.')
     .option('--force', 'Reinstall even if the SDK is already present.')
-    .action(async (version: string, opts: { force?: boolean }) => {
+    .option(
+      '--tmp-dir <path>',
+      'Directory for download/extract temporaries (default: ONIRO_TMP_DIR, else the system temp dir). ' +
+        'Use a disk-backed path when the system temp dir is a small RAM-backed tmpfs.',
+    )
+    .action(async (version: string, opts: { force?: boolean; tmpDir?: string }) => {
       const { config, logger, progress } = getRuntime();
       const release = ALL_SDKS.find((s) => s.version === version);
       if (!release) {
@@ -34,7 +39,14 @@ export function registerSdkCommand(program: Command): void {
         return;
       }
       logger.info(`Installing OpenHarmony SDK ${release.version} (api ${release.api})...`);
-      await downloadAndInstallSdk({ config, version: release.version, api: release.api, progress, logger });
+      await downloadAndInstallSdk({
+        config,
+        version: release.version,
+        api: release.api,
+        progress,
+        logger,
+        tmpDir: opts.tmpDir,
+      });
       logger.info('SDK installed.');
     });
 
