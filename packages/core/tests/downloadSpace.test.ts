@@ -26,6 +26,11 @@ describe('downloadFile free-space preflight', () => {
         res.write('partial');
         return; // never completes: the client should bail out on the headers alone
       }
+      if (req.url === '/missing') {
+        res.writeHead(404);
+        res.end('nope');
+        return;
+      }
       const body = Buffer.from('hello oniro');
       res.writeHead(200, { 'content-length': String(body.length) });
       res.end(body);
@@ -67,6 +72,12 @@ describe('downloadFile free-space preflight', () => {
   it.skipIf(!hasDevFull)('maps a mid-write ENOSPC to InsufficientSpaceError instead of crashing', async () => {
     await expect(downloadFile({ url: `${baseUrl}/small`, dest: '/dev/full', what: 'the test download' }))
       .rejects.toThrowError(InsufficientSpaceError);
+  });
+
+  it('leaves no partial file behind when the download fails', async () => {
+    const dest = path.join(dir, 'missing.bin');
+    await expect(downloadFile({ url: `${baseUrl}/missing`, dest })).rejects.toThrow();
+    expect(fs.existsSync(dest)).toBe(false);
   });
 
   it('downloads normally when the file fits', async () => {

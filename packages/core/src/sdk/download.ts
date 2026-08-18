@@ -70,22 +70,25 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
     const file = fs.createWriteStream(dest);
     let activeResponse: NodeJS.ReadableStream | undefined;
 
+    // Settle only once the partial file is gone, so a caller that retries — or a test
+    // that checks — never observes the leftover. Closing before removing keeps Windows
+    // happy, where an open file cannot be deleted.
+    const failWith = (err: unknown) => {
+      file.close(() => fs.rm(dest, { force: true }, () => done(err)));
+    };
+
     // A write-stream failure (most often ENOSPC) has no other listener; without this
     // it would surface as an unhandled 'error' event and take the process down.
     file.on('error', (err) => {
       try { (activeResponse as { destroy?: () => void } | undefined)?.destroy?.(); } catch {}
-      try { file.close(); } catch {}
-      fs.unlink(dest, () => {});
-      done(writeFailed(err));
+      failWith(writeFailed(err));
     });
 
     const req = proto.get(url, (response) => {
       activeResponse = response;
       if (response.statusCode !== 200) {
         try { response.destroy(); } catch {}
-        try { file.close(); } catch {}
-        fs.unlink(dest, () => {});
-        done(new OniroError(`Failed to download '${url}' (HTTP ${response.statusCode})`));
+        failWith(new OniroError(`Failed to download '${url}' (HTTP ${response.statusCode})`));
         return;
       }
 
@@ -97,9 +100,7 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
           ensureFreeSpace(opts.tmpRoot ?? destDir, total, what);
         } catch (err) {
           try { response.destroy(); } catch {}
-          try { file.close(); } catch {}
-          fs.unlink(dest, () => {});
-          done(err);
+          failWith(err);
           return;
         }
       }
@@ -135,23 +136,17 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
 
       abortSignal?.addEventListener('abort', () => {
         response.destroy();
-        file.close();
-        fs.unlink(dest, () => {});
-        done(new CancelledError('Download cancelled.'));
+        failWith(new CancelledError('Download cancelled.'));
       });
     });
 
     req.on('error', (err) => {
-      try { file.close(); } catch {}
-      fs.unlink(dest, () => {});
-      done(new OniroError(`Error downloading '${url}': ${err.message}`, err));
+      failWith(new OniroError(`Error downloading '${url}': ${err.message}`, err));
     });
 
     abortSignal?.addEventListener('abort', () => {
       req.destroy();
-      file.close();
-      fs.unlink(dest, () => {});
-      done(new CancelledError('Download cancelled.'));
+      failWith(new CancelledError('Download cancelled.'));
     });
   });
 }
