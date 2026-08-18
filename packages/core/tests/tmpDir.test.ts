@@ -165,7 +165,11 @@ describe('free space checks', () => {
 
   it('getFreeSpaceBytes falls back to the nearest existing ancestor', () => {
     const missing = path.join(os.tmpdir(), 'oniro-definitely-missing', 'deep', 'path');
-    expect(getFreeSpaceBytes(missing)).toBe(getFreeSpaceBytes(os.tmpdir()));
+    const free = getFreeSpaceBytes(missing);
+    // Same filesystem as the temp dir, so it reports rather than giving up. The two
+    // readings are not compared for equality: free space moves under a live system.
+    expect(free === null).toBe(getFreeSpaceBytes(os.tmpdir()) === null);
+    if (free !== null) expect(free).toBeGreaterThan(0);
   });
 
   it('ensureFreeSpace throws an InsufficientSpaceError when the requirement cannot fit', () => {

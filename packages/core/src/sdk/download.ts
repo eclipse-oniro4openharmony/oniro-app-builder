@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import followRedirects from 'follow-redirects';
 import type { ProgressReporter } from '../ports/progress.js';
 import { CancelledError, ChecksumMismatchError, OniroError } from '../ports/errors.js';
-import { ensureFreeSpace, toSpaceError } from './tmp.js';
+import { ensureFreeSpace, isOutOfSpaceError, toSpaceError } from './tmp.js';
 
 const { http, https } = followRedirects;
 const pipelineAsync = promisify(pipeline);
@@ -60,6 +60,13 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
     const destDir = path.dirname(path.resolve(dest));
     const what = opts.what ?? `the download of '${url}'`;
 
+    // Out of space gets the directory-aware explanation; anything else (a bad path,
+    // a permission problem) still surfaces as a typed error rather than a raw fs one.
+    const writeFailed = (err: unknown): unknown =>
+      isOutOfSpaceError(err)
+        ? toSpaceError(err, opts.tmpRoot ?? destDir, what)
+        : new OniroError(`Error writing '${dest}': ${err instanceof Error ? err.message : String(err)}`, err);
+
     const file = fs.createWriteStream(dest);
     let activeResponse: NodeJS.ReadableStream | undefined;
 
@@ -69,7 +76,7 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
       try { (activeResponse as { destroy?: () => void } | undefined)?.destroy?.(); } catch {}
       try { file.close(); } catch {}
       fs.unlink(dest, () => {});
-      done(toSpaceError(err, opts.tmpRoot ?? destDir, what));
+      done(writeFailed(err));
     });
 
     const req = proto.get(url, (response) => {
@@ -123,7 +130,7 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
           const inc = endOverall - lastOverall;
           if (inc > 0) progress.report({ message: 'Downloading: 100%', increment: inc });
         }
-        file.close((err) => (err ? done(toSpaceError(err, opts.tmpRoot ?? destDir, what)) : done()));
+        file.close((err) => (err ? done(writeFailed(err)) : done()));
       });
 
       abortSignal?.addEventListener('abort', () => {
