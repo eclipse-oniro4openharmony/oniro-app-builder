@@ -9,8 +9,10 @@
 # at runtime. Trusted publishing also attaches provenance attestations
 # automatically, so no NPM_CONFIG_PROVENANCE flag is needed.
 #
-# Requires npm CLI 11.5.1+ for OIDC support, which is newer than the version
-# bundled with Node 20 — the explicit `npm install -g npm@latest` upgrades it.
+# Requires npm CLI 11.5.1+ for OIDC support, so the job upgrades npm explicitly.
+# That upgrade dictates the Node version: npm@latest (12.x) requires Node
+# ^22.22.2 || ^24.15.0 || >=26, so this job runs on Node 24 while ci.yml keeps
+# testing on Node 20, the minimum the packages declare in `engines`.
 
 name: Release
 
@@ -38,7 +40,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - run: npm install -g npm@latest
