@@ -8,7 +8,7 @@ import { noopLogger } from '../ports/logger.js';
 import { getEmulatorDir } from '../sdk/paths.js';
 import { downloadFile } from '../sdk/download.js';
 import { extractZipWithProgress } from '../sdk/extract.js';
-import { createTempWorkDir, resolveTmpRoot, toSpaceError } from '../sdk/tmp.js';
+import { createInstallTempDir, removeTempWorkDir, toSpaceError } from '../sdk/tmp.js';
 
 export interface InstallEmulatorOptions {
   config: ConfigProvider;
@@ -17,7 +17,7 @@ export interface InstallEmulatorOptions {
   logger?: Logger;
   /**
    * Scratch directory for the downloaded ZIP. Overrides the `tmpDir` config key and
-   * the system temp dir — use it when the system temp dir is a small RAM-backed tmpfs.
+   * the default location next to the install target.
    */
   tmpDir?: string;
 }
@@ -32,8 +32,13 @@ export async function installEmulator(opts: InstallEmulatorOptions): Promise<voi
   const url = config.get('emulatorUrl', defaultPaths.emulatorUrl);
   const emulatorDir = getEmulatorDir(config);
   const what = 'the emulator install';
-  const tmpRoot = resolveTmpRoot(config, opts.tmpDir);
-  const tmpDir = createTempWorkDir(tmpRoot, 'oniro-emulator-');
+  const { dir: tmpDir, root: tmpRoot } = createInstallTempDir({
+    config,
+    override: opts.tmpDir,
+    installRoot: path.dirname(emulatorDir),
+    prefix: 'oniro-emulator-',
+    logger,
+  });
   const tmpZip = path.join(tmpDir, 'oniro_emulator.zip');
 
   try {
@@ -53,7 +58,7 @@ export async function installEmulator(opts: InstallEmulatorOptions): Promise<voi
   } catch (err) {
     throw toSpaceError(err, tmpRoot, what);
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    removeTempWorkDir(tmpDir, tmpRoot);
   }
 }
 

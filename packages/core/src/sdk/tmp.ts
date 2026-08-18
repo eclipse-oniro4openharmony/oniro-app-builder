@@ -2,33 +2,41 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ConfigProvider } from '../ports/config.js';
+import type { Logger } from '../ports/logger.js';
+import { noopLogger } from '../ports/logger.js';
 import { InsufficientSpaceError, OniroError } from '../ports/errors.js';
 
-/**
- * Advice appended to out-of-space failures in the scratch directory. Downloads and
- * extraction happen in a temp directory that defaults to the system one — which on
- * most Linux distributions is a RAM-backed `tmpfs`, so a multi-GB SDK/tools archive
- * can run out of "disk" long before the real disk is full.
- */
-export const TMP_DIR_HINT =
-  'Point the scratch directory at a disk-backed filesystem with --tmp-dir <path> ' +
-  '(or set the ONIRO_TMP_DIR environment variable), e.g. --tmp-dir ~/.cache/oniro-tmp.';
+/** Name of the scratch folder created next to an install target. */
+export const INSTALL_TMP_DIRNAME = '.oniro-tmp';
 
 /** `statfs` type magics for the Linux filesystems whose capacity comes out of RAM. */
 const TMPFS_MAGIC = 0x01021994;
 const RAMFS_MAGIC = 0x858458f6;
 
+const HINT_EXAMPLE = os.platform() === 'win32' ? 'D:\\oniro-tmp' : '~/.cache/oniro-tmp';
+
+/** Advice appended to out-of-space failures in the scratch directory. */
+export const TMP_DIR_HINT =
+  'Point the scratch directory at a filesystem with more room using --tmp-dir <path> ' +
+  `(or the ONIRO_TMP_DIR environment variable), e.g. --tmp-dir ${HINT_EXAMPLE}.`;
+
 /**
  * Resolve the directory that download/extract scratch space is created in.
  *
  * Precedence: explicit override (CLI `--tmp-dir`) → `tmpDir` config key
- * (`ONIRO_TMP_DIR`) → the system temp dir.
+ * (`ONIRO_TMP_DIR`) → `<installRoot>/.oniro-tmp` → the system temp dir.
+ *
+ * The default sits next to the install target so that the unpacked tree is renamed
+ * into place rather than copied across a device boundary, and so the system temp dir
+ * — a RAM-backed `tmpfs` on most Linux systems, and far smaller than a multi-GB
+ * archive — is never in the picture.
  */
-export function resolveTmpRoot(config: ConfigProvider, override?: string): string {
+export function resolveTmpRoot(config: ConfigProvider, override?: string, installRoot?: string): string {
   const explicit = (override ?? '').trim();
   if (explicit) return path.resolve(explicit);
   const configured = config.get('tmpDir', '').trim();
   if (configured) return path.resolve(configured);
+  if (installRoot) return path.join(path.resolve(installRoot), INSTALL_TMP_DIRNAME);
   return os.tmpdir();
 }
 
@@ -43,6 +51,61 @@ export function createTempWorkDir(root: string, prefix: string): string {
       `Cannot create a temporary directory in '${root}': ${err instanceof Error ? err.message : String(err)}\n${TMP_DIR_HINT}`,
       err,
     );
+  }
+}
+
+/**
+ * Remove a scratch directory once an install is done, taking the `.oniro-tmp` root
+ * with it when that leaves it empty. A root the caller named explicitly is left alone,
+ * as are roots another install is still using (the rmdir simply fails).
+ */
+export function removeTempWorkDir(dir: string, root?: string): void {
+  fs.rmSync(dir, { recursive: true, force: true });
+  if (!root || path.basename(root) !== INSTALL_TMP_DIRNAME) return;
+  try {
+    fs.rmdirSync(root);
+  } catch {
+    // Not empty (a concurrent install) or already gone — nothing to do.
+  }
+}
+
+export interface InstallTempDirOptions {
+  config: ConfigProvider;
+  /** Explicit scratch directory (CLI `--tmp-dir`). */
+  override?: string;
+  /** Directory the install lands in; the default scratch root is created inside it. */
+  installRoot: string;
+  prefix: string;
+  logger?: Logger;
+}
+
+export interface InstallTempDir {
+  /** The private per-run scratch directory. Remove it when the install finishes. */
+  dir: string;
+  /** The configurable root it was created under, for out-of-space messages. */
+  root: string;
+}
+
+/**
+ * Create the scratch directory for an install, defaulting to `<installRoot>/.oniro-tmp`.
+ *
+ * When that default is unusable — a read-only or root-owned install parent, say — the
+ * system temp dir is used instead. A directory the caller asked for explicitly is never
+ * swapped out silently, and a full filesystem is reported rather than papered over.
+ */
+export function createInstallTempDir(opts: InstallTempDirOptions): InstallTempDir {
+  const requested =
+    (opts.override ?? '').trim() || opts.config.get('tmpDir', '').trim();
+  const root = resolveTmpRoot(opts.config, opts.override, opts.installRoot);
+
+  try {
+    return { dir: createTempWorkDir(root, opts.prefix), root };
+  } catch (err) {
+    const fallback = os.tmpdir();
+    if (requested || isOutOfSpaceError(err) || path.resolve(fallback) === path.resolve(root)) throw err;
+    const reason = err instanceof Error ? err.message.split('\n')[0] : String(err);
+    (opts.logger ?? noopLogger).warn(`${reason} Falling back to '${fallback}'.`);
+    return { dir: createTempWorkDir(fallback, opts.prefix), root: fallback };
   }
 }
 

@@ -60,7 +60,7 @@ Install commands are idempotent (they skip when already present); pass `--force`
 
 | Command | Description |
 | --- | --- |
-| `sdk install <version> [--force] [--tmp-dir <path>]` | Download and install an OpenHarmony SDK (e.g. `6.1`). `--tmp-dir` moves the download/extract scratch space off the system temp dir (see [Temporary space](#temporary-space)). |
+| `sdk install <version> [--force] [--tmp-dir <path>]` | Download and install an OpenHarmony SDK (e.g. `6.1`). `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). |
 | `sdk list [--json]` | List known SDK versions; an `*` marks installed ones. |
 | `sdk remove <api>` | Remove an installed SDK by API level (e.g. `18`, `20`). |
 
@@ -68,7 +68,7 @@ Install commands are idempotent (they skip when already present); pass `--force`
 
 | Command | Description |
 | --- | --- |
-| `cmdtools install [--from-zip <path>] [--force] [--tmp-dir <path>]` | Install the tools. `--from-zip` installs from a local archive instead of downloading (required on Windows/macOS — see [Configuration](#configuration)); `--tmp-dir` moves the download/extract scratch space off the system temp dir (see [Temporary space](#temporary-space)). |
+| `cmdtools install [--from-zip <path>] [--force] [--tmp-dir <path>]` | Install the tools. `--from-zip` installs from a local archive instead of downloading (required on Windows/macOS — see [Configuration](#configuration)); `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). |
 | `cmdtools status [--json]` | Report whether the tools are installed and their version. Exits non-zero when not installed. |
 | `cmdtools remove` | Delete the configured command-line-tools directory. |
 
@@ -76,7 +76,7 @@ Install commands are idempotent (they skip when already present); pass `--force`
 
 | Command | Description |
 | --- | --- |
-| `emulator install [--force] [--tmp-dir <path>]` | Download and install the emulator. `--tmp-dir` moves the downloaded ZIP off the system temp dir (see [Temporary space](#temporary-space)). |
+| `emulator install [--force] [--tmp-dir <path>]` | Download and install the emulator. `--tmp-dir` overrides where the downloaded ZIP goes (see [Temporary space](#temporary-space)). |
 | `emulator start [options]` | Start the emulator via the bundled launcher and detach, so the CLI can exit while it keeps running. |
 | `emulator stop` | Kill running emulator processes. |
 | `emulator connect [--address <host:port>]` | Attempt an `hdc` connection (default `127.0.0.1:55555`). |
@@ -297,7 +297,7 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 | `ONIRO_CMD_TOOLS_URL_WINDOWS` | (unset) | Self-hosted Windows cmd-tools URL |
 | `ONIRO_CMD_TOOLS_URL_MAC` | (unset) | Self-hosted macOS cmd-tools URL |
 | `ONIRO_EMULATOR_URL` | Latest `oniro_emulator.zip` | Emulator download URL |
-| `ONIRO_TMP_DIR` | System temp dir | Scratch directory for download/extract temporaries (see [Temporary space](#temporary-space)) |
+| `ONIRO_TMP_DIR` | `<install root>/.oniro-tmp` | Scratch directory for download/extract temporaries (see [Temporary space](#temporary-space)) |
 | `ONIRO_APPLICATION_CERT_PATH` | (unset) | External application-cert chain to use when signing system apps |
 | `ONIRO_DEBUG` | (unset) | Set to `1` for full stack traces on error |
 
@@ -305,21 +305,29 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 
 `sdk install`, `cmdtools install`, and `emulator install` download a multi-GB archive and
 extract it in a scratch directory before moving the result into place. That scratch directory
-defaults to the system temp dir — which on many Linux systems is `/tmp` on a **RAM-backed
-`tmpfs`**, sized from available memory. A machine with plenty of disk but little free RAM
-therefore runs out of "disk" mid-download.
+lives **next to the install target** — `.oniro-tmp` beside the SDK root, the command-line-tools
+directory, or the emulator directory — for two reasons:
 
-Point the scratch space at a disk-backed directory, per command or globally:
+- The system temp dir is not involved. On many Linux systems `/tmp` is a **RAM-backed `tmpfs`**
+  sized from available memory, so a machine with plenty of disk but little free RAM would run
+  out of "disk" mid-download.
+- Temporaries and their destination share a filesystem, so finishing an install is a rename
+  rather than a multi-GB copy across a device boundary.
+
+Override it per command or globally when the install target's filesystem is the cramped one:
 
 ```bash
 oniro-app cmdtools install --tmp-dir ~/.cache/oniro-tmp
 export ONIRO_TMP_DIR=~/.cache/oniro-tmp        # applies to all three install commands
 ```
 
-Precedence is `--tmp-dir` → `ONIRO_TMP_DIR` → system temp dir; the directory is created if it
-does not exist, and the per-run scratch folder inside it is removed afterwards. When space does
-run short, the install fails with a message naming the directory, how much room it needed,
-whether that directory is RAM-backed, and this flag — rather than crashing part-way through.
+Precedence is `--tmp-dir` → `ONIRO_TMP_DIR` → `<install root>/.oniro-tmp`. The directory is
+created if it does not exist; the per-run folder inside it is removed afterwards, and so is
+`.oniro-tmp` itself once empty. If the install target's parent cannot be written to at all
+(a root-owned prefix, a read-only mount), the system temp dir is used instead and the CLI says
+so. When space runs short, the install fails with a message naming the directory, how much room
+it needed, whether that directory is RAM-backed, and this flag — rather than crashing part-way
+through.
 
 **Command-line tools on Windows / macOS.** The Huawei mirror only publishes a Linux build of the command-line tools. On Windows and macOS you must either download the ZIP manually from the Huawei developer portal and install it with `oniro-app cmdtools install --from-zip path/to/commandline-tools-<platform>.zip`, or host the archive yourself and set `ONIRO_CMD_TOOLS_URL_WINDOWS` / `ONIRO_CMD_TOOLS_URL_MAC` so `cmdtools install` can fetch it.
 

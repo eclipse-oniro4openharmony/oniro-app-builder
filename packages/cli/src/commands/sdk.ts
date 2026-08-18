@@ -20,8 +20,8 @@ export function registerSdkCommand(program: Command): void {
     .option('--force', 'Reinstall even if the SDK is already present.')
     .option(
       '--tmp-dir <path>',
-      'Directory for download/extract temporaries (default: ONIRO_TMP_DIR, else the system temp dir). ' +
-        'Use a disk-backed path when the system temp dir is a small RAM-backed tmpfs.',
+      'Directory for download/extract temporaries (default: ONIRO_TMP_DIR, else .oniro-tmp next to ' +
+        'the install target). Use this when that filesystem is short on space.',
     )
     .action(async (version: string, opts: { force?: boolean; tmpDir?: string }) => {
       const { config, logger, progress } = getRuntime();

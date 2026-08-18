@@ -94,7 +94,7 @@ The injection points every frontend implements, plus their defaults.
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `downloadAndInstallSdk` | `(InstallSdkOptions) => Promise<void>` | Download + install an SDK release into `<sdkRootDir>/<os>/<api>`, reporting progress; `tmpDir` overrides the scratch directory. |
+| `downloadAndInstallSdk` | `(InstallSdkOptions) => Promise<void>` | Download + install an SDK release into `<sdkRootDir>/<os>/<api>`, reporting progress; `tmpDir` overrides the scratch directory (default: next to the install target). |
 | `getSupportedSdksForUi` | `(config) => SdkInfo[]` | Known SDKs annotated with `installed`, newest first. |
 | `getInstalledSdks` | `(config) => string[]` | Versions with at least one OS-folder install. |
 | `removeSdk` | `(config, api) => boolean` | Remove an installed SDK by API level across OS folders. |
@@ -108,18 +108,22 @@ The injection points every frontend implements, plus their defaults.
 **Download/archive primitives**: `downloadFile(DownloadOptions)` (rejects with `InsufficientSpaceError` when the advertised `content-length` does not fit on the destination filesystem), `verifySha256(file, sha256File)`, `extractZipWithProgress(ExtractZipOptions)` (Zip-Slip-safe), `extractTarball(tar, dest, strip?)`.
 
 **Temporary space**: the installers download and extract in a scratch directory resolved as
-`options.tmpDir` → `tmpDir` config key → `os.tmpdir()` — worth overriding because the system
-temp dir is often a RAM-backed `tmpfs` too small for a multi-GB archive.
-`resolveTmpRoot(config, override?)`, `createTempWorkDir(root, prefix)`, `getFreeSpaceBytes(dir)`,
-`isRamBackedPath(dir)`, `ensureFreeSpace(dir, bytes, what)`, `isOutOfSpaceError(err)`,
-`toSpaceError(err, tmpRoot, what)` (turns an `ENOSPC` into an `InsufficientSpaceError` naming the
-directory and the remedy), `formatBytes(n)`, `TMP_DIR_HINT`.
+`options.tmpDir` → `tmpDir` config key → `<installRoot>/.oniro-tmp`. The default sits next to the
+install target so the finished tree is renamed into place instead of copied across a device
+boundary, and so the system temp dir — a RAM-backed `tmpfs` on most Linux systems, too small for a
+multi-GB archive — is never involved. `createInstallTempDir(opts)` (returns `{ dir, root }`, and
+falls back to `os.tmpdir()` when the install parent is unwritable) and `removeTempWorkDir(dir, root?)`
+are the pair the installers use; `resolveTmpRoot(config, override?, installRoot?)`,
+`createTempWorkDir(root, prefix)`, `getFreeSpaceBytes(dir)`, `isRamBackedPath(dir)`,
+`ensureFreeSpace(dir, bytes, what)`, `isOutOfSpaceError(err)`, `toSpaceError(err, tmpRoot, what)`
+(turns an `ENOSPC` into an `InsufficientSpaceError` naming the directory and the remedy),
+`formatBytes(n)`, `INSTALL_TMP_DIRNAME`, `TMP_DIR_HINT`.
 
 ### Command-line tools
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `installCmdTools` | `(InstallCmdToolsOptions) => Promise<void>` | Install the tools by download or from a local zip (`localZipPath`); `tmpDir` overrides the scratch directory. |
+| `installCmdTools` | `(InstallCmdToolsOptions) => Promise<void>` | Install the tools by download or from a local zip (`localZipPath`); `tmpDir` overrides the scratch directory (default: next to the install target). |
 | `getCmdToolsStatus` | `(config) => CmdToolsStatus` | `{ installed, status }` (version when present). |
 | `isCmdToolsInstalled` | `(config) => boolean` | — |
 | `removeCmdTools` | `(config) => void` | Delete the install. |
@@ -143,7 +147,7 @@ directory and the remedy), `formatBytes(n)`, `TMP_DIR_HINT`.
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `installEmulator` | `(InstallEmulatorOptions) => Promise<void>` | Download + extract the QEMU emulator into `emulatorDir`; `tmpDir` overrides the scratch directory. |
+| `installEmulator` | `(InstallEmulatorOptions) => Promise<void>` | Download + extract the QEMU emulator into `emulatorDir`; `tmpDir` overrides the scratch directory (default: next to the install target). |
 | `isEmulatorInstalled` / `removeEmulator` | `(config) => boolean` / `void` | — |
 | `startEmulator` | `(StartEmulatorOptions) => Promise<void>` | Launch detached via `run.sh`/`run.bat`; optional `headless`, `logFile`, `connect`, and `waitForHdcSeconds`. |
 | `stopEmulator` | `(logger?) => Promise<void>` | Kill running emulator processes. |

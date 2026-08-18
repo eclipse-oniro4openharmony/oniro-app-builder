@@ -12,7 +12,7 @@ import { getCmdToolsPath } from '../sdk/paths.js';
 import { downloadFile } from '../sdk/download.js';
 import { extractZipWithProgress } from '../sdk/extract.js';
 import { movePath } from '../sdk/move.js';
-import { createTempWorkDir, resolveTmpRoot, toSpaceError } from '../sdk/tmp.js';
+import { createInstallTempDir, removeTempWorkDir, toSpaceError } from '../sdk/tmp.js';
 
 /**
  * Resolve the per-platform download URL for the OpenHarmony command-line tools.
@@ -85,8 +85,7 @@ export interface InstallCmdToolsOptions {
   localZipPath?: string;
   /**
    * Scratch directory for the download/extract temporaries. Overrides the `tmpDir`
-   * config key and the system temp dir — use it when the system temp dir is a small
-   * RAM-backed tmpfs.
+   * config key and the default location next to the install target.
    */
   tmpDir?: string;
 }
@@ -101,8 +100,13 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
   const CMD_PATH = getCmdToolsPath(config);
   const what = 'the command-line tools install';
 
-  const tmpRoot = resolveTmpRoot(config, opts.tmpDir);
-  const tmpDir = createTempWorkDir(tmpRoot, 'oniro-cmdtools-');
+  const { dir: tmpDir, root: tmpRoot } = createInstallTempDir({
+    config,
+    override: opts.tmpDir,
+    installRoot: path.dirname(CMD_PATH),
+    prefix: 'oniro-cmdtools-',
+    logger,
+  });
   const zipPath = opts.localZipPath ?? path.join(tmpDir, 'oh-command-line-tools.zip');
   const extractPath = path.join(tmpDir, 'oh-command-line-tools');
 
@@ -142,7 +146,7 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
   } catch (err) {
     throw toSpaceError(err, tmpRoot, what);
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    removeTempWorkDir(tmpDir, tmpRoot);
   }
 }
 

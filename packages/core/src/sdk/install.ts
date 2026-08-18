@@ -11,7 +11,7 @@ import { getSdkRootDir } from './paths.js';
 import { downloadFile, verifySha256 } from './download.js';
 import { extractTarball, extractZipWithProgress } from './extract.js';
 import { movePath } from './move.js';
-import { createTempWorkDir, resolveTmpRoot, toSpaceError } from './tmp.js';
+import { createInstallTempDir, removeTempWorkDir, toSpaceError } from './tmp.js';
 
 export interface InstallSdkOptions {
   config: ConfigProvider;
@@ -22,8 +22,7 @@ export interface InstallSdkOptions {
   logger?: Logger;
   /**
    * Scratch directory for the download/extract temporaries. Overrides the `tmpDir`
-   * config key and the system temp dir — use it when the system temp dir is a small
-   * RAM-backed tmpfs.
+   * config key and the default location next to the install target.
    */
   tmpDir?: string;
 }
@@ -49,14 +48,20 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
   const sha256Url = `${downloadUrl}.sha256`;
 
   const what = `the SDK ${version} install`;
-  const tmpRoot = resolveTmpRoot(config, opts.tmpDir);
-  const tmpDir = createTempWorkDir(tmpRoot, 'oniro-sdk-');
+  const sdkRoot = getSdkRootDir(config);
+  const { dir: tmpDir, root: tmpRoot } = createInstallTempDir({
+    config,
+    override: opts.tmpDir,
+    installRoot: sdkRoot,
+    prefix: 'oniro-sdk-',
+    logger,
+  });
   const tarPath = path.join(tmpDir, filename);
   const sha256Path = path.join(tmpDir, `${filename}.sha256`);
   const extractDir = path.join(tmpDir, 'extract');
   fs.mkdirSync(extractDir);
 
-  const sdkInstallDir = path.join(getSdkRootDir(config), osFolder, api);
+  const sdkInstallDir = path.join(sdkRoot, osFolder, api);
   fs.mkdirSync(path.dirname(sdkInstallDir), { recursive: true });
 
   const checkCancelled = () => {
@@ -122,12 +127,12 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
     progress?.report({ message: 'Finalizing installation...', increment: 3 });
 
     progress?.report({ message: 'Cleaning up...', increment: 0 });
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    removeTempWorkDir(tmpDir, tmpRoot);
     progress?.report({ message: 'Cleaning up...', increment: 2 });
   } catch (err) {
     const wrapped = toSpaceError(err, tmpRoot, what);
     logger.error(`SDK install failed: ${wrapped instanceof Error ? wrapped.message : String(wrapped)}`);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    removeTempWorkDir(tmpDir, tmpRoot);
     throw wrapped;
   }
 }
