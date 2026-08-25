@@ -45,22 +45,24 @@ describe('toLongPath', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     });
 
-    it('expands an 8.3 short path back to its long form', () => {
+    it('expands an 8.3 short path back to its long form', (ctx) => {
       const canonical = fs.realpathSync.native(dir);
       const short = shortNameOf(canonical);
-      if (!short) return; // 8.3 creation disabled on this volume — nothing to expand.
+      // Report as skipped, not passed: hosted CI runners often disable 8.3 name
+      // creation, and a vacuous pass would read as real coverage.
+      if (!short) return ctx.skip();
 
       expect(short).not.toBe(canonical);
       expect(toLongPath(short)).toBe(canonical);
     });
 
-    it('expands a short path that has long segments below it', () => {
+    it('expands a short path that has long segments below it', (ctx) => {
       // The real shape of the bug: hvigor was handed `<short>\entry` and could
       // not resolve the module directory under it.
       const nested = path.join(dir, 'entry');
       fs.mkdirSync(nested);
       const short = shortNameOf(fs.realpathSync.native(dir));
-      if (!short) return;
+      if (!short) return ctx.skip();
 
       expect(toLongPath(path.join(short, 'entry'))).toBe(fs.realpathSync.native(nested));
     });
