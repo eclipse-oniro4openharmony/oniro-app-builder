@@ -1,12 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import type { ConfigProvider } from '../ports/config.js';
 import { defaultPaths } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger, scopedLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 import { getHdcPath } from '../sdk/paths.js';
+import { killProcessTree, spawnCompat } from './spawnCompat.js';
 import { hdcExec, shell, ensureOk } from './exec.js';
 import { getBundleName, getMainAbility } from './project.js';
 
@@ -189,11 +190,21 @@ export function listRunningProcesses(
   const hdc = getHdcPath(config);
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(hdc, ['track-jpid']);
+    // `hdc` may be a batch wrapper on Windows (an `hdcPath` override pointing at
+    // a proxy/tunnel script), which a bare spawn cannot execute — spawnCompat
+    // routes those through cmd.exe. It can also throw synchronously, so the
+    // failure is funnelled into the same rejection as the 'error' event below.
+    let proc: ChildProcess;
+    try {
+      proc = spawnCompat(hdc, ['track-jpid']);
+    } catch (err) {
+      reject(new OniroError(`Failed to spawn ${hdc}: ${err instanceof Error ? err.message : String(err)}`, err));
+      return;
+    }
     const processes: RunningProcess[] = [];
     let resolved = false;
 
-    proc.stdout.on('data', (data: Buffer) => {
+    proc.stdout?.on('data', (data: Buffer) => {
       for (const line of data.toString().split('\n').filter(Boolean)) {
         const match = line.match(/^(\d+)\s+(.+)$/);
         if (!match) continue;
@@ -202,14 +213,14 @@ export function listRunningProcesses(
         processes.push({ pid, name });
         if (options.targetProcessName && name === options.targetProcessName && !resolved) {
           resolved = true;
-          proc.kill();
+          killProcessTree(proc);
           resolve(pid);
           return;
         }
       }
     });
 
-    proc.stderr.on('data', (data: Buffer) => {
+    proc.stderr?.on('data', (data: Buffer) => {
       logger.warn(`[hdc track-jpid] ${data.toString()}`);
     });
 
@@ -223,7 +234,7 @@ export function listRunningProcesses(
     const timeout = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      proc.kill();
+      killProcessTree(proc);
       if (options.targetProcessName) {
         reject(new OniroError(`Could not find process for bundle: ${options.targetProcessName}`));
       } else {

@@ -1,8 +1,10 @@
-import { spawn } from 'node:child_process';
+import * as fs from 'node:fs';
+import type { ChildProcess } from 'node:child_process';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { CancelledError, CommandFailedError, OniroError } from '../ports/errors.js';
 import { getHdcPath } from '../sdk/paths.js';
+import { killProcessTree, needsCmdWrapper, spawnCompat } from './spawnCompat.js';
 
 /** Result of a spawned command. `code` is the process exit code (-1 if it was killed). */
 export interface HdcExecResult {
@@ -13,6 +15,11 @@ export interface HdcExecResult {
 
 /** Streamed output callback, invoked per stdout/stderr chunk as it arrives. */
 export type OutputSink = (chunk: string, stream: 'stdout' | 'stderr') => void;
+
+/** Message of an unknown thrown value, for uniform spawn-failure reporting. */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 export interface RunProcessOptions {
   /** Executable to spawn. */
@@ -37,6 +44,12 @@ export interface RunProcessOptions {
  * because args are passed as an array and never interpolated into a shell
  * string, command construction is injection-safe by construction.
  *
+ * The one exception is a Windows batch wrapper (`.bat`/`.cmd`, how the
+ * OpenHarmony command-line tools ship there), which the OS cannot execute
+ * directly: those go through `cmd.exe` with every argument individually
+ * escaped — see {@link spawnCompat}. The array-in, no-word-splitting contract
+ * is preserved.
+ *
  * Resolves with `{ code, stdout, stderr }` for ANY exit code (callers opt into
  * throw-on-non-zero via {@link ensureOk}). Rejects only on spawn failure
  * (e.g. missing binary), timeout, or abort.
@@ -52,7 +65,25 @@ export function runProcess(opts: RunProcessOptions): Promise<HdcExecResult> {
       return;
     }
 
-    const child = spawn(command, [...args], { cwd, env, shell: false });
+    // A batch wrapper runs through cmd.exe, which cannot report ENOENT for the
+    // wrapper itself — it would exit 1 with "is not recognized as an internal
+    // or external command". Check up front so a missing tool keeps surfacing as
+    // a spawn failure on Windows too.
+    if (needsCmdWrapper(command) && !fs.existsSync(command)) {
+      reject(new OniroError(`Failed to spawn ${command}: ENOENT (no such file)`));
+      return;
+    }
+
+    let child: ChildProcess;
+    try {
+      child = spawnCompat(command, args, { cwd, env });
+    } catch (err) {
+      // spawn() can also fail synchronously (EINVAL, EACCES). Report it the
+      // same way as the asynchronous 'error' event so callers see one message.
+      reject(new OniroError(`Failed to spawn ${command}: ${errorMessage(err)}`, err));
+      return;
+    }
+
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -67,31 +98,23 @@ export function runProcess(opts: RunProcessOptions): Promise<HdcExecResult> {
       if (settled) return;
       settled = true;
       cleanup();
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
+      killProcessTree(child);
       reject(new CancelledError(`Command aborted: ${command} ${args.join(' ')}`));
     };
 
     const timer = setTimeout(() => {
       timedOut = true;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
+      killProcessTree(child);
     }, timeoutMs);
 
     abortSignal?.addEventListener('abort', onAbort, { once: true });
 
-    child.stdout.on('data', (d: Buffer) => {
+    child.stdout?.on('data', (d: Buffer) => {
       const s = d.toString();
       stdout += s;
       onOutput?.(s, 'stdout');
     });
-    child.stderr.on('data', (d: Buffer) => {
+    child.stderr?.on('data', (d: Buffer) => {
       const s = d.toString();
       stderr += s;
       onOutput?.(s, 'stderr');

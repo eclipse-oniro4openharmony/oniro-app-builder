@@ -1,3 +1,4 @@
+export * from './spawnCompat.js';
 export * from './exec.js';
 export * from './devices.js';
 export * from './param.js';

@@ -4,6 +4,7 @@ import { noopLogger, scopedLogger } from '../ports/logger.js';
 import { runHvigorw } from './runHvigorw.js';
 import { ensureOhModules } from './ohpm.js';
 import { discoverHaps, type ModuleHaps } from './discoverHaps.js';
+import { toLongPath } from '../sdk/paths.js';
 
 export interface BuildHapOptions {
   config: ConfigProvider;
@@ -40,11 +41,14 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'build');
   const warnings: string[] = [];
   const start = Date.now();
+  // Normalise once so ohpm, hvigor and HAP discovery all agree on the project
+  // dir, and the returned artifact paths come back in long form.
+  const projectDir = toLongPath(opts.projectDir);
 
   if (opts.autoInstallDeps !== false) {
     const r = await ensureOhModules({
       config: opts.config,
-      projectDir: opts.projectDir,
+      projectDir,
       abortSignal: opts.abortSignal,
       onOutput: opts.onOutput,
       logger: opts.logger,
@@ -54,7 +58,7 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
 
   const { exitCode } = await runHvigorw({
     config: opts.config,
-    projectDir: opts.projectDir,
+    projectDir,
     product: opts.product,
     module: opts.module,
     buildMode: opts.mode,
@@ -65,7 +69,7 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
     logger: opts.logger,
   });
 
-  const discoveredHaps = await discoverHaps({ projectDir: opts.projectDir });
+  const discoveredHaps = await discoverHaps({ projectDir });
   const anySigned = Object.values(discoveredHaps).some((m) => m.signed.length > 0);
   if (!anySigned) {
     warnings.push(
