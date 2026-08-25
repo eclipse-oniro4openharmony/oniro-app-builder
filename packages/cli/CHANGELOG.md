@@ -1,5 +1,12 @@
 # @oniroproject/oniro-app
 
+## 0.9.1
+
+### Patch Changes
+
+- Updated dependencies [67b2d62]
+  - @oniroproject/core@0.9.0
+
 ## 0.9.0
 
 ### Minor Changes
