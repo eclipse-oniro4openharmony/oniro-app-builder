@@ -40,6 +40,17 @@ describe('getHvigorwPath probe-and-fallback', () => {
     expect(getHvigorwPath(config(), projectDir)).toBe(getCmdToolsBin(config(), 'hvigorw'));
   });
 
+  it('picks the .bat wrapper on Windows, the shell script elsewhere', () => {
+    // DevEco projects ship both side by side; the OS cannot execute the other one.
+    fs.writeFileSync(path.join(projectDir, 'hvigorw'), '#!/bin/sh\n');
+    fs.writeFileSync(path.join(projectDir, 'hvigorw.bat'), '@echo off\r\n');
+    fs.mkdirSync(path.join(projectDir, 'hvigor', 'node_modules'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, 'hvigor', 'hvigor-wrapper.js'), '');
+
+    expect(getHvigorwPath(config(), projectDir, 'win32')).toBe(path.join(projectDir, 'hvigorw.bat'));
+    expect(getHvigorwPath(config(), projectDir, 'linux')).toBe(path.join(projectDir, 'hvigorw'));
+  });
+
   it('requires BOTH the wrapper script and its node_modules', () => {
     fs.writeFileSync(path.join(projectDir, 'hvigorw'), '#!/bin/sh\n');
     fs.mkdirSync(path.join(projectDir, 'hvigor'), { recursive: true });

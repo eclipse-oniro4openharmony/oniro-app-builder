@@ -1,9 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcess, ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { CancelledError, OniroError } from '../ports/errors.js';
 import { getHdcPath } from '../sdk/paths.js';
+import { killProcessTree, spawnCompat } from './spawnCompat.js';
 import { shell } from './exec.js';
 import { findRunningProcess } from './app.js';
 
@@ -36,9 +37,21 @@ export function setHilogLevel(opts: SetHilogLevelOptions): Promise<void> {
   const logger = opts.logger ?? noopLogger;
   const hdc = getHdcPath(opts.config);
   return new Promise((resolve, reject) => {
-    const child = spawn(hdc, ['shell', 'hilog', '-b', opts.level]);
+    // `hdc` may be a batch wrapper on Windows (an `hdcPath` override pointing at
+    // a proxy/tunnel script), which a bare spawn cannot execute — spawnCompat
+    // routes those through cmd.exe. It can also throw synchronously, so the
+    // failure is funnelled into the same rejection as the 'error' event below.
+    let child: ChildProcess;
+    try {
+      child = spawnCompat(hdc, ['shell', 'hilog', '-b', opts.level]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`[hilog] failed to spawn hdc: ${msg}`);
+      reject(err instanceof Error ? err : new Error(msg));
+      return;
+    }
     let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
     child.once('error', (err) => {
@@ -84,7 +97,10 @@ export function streamHilog(opts: StreamHilogOptions): ChildProcessWithoutNullSt
   if (opts.domain !== undefined && `${opts.domain}` !== '') {
     args.push('-D', `${opts.domain}`);
   }
-  return spawn(hdc, args);
+  // Keeps the published non-null-stdio signature rather than pushing `?.` onto
+  // every consumer. Sound because no stdio option is passed: both spawnCompat
+  // branches inherit spawn's default `stdio: 'pipe'`, so the streams exist.
+  return spawnCompat(hdc, args) as ChildProcessWithoutNullStreams;
 }
 
 // `\S+` is greedy on the tag so values like `C01406/OHOS::RS` aren't split at
@@ -171,11 +187,9 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       opts.abortSignal?.removeEventListener('abort', onAbort);
       if (child) {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          /* already gone */
-        }
+        // A batch wrapper's own death would leave the hdc process it launched
+        // streaming; tear down the whole tree.
+        killProcessTree(child);
         child = null;
       }
     };
@@ -191,6 +205,7 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
       cleanup();
       reject(err);
     };
+    const failWith = (err: unknown): void => fail(err instanceof Error ? err : new Error(String(err)));
     const onAbort = (): void => fail(new CancelledError('waitForLog cancelled.'));
     const timer = setTimeout(
       () => fail(new OniroError(`No log line matched ${String(opts.pattern)} within ${opts.timeoutMs}ms.`)),
@@ -222,14 +237,16 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
         child = null;
         if (Date.now() < deadline) {
           // Auto-reconnect (survives a reboot) until the deadline.
-          reconnectTimer = setTimeout(() => void spawnStream(), 1_000);
+          reconnectTimer = setTimeout(() => void spawnStream().catch(failWith), 1_000);
         }
       };
       stream.once('close', onEnd);
       stream.once('error', onEnd);
     };
 
-    void spawnStream();
+    // spawnStream can reject (device lookup, or a synchronous spawn failure);
+    // surface it as this promise's rejection instead of an unhandled one.
+    void spawnStream().catch(failWith);
   });
 }
 
@@ -259,11 +276,9 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
       clearTimeout(timer);
       opts.abortSignal?.removeEventListener('abort', onAbort);
       if (child) {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          /* already gone */
-        }
+        // A batch wrapper's own death would leave the hdc process it launched
+        // streaming; tear down the whole tree.
+        killProcessTree(child);
         child = null;
       }
     };
@@ -297,7 +312,14 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
           if (entry && opts.pattern.test(entryText(entry))) matches.push(entry);
         }
       });
-    })();
+      // A device lookup or synchronous spawn failure used to surface as an
+      // unhandled rejection while watchLog quietly resolved empty at the deadline.
+    })().catch((err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    });
   });
 }
 

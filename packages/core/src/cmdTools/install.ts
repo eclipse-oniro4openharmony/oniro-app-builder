@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import type { ConfigProvider } from '../ports/config.js';
 import { defaultPaths } from '../ports/config.js';
 import type { ProgressReporter } from '../ports/progress.js';
@@ -12,6 +12,7 @@ import { getCmdToolsPath } from '../sdk/paths.js';
 import { downloadFile } from '../sdk/download.js';
 import { extractZipWithProgress } from '../sdk/extract.js';
 import { movePath } from '../sdk/move.js';
+import { buildCmdWrapper, needsCmdWrapper } from '../hdc/spawnCompat.js';
 import { createInstallTempDir, removeTempWorkDir, toSpaceError } from '../sdk/tmp.js';
 
 /**
@@ -186,7 +187,16 @@ export function getCmdToolsStatus(config: ConfigProvider): CmdToolsStatus {
   }
 
   try {
-    const version = execFileSync(bin, ['-v'], { encoding: 'utf8' }).trim();
+    // `ohpm` is a .bat wrapper on Windows, which cannot be spawned directly
+    // (EINVAL since Node 20.12.2) — go through cmd.exe there.
+    const wrapped = needsCmdWrapper(bin);
+    const probe = wrapped ? buildCmdWrapper(bin, ['-v']) : { command: bin, args: ['-v'] };
+    const res = spawnSync(probe.command, probe.args, {
+      encoding: 'utf8',
+      windowsVerbatimArguments: wrapped,
+    });
+    if (res.error || res.status !== 0) throw res.error ?? new Error(`exit ${String(res.status)}`);
+    const version = res.stdout.trim();
     return { installed: true, status: `Installed (${version})` };
   } catch {
     return { installed: true, status: 'Installed (version unknown)' };

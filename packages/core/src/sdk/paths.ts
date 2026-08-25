@@ -24,6 +24,34 @@ export function getEmulatorDir(config: ConfigProvider): string {
   return config.get('emulatorDir', defaultPaths.emulatorDir());
 }
 
+/**
+ * Expand a Windows 8.3 short path (`C:\Users\FRANCE~1\...`) to its long form.
+ *
+ * Short names reach us whenever a caller passes `%TEMP%` or a path built in a
+ * `cmd` context, and hvigor cannot resolve a module directory underneath one:
+ * it aborts with `00303149 Configuration Error / Path not found` naming a
+ * `srcPath` that plainly exists. Node and the Win32 API resolve short names
+ * fine, so the mismatch only surfaces once hvigor is running.
+ *
+ * No-op off Windows, where short names do not exist and resolving would only
+ * dereference symlinks the caller chose deliberately. On Windows it does also
+ * canonicalise case and follow junctions — the same path the OS resolves to
+ * anyway.
+ *
+ * Returns `p` unchanged when it does not exist, so a caller's "not found"
+ * error still quotes the path the user actually typed.
+ *
+ * `platform` is injectable so the behaviour is unit-testable off Windows.
+ */
+export function toLongPath(p: string, platform: NodeJS.Platform = os.platform()): string {
+  if (platform !== 'win32') return p;
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
+
 function pickExisting(candidates: string[]): string {
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -82,13 +110,21 @@ export function getHdcPath(config: ConfigProvider): string {
  * ship a project-local `hvigorw` whose `hvigor/` install is absent, so the
  * wrapper crashes on startup; in that case we fall back to the hvigorw bundled
  * with the command-line tools, which is always installed.
+ *
+ * DevEco projects ship both wrappers side by side: an extensionless POSIX shell
+ * script and a `.bat` for Windows. The candidate order is therefore
+ * platform-dependent — picking the shell script on Windows would hand `spawn` a
+ * file the OS cannot execute.
  */
-export function getHvigorwPath(config: ConfigProvider, projectDir: string): string {
-  const local = pickExisting([
-    path.join(projectDir, 'hvigorw'),
-    path.join(projectDir, 'hvigorw.bat'),
-    path.join(projectDir, 'hvigorw.cmd'),
-  ]);
+export function getHvigorwPath(
+  config: ConfigProvider,
+  projectDir: string,
+  platform: NodeJS.Platform = os.platform(),
+): string {
+  const posixFirst = ['hvigorw', 'hvigorw.bat', 'hvigorw.cmd'];
+  const windowsFirst = ['hvigorw.bat', 'hvigorw.cmd', 'hvigorw'];
+  const names = platform === 'win32' ? windowsFirst : posixFirst;
+  const local = pickExisting(names.map((n) => path.join(projectDir, n)));
   if (fs.existsSync(local) && isProjectLocalHvigorwWorking(projectDir)) {
     return local;
   }

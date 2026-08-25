@@ -1,11 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { killProcessTree, spawnCompat } from '../hdc/spawnCompat.js';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { CancelledError, CmdToolsNotInstalledError, OniroError } from '../ports/errors.js';
-import { getHvigorwPath, getOhosBaseSdkHome, getCmdToolsPath } from '../sdk/paths.js';
+import { getHvigorwPath, getOhosBaseSdkHome, getCmdToolsPath, toLongPath } from '../sdk/paths.js';
 
 export interface RunHvigorwOptions {
   config: ConfigProvider;
@@ -66,7 +67,10 @@ export function buildHvigorwArgs(opts: {
  * and the bash CLI's chained `clean` + `assembleHap` calls with a single direct spawn.
  */
 export function runHvigorw(opts: RunHvigorwOptions): Promise<RunHvigorwResult> {
-  const { config, projectDir } = opts;
+  const { config } = opts;
+  // hvigor resolves each module's `srcPath` against the project dir it is given
+  // and fails on a Windows 8.3 short path, so hand it the long form.
+  const projectDir = toLongPath(opts.projectDir);
   const logger = opts.logger ?? noopLogger;
 
   if (!fs.existsSync(path.join(projectDir, 'build-profile.json5'))) {
@@ -77,6 +81,9 @@ export function runHvigorw(opts: RunHvigorwOptions): Promise<RunHvigorwResult> {
   }
 
   const hvigorw = getHvigorwPath(config, projectDir);
+  if (!fs.existsSync(hvigorw)) {
+    throw new OniroError(`hvigorw wrapper not found at ${hvigorw}.`);
+  }
   const args = buildHvigorwArgs(opts);
 
   // Ensure hvigorw is executable on POSIX (project-local copies often aren't after a fresh clone).
@@ -95,27 +102,33 @@ export function runHvigorw(opts: RunHvigorwOptions): Promise<RunHvigorwResult> {
       return;
     }
     logger.info(`[build] ${hvigorw} ${args.join(' ')}`);
-    const child = spawn(hvigorw, args, { cwd: projectDir, env, shell: false });
+    // On Windows hvigorw is a .bat wrapper, which spawnCompat routes through
+    // cmd.exe — a direct spawn there throws `EINVAL` on Node 20.12.2+.
+    let child: ChildProcess;
+    try {
+      child = spawnCompat(hvigorw, args, { cwd: projectDir, env });
+    } catch (err) {
+      // spawn() can fail synchronously; report it like the 'error' event below
+      // instead of letting a bare OS error escape to the CLI.
+      reject(new OniroError(`Failed to start hvigorw: ${err instanceof Error ? err.message : String(err)}`, err));
+      return;
+    }
     let settled = false;
     const cleanup = (): void => opts.abortSignal?.removeEventListener('abort', onAbort);
     const onAbort = (): void => {
       if (settled) return;
       settled = true;
       cleanup();
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
+      killProcessTree(child);
       reject(new CancelledError('hvigorw build cancelled.'));
     };
     opts.abortSignal?.addEventListener('abort', onAbort, { once: true });
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       opts.onOutput?.(text, 'stdout');
       logger.info(text.trimEnd());
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       opts.onOutput?.(text, 'stderr');
       logger.warn(text.trimEnd());
