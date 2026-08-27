@@ -205,7 +205,7 @@ export function listRunningProcesses(
     let resolved = false;
 
     proc.stdout?.on('data', (data: Buffer) => {
-      for (const line of data.toString().split('\n').filter(Boolean)) {
+      for (const line of data.toString().split(/\r?\n/).filter(Boolean)) {
         const match = line.match(/^(\d+)\s+(.+)$/);
         if (!match) continue;
         const pid = match[1]!;

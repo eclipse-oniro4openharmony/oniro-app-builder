@@ -221,10 +221,9 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
       child = stream;
       stream.stdout.on('data', (d: Buffer) => {
         buf += d.toString();
-        let idx: number;
-        while ((idx = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, idx);
-          buf = buf.slice(idx + 1);
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
           const entry = parseHilogLine(line);
           if (entry && opts.pattern.test(entryText(entry))) {
             finish(entry);
@@ -304,10 +303,9 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
       child = stream;
       stream.stdout.on('data', (d: Buffer) => {
         buf += d.toString();
-        let idx: number;
-        while ((idx = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, idx);
-          buf = buf.slice(idx + 1);
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
           const entry = parseHilogLine(line);
           if (entry && opts.pattern.test(entryText(entry))) matches.push(entry);
         }
@@ -364,7 +362,7 @@ export async function dumpLog(opts: DumpLogOptions): Promise<HilogEntry[]> {
     logger: opts.logger,
   });
   return res.stdout
-    .split('\n')
+    .split(/\r?\n/)
     .map((line) => parseHilogLine(line))
     .filter((e): e is HilogEntry => e !== null);
 }
