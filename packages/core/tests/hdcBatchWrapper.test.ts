@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { staticConfig } from '../src/ports/config.js';
-import { setHilogLevel, streamHilog } from '../src/hdc/hilog.js';
+import { dumpLog, setHilogLevel, streamHilog, waitForLog, watchLog } from '../src/hdc/hilog.js';
 import { listRunningProcesses } from '../src/hdc/app.js';
 
 const isWin = process.platform === 'win32';
@@ -42,17 +42,43 @@ describe.skipIf(!isWin)('hdc streaming call sites against a Windows batch wrappe
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('listRunningProcesses reads track-jpid through the wrapper', async () => {
-    fakeHdc('console.log("1234 com.example.app");\n');
+  it('listRunningProcesses reads CRLF track-jpid output through the wrapper', async () => {
+    fakeHdc('process.stdout.write("1234 com.example.app\\r\\n");\n');
     const config = staticConfig({ hdcPath: hdc });
     const pid = await listRunningProcesses(config, { targetProcessName: 'com.example.app', timeoutMs: 8000 });
     expect(pid).toBe('1234');
   });
 
   it('streamHilog pipes the device log through the wrapper', async () => {
-    fakeHdc('console.log("01-01 00:00:00.000  1  2 I Tag: hello");\n');
+    fakeHdc('process.stdout.write("01-01 00:00:00.000  1  2 I Tag: hello\\r\\n");\n');
     const out = await drain(streamHilog({ config: staticConfig({ hdcPath: hdc }) }));
     expect(out.trim()).toBe('01-01 00:00:00.000  1  2 I Tag: hello');
+  });
+
+  it('waitForLog strips CRLF from parsed messages', async () => {
+    fakeHdc('process.stdout.write("01-01 00:00:00.000  1  2 I Tag: hello\\r\\n");\n');
+    const entry = await waitForLog({
+      config: staticConfig({ hdcPath: hdc }),
+      pattern: /hello$/,
+      timeoutMs: 8000,
+    });
+    expect(entry.message).toBe('hello');
+  });
+
+  it('watchLog strips CRLF from parsed messages', async () => {
+    fakeHdc('process.stdout.write("01-01 00:00:00.000  1  2 I Tag: hello\\r\\n");\n');
+    const entries = await watchLog({
+      config: staticConfig({ hdcPath: hdc }),
+      pattern: /hello/,
+      durationMs: 1000,
+    });
+    expect(entries.map((entry) => entry.message)).toEqual(['hello']);
+  });
+
+  it('dumpLog strips CRLF from parsed messages', async () => {
+    fakeHdc('process.stdout.write("01-01 00:00:00.000  1  2 I Tag: hello\\r\\n");\n');
+    const entries = await dumpLog({ config: staticConfig({ hdcPath: hdc }) });
+    expect(entries.map((entry) => entry.message)).toEqual(['hello']);
   });
 
   it('streamHilog forwards its args intact across the wrapper', async () => {

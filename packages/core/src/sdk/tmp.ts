@@ -103,7 +103,7 @@ export function createInstallTempDir(opts: InstallTempDirOptions): InstallTempDi
   } catch (err) {
     const fallback = os.tmpdir();
     if (requested || isOutOfSpaceError(err) || path.resolve(fallback) === path.resolve(root)) throw err;
-    const reason = err instanceof Error ? err.message.split('\n')[0] : String(err);
+    const reason = err instanceof Error ? err.message.split(/\r?\n/)[0] : String(err);
     (opts.logger ?? noopLogger).warn(`${reason} Falling back to '${fallback}'.`);
     return { dir: createTempWorkDir(fallback, opts.prefix), root: fallback };
   }
