@@ -162,8 +162,8 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 
 | Command | Description |
 | --- | --- |
-| `app install [project-dir] [--hap <path>]` | Install the signed `.hap` via `hdc`. `--hap` overrides the resolved path. |
-| `app launch [project-dir] [--module <m>] [--ability <name>]` | Launch the app. `--ability` defaults to the module's `mainElement` / first visible ability. |
+| `app install [project-dir] [--hap <path>] [--device <serial>]` | Install the signed `.hap` via `hdc`. `--hap` overrides the resolved path. |
+| `app launch [project-dir] [--module <m>] [--ability <name>] [--device <serial>]` | Launch the app. `--ability` defaults to the module's `mainElement` / first visible ability. |
 | `app apply [project-dir] --bundle <b> [options]` | Install a HAP **and verify the running process took the change** — handles sign-info mismatch, asset-cache invalidation, and persistent-bundle restart. |
 | `app uninstall <bundle> [--device <serial>]` | Uninstall an app by bundle name. |
 | `app stop <bundle> [--device <serial>]` | Force-stop an app by bundle name. |
@@ -178,6 +178,7 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 | `--installed-hap <path>` | Local copy of the currently-installed HAP, to enable the asset-cache reboot diff. |
 | `--system` | Treat as a persistent/system bundle (refuses to uninstall on a sign-info mismatch). |
 | `--allow-uninstall` | Permit uninstalling a system bundle on sign-info mismatch (dangerous). |
+| `--device <serial>` | Target device serial. |
 | `--json` | Emit the result (`method`, pre/post-install pid, `cacheCleared`) as JSON. |
 
 #### `file` — transfer files to/from the device
