@@ -21,11 +21,12 @@ export function registerAppCommand(program: Command): void {
     .command('install [project-dir]')
     .description('Install the signed .hap on the connected device/emulator via hdc.')
     .option('--hap <path>', 'Override the .hap path (relative to project-dir or absolute).')
-    .action(async (projectDir: string | undefined, opts: { hap?: string }) => {
+    .option('--device <serial>', 'Target device serial.')
+    .action(async (projectDir: string | undefined, opts: { hap?: string; device?: string }) => {
       const { config, logger } = getRuntime();
       const dir = path.resolve(projectDir ?? process.cwd());
       logger.info(`Installing app from ${dir}...`);
-      await installApp({ config, projectDir: dir, hapPath: opts.hap, logger });
+      await installApp({ config, projectDir: dir, hapPath: opts.hap, deviceSerial: opts.device, logger });
       logger.info('App installed.');
     });
 

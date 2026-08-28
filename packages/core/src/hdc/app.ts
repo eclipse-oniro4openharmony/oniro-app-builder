@@ -19,6 +19,7 @@ export interface InstallAppOptions {
    * Falls back to the `hapPath` config key, then to the well-known default.
    */
   hapPath?: string;
+  deviceSerial?: string;
   logger?: Logger;
 }
 
@@ -41,7 +42,12 @@ export async function installApp(opts: InstallAppOptions): Promise<InstallAppRes
     throw new OniroError(`HAP file not found at: ${hapPath}. Build and sign the app first.`);
   }
 
-  const result = await hdcExec({ config: opts.config, args: ['install', hapPath], timeoutMs: 300_000 });
+  const result = await hdcExec({
+    config: opts.config,
+    args: ['install', hapPath],
+    deviceSerial: opts.deviceSerial,
+    timeoutMs: 300_000,
+  });
   if (result.stdout.trim()) logger.info(result.stdout.trim());
   if (result.stderr.trim()) logger.warn(result.stderr.trim());
   ensureOk(result, `hdc install ${hapPath}`);

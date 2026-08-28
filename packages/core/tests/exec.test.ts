@@ -207,11 +207,11 @@ describe.skipIf(isWin)('installApp / launchApp argv + injection safety (fake hdc
 
   const config = () => staticConfig({ cmdToolsPath: root });
 
-  it('installApp sends `install <hapPath>` as discrete args', async () => {
+  it('installApp sends the target and `install <hapPath>` as discrete args', async () => {
     const hapPath = path.join(projectDir, 'app.hap');
     fs.writeFileSync(hapPath, 'fake');
-    await installApp({ config: config(), projectDir, hapPath });
-    // No throw means exit 0 from the fake hdc. (Output is logged, not returned in P1.)
+    const result = await installApp({ config: config(), projectDir, hapPath, deviceSerial: 'ABC123' });
+    expect(result.output.split('\n').filter(Boolean)).toEqual(['-t', 'ABC123', 'install', hapPath]);
   });
 
   it('launchApp passes a metacharacter-laden ability as ONE argv element (no host injection)', async () => {
