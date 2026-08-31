@@ -1,5 +1,16 @@
 # @oniroproject/oniro-app
 
+## 0.10.0
+
+### Minor Changes
+
+- 73a11d5: Add device targeting to app installation. `installApp` now accepts `deviceSerial`, and `oniro-app app install` exposes it as `--device <serial>`.
+
+### Patch Changes
+
+- Updated dependencies [73a11d5]
+  - @oniroproject/core@0.10.0
+
 ## 0.9.1
 
 ### Patch Changes
