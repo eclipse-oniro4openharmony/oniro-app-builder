@@ -18,21 +18,9 @@ npm install -g @oniroproject/oniro-app
 oniro-app --help
 ```
 
-## Typical workflow
+## Getting started
 
-```bash
-oniro-app sdk install 6.1
-oniro-app cmdtools install
-oniro-app create --name HelloOniro --bundle com.example.hello \
-                 --location ~/projects --sdk 23
-cd ~/projects/HelloOniro
-oniro-app sign
-oniro-app build
-oniro-app emulator install
-oniro-app emulator start --wait-for-hdc 300
-oniro-app app install
-oniro-app app launch
-```
+See the [application development tutorial](https://docs.oniroproject.org/application-development/environment-setup-guide/oniro/setup/) for a step-by-step introduction to Oniro App Builder.
 
 The full command list, environment-variable configuration, and the system-permission signing guide live in the **[CLI README](packages/cli/README.md)**. To call the same functionality from your own code, see the **[core API reference](packages/core/README.md)**.
 
