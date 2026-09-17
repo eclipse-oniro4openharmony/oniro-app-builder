@@ -24,7 +24,15 @@ export type ConfigKey =
   | 'sdkUrlBase'
   // Optional path to an external application-cert chain that overrides the bundled
   // `OpenHarmonyApplication.cer` during signing. Empty/unset → use the bundled cert.
-  | 'applicationCertPath';
+  | 'applicationCertPath'
+  // A HarmonyOS SDK: a DevEco Studio or HarmonyOS command-line-tools install, or its
+  // `sdk` directory. Autodetected when unset; never downloaded.
+  | 'harmonyosSdkPath'
+  // Encrypted Huawei developer-account token. Default `~/.oniro/harmonyos`.
+  | 'harmonyosAuthDir'
+  // Generated HarmonyOS signing material (p12/csr/cer/p7b). Default `~/.ohos/config`,
+  // where DevEco Studio keeps its own.
+  | 'harmonyosSigningDir';
 
 export interface ConfigProvider {
   /**
@@ -42,6 +50,8 @@ export const defaultPaths = {
   sdkRootDir: () => path.join(os.homedir(), 'setup-ohos-sdk'),
   cmdToolsPath: () => path.join(os.homedir(), 'command-line-tools'),
   emulatorDir: () => path.join(os.homedir(), 'oniro-emulator'),
+  harmonyosAuthDir: () => path.join(os.homedir(), '.oniro', 'harmonyos'),
+  harmonyosSigningDir: () => path.join(os.homedir(), '.ohos', 'config'),
   hapPath: 'entry/build/default/outputs/default/entry-default-signed.hap',
   emulatorUrl:
     'https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/latest/download/oniro_emulator.zip',

@@ -5,6 +5,8 @@ import { runHvigorw } from './runHvigorw.js';
 import { ensureOhModules } from './ohpm.js';
 import { discoverHaps, type ModuleHaps } from './discoverHaps.js';
 import { toLongPath } from '../sdk/paths.js';
+import { detectRuntimeOs } from '../harmonyos/target.js';
+import { findHarmonyOsSdk, findHarmonyOsTool } from '../harmonyos/sdk.js';
 
 export interface BuildHapOptions {
   config: ConfigProvider;
@@ -44,11 +46,15 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
   // Normalise once so ohpm, hvigor and HAP discovery all agree on the project
   // dir, and the returned artifact paths come back in long form.
   const projectDir = toLongPath(opts.projectDir);
+  const isHarmonyOs = detectRuntimeOs(projectDir, opts.product) === 'HarmonyOS';
 
   if (opts.autoInstallDeps !== false) {
+    // HarmonyOS projects install dependencies with their own install's ohpm.
+    const harmonySdk = isHarmonyOs ? findHarmonyOsSdk({ config: opts.config, logger: opts.logger }) : null;
     const r = await ensureOhModules({
       config: opts.config,
       projectDir,
+      ohpmPath: (harmonySdk && findHarmonyOsTool(harmonySdk, 'ohpm')) ?? undefined,
       abortSignal: opts.abortSignal,
       onOutput: opts.onOutput,
       logger: opts.logger,
@@ -73,7 +79,9 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
   const anySigned = Object.values(discoveredHaps).some((m) => m.signed.length > 0);
   if (!anySigned) {
     warnings.push(
-      'No signed HAPs found — configure signingConfigs in build-profile.json5 (unsigned HAPs are rejected by most devices).',
+      isHarmonyOs
+        ? 'No signed HAPs found — run `oniro-app sign --harmonyos` to have AppGallery Connect issue a certificate and profile.'
+        : 'No signed HAPs found — configure signingConfigs in build-profile.json5 (unsigned HAPs are rejected by most devices).',
     );
   }
 

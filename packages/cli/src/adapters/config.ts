@@ -18,6 +18,9 @@ const ENV_VAR_BY_KEY: Record<ConfigKey, string> = {
   tmpDir: 'ONIRO_TMP_DIR',
   sdkUrlBase: 'ONIRO_SDK_URL_BASE',
   applicationCertPath: 'ONIRO_APPLICATION_CERT_PATH',
+  harmonyosSdkPath: 'ONIRO_HARMONYOS_SDK_PATH',
+  harmonyosAuthDir: 'ONIRO_HARMONYOS_AUTH_DIR',
+  harmonyosSigningDir: 'ONIRO_HARMONYOS_SIGNING_DIR',
 };
 
 /**

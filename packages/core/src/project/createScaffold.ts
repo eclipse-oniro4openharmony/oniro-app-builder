@@ -5,6 +5,8 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 import { getOhosBaseSdkHome } from '../sdk/paths.js';
+import { HARMONYOS_SDK_VERSIONS, detectRuntimeOs, harmonyOsSdkLabelForApi } from '../harmonyos/target.js';
+import { findHarmonyOsSdk } from '../harmonyos/sdk.js';
 import { listTemplates, validateTemplateLayout } from './templates.js';
 import { isValidBundleName, isValidProjectName } from './validators.js';
 import { readJson5File, readJsonFile, writeJson5File, writeJsonFile } from './jsonHelpers.js';
@@ -116,7 +118,8 @@ function updateTemplateConfigs(
   args: {
     projectName: string;
     bundleName: string;
-    sdkApi: number;
+    /** A plain API level for OpenHarmony; `"<version>(<api>)"` for HarmonyOS. */
+    sdkVersion: number | string;
     moduleName: string;
   },
   sdkBaseDir: string,
@@ -145,13 +148,13 @@ function updateTemplateConfigs(
   const buildProfilePath = path.join(projectDir, 'build-profile.json5');
   if (fs.existsSync(buildProfilePath)) {
     const buildProfile = readJson5File<{
-      app?: { products?: Array<{ compileSdkVersion?: number; compatibleSdkVersion?: number }> };
+      app?: { products?: Array<{ compileSdkVersion?: number | string; compatibleSdkVersion?: number | string }> };
       modules?: Array<{ name?: string; srcPath?: string }>;
     }>(buildProfilePath);
     buildProfile.app = buildProfile.app ?? {};
     if (Array.isArray(buildProfile.app.products) && buildProfile.app.products.length > 0) {
-      buildProfile.app.products[0]!.compileSdkVersion = args.sdkApi;
-      buildProfile.app.products[0]!.compatibleSdkVersion = args.sdkApi;
+      buildProfile.app.products[0]!.compileSdkVersion = args.sdkVersion;
+      buildProfile.app.products[0]!.compatibleSdkVersion = args.sdkVersion;
     }
     if (Array.isArray(buildProfile.modules) && buildProfile.modules.length > 0) {
       buildProfile.modules[0]!.name = args.moduleName;
@@ -223,6 +226,37 @@ export async function createScaffold(opts: CreateScaffoldOptions): Promise<Creat
     throw new OniroError(`Template '${opts.templateId}' is missing required files:\n- ${missing.join('\n- ')}`);
   }
 
+  // HarmonyOS templates declare the SDK as "<version>(<api>)" and build against the
+  // HarmonyOS SDK; OpenHarmony ones take the plain API level and the OpenHarmony SDK.
+  let sdkVersion: number | string = opts.sdkApi;
+  let sdkBaseDir = getOhosBaseSdkHome(opts.config);
+  if (detectRuntimeOs(templateDir) === 'HarmonyOS') {
+    const harmonySdk = findHarmonyOsSdk({ config: opts.config, logger });
+    // The installed SDK names its own release, which covers API levels newer than the table.
+    const label = harmonySdk?.version?.endsWith(`(${opts.sdkApi})`)
+      ? harmonySdk.version
+      : harmonyOsSdkLabelForApi(opts.sdkApi);
+    if (!label) {
+      throw new OniroError(
+        `No HarmonyOS release is known for API ${opts.sdkApi}. Known: ${[...HARMONYOS_SDK_VERSIONS.keys()].join(', ')}` +
+          (harmonySdk?.version ? `, and the installed SDK's ${harmonySdk.version}.` : '.'),
+      );
+    }
+    sdkVersion = label;
+    if (!harmonySdk) {
+      logger.warn('[create] No HarmonyOS SDK found; set ONIRO_HARMONYOS_SDK_PATH before building.');
+    } else {
+      sdkBaseDir = harmonySdk.sdkPath;
+      if (harmonySdk.version && harmonySdk.version !== label) {
+        // hvigor fails with "SDK component missing" when compileSdkVersion names another release.
+        logger.warn(
+          `[create] The HarmonyOS SDK at ${harmonySdk.sdkPath} is ${harmonySdk.version}, so a project ` +
+            `declaring ${label} will not build against it. Install ${label}, or create with the installed API level.`,
+        );
+      }
+    }
+  }
+
   const projectDir = path.join(opts.location, opts.projectName);
   if (await pathExists(projectDir)) {
     if (!opts.overwrite) {
@@ -243,10 +277,10 @@ export async function createScaffold(opts: CreateScaffoldOptions): Promise<Creat
     {
       projectName: opts.projectName,
       bundleName: opts.bundleName,
-      sdkApi: opts.sdkApi,
+      sdkVersion,
       moduleName,
     },
-    getOhosBaseSdkHome(opts.config),
+    sdkBaseDir,
   );
 
   await normalizeJson5ToJson(projectDir, logger);
