@@ -21,14 +21,18 @@ function escapeForCmd(s: string): string {
 }
 
 /**
- * Open `url` in the user's default browser.
+ * Open `url` in the user's default browser. Resolves once the launcher exits
+ * successfully.
  *
+ * Some launchers (`xdg-open` without a desktop environment, `$BROWSER`) only exit
+ * when the browser does, so callers should not wait on this before carrying on;
+ * the launcher is detached so it neither keeps this process alive nor dies with it.
  * Headless environments (CI, a remote shell) have no browser to open; the caller
  * is expected to print the URL as well so the user can open it themselves.
  */
-export async function openBrowser(url: string): Promise<void> {
+export function openBrowser(url: string): Promise<void> {
   if (!isSafeUrl(url)) {
-    throw new OniroError(`Refusing to open unsafe URL: ${JSON.stringify(url)}`);
+    return Promise.reject(new OniroError(`Refusing to open unsafe URL: ${JSON.stringify(url)}`));
   }
 
   const [command, args] =
@@ -41,12 +45,14 @@ export async function openBrowser(url: string): Promise<void> {
   const child = spawn(command as string, args as string[], {
     stdio: 'ignore',
     shell: false,
+    detached: true,
     windowsHide: true,
   });
+  child.unref();
 
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     child.on('error', (err) => reject(new OniroError(`Failed to open a browser (${command}).`, err)));
-    child.on('close', (code) =>
+    child.on('exit', (code) =>
       code === 0 ? resolve() : reject(new OniroError(`Browser launcher '${command}' exited with code ${code}.`)),
     );
   });

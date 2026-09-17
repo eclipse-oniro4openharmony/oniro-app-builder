@@ -30,12 +30,16 @@ export function parseDeviceKind(stdout: string): string {
   return ['liteWearable', 'wearable', 'tv'].find((kind) => stdout.includes(kind)) ?? 'phone';
 }
 
+export interface LocalDevice {
+  serial: string;
+  /** Uppercased. */
+  udid: string;
+  kind: string;
+}
+
 /** UDID and kind of every connected device; one that will not answer is skipped. */
-async function collectLocalDevices(
-  config: ConfigProvider,
-  logger: Logger,
-): Promise<Array<{ serial: string; udid: string; kind: string }>> {
-  const devices = [];
+export async function collectLocalDevices(config: ConfigProvider, logger: Logger): Promise<LocalDevice[]> {
+  const devices: LocalDevice[] = [];
   for (const target of await listDevices(config, { logger, timeoutMs: 15_000 })) {
     if (target.status !== 'Connected') continue;
     const shell = async (...args: string[]) =>
@@ -56,19 +60,14 @@ async function collectLocalDevices(
 }
 
 /**
- * Register every connected device with the team, and return the team's device ids
- * and the connected UDIDs.
+ * Register the connected devices the team does not know yet, and return the ids of
+ * every device registered to the team.
  *
  * The profile names every registered device, not only the connected ones, so it
  * stays valid across devices — and no device needs to be connected at all once the
  * team has some registered (from another machine, or by DevEco Studio).
  */
-export async function registerDevices(
-  agc: AgcClient,
-  config: ConfigProvider,
-  logger: Logger,
-): Promise<{ deviceIds: string[]; connectedUdids: string[] }> {
-  const connected = await collectLocalDevices(config, logger);
+export async function registerDevices(agc: AgcClient, connected: LocalDevice[], logger: Logger): Promise<string[]> {
   let devices = await agc.listDevices();
   const registered = new Set(devices.map((d) => d.udid.toUpperCase()));
 
@@ -86,5 +85,5 @@ export async function registerDevices(
       `[harmonyos] No device is connected; the profile will name the ${deviceIds.length} device(s) already registered to this team.`,
     );
   }
-  return { deviceIds, connectedUdids: connected.map((d) => d.udid) };
+  return deviceIds;
 }

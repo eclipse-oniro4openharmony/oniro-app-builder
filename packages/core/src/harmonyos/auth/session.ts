@@ -161,12 +161,11 @@ export function createHarmonyOsSession(opts: HarmonyOsSessionOptions): HarmonyOs
       try {
         const loginUrl = `${start}/${AUTH_PATHS.AUTH_APPLY}?port=${server.port}&appid=${HUAWEI_APP_ID}&code=${clientSecret}`;
         opts.onLoginUrl?.(loginUrl);
-        try {
-          await openBrowser(loginUrl);
-        } catch (err) {
+        // Not awaited: some launchers exit only when the browser does.
+        openBrowser(loginUrl).catch((err: Error) => {
           // Headless hosts have no browser; the URL was surfaced via onLoginUrl.
-          logger.warn(`[harmonyos] Could not open a browser automatically: ${(err as Error).message}`);
-        }
+          logger.warn(`[harmonyos] Could not open a browser automatically: ${err.message}`);
+        });
 
         const callback = await server.waitForCallback(o.timeoutMs ?? LOGIN_TIMEOUT_MS);
         const site = siteForId(callback.siteId);

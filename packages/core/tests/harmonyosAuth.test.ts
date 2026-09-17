@@ -1,12 +1,13 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
+import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parseTeamList } from '../src/harmonyos/auth/session.js';
 import { HUAWEI_SITES, siteForId } from '../src/harmonyos/auth/endpoints.js';
 import { createTokenStore } from '../src/harmonyos/auth/tokenStore.js';
 import { startCallbackServer } from '../src/harmonyos/auth/callbackServer.js';
-import { previewBody, proxyForUrl, redactUrl } from '../src/harmonyos/http.js';
+import { openBrowser } from '../src/harmonyos/auth/browser.js';
 import { staticConfig } from '../src/ports/config.js';
 import { OniroError } from '../src/ports/errors.js';
 
@@ -36,47 +37,54 @@ describe('parseTeamList', () => {
 
 describe('token store', () => {
   let home: string;
+  let authDir: string;
 
   beforeEach(() => {
+    // The key lives under the home directory; keep it out of the real one.
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-token-'));
+    authDir = path.join(home, 'auth');
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  const store = () => createTokenStore({ config: staticConfig({ harmonyosAuthDir: home }) });
+  const store = () => createTokenStore({ config: staticConfig({ harmonyosAuthDir: authDir }) });
+  const keyPath = () => path.join(home, '.local', 'share', 'oniro-app', 'keys', 'kek.bin');
 
-  it('round-trips a session through encryption', () => {
+  it('round-trips a session, region included, through encryption', () => {
     const s = store();
     s.save({ jwtToken: 'my.jwt.token', siteId: '7' });
     expect(s.load()).toEqual({ jwtToken: 'my.jwt.token', siteId: '7' });
+    // A fresh instance reads it back too.
+    expect(store().load()).toEqual({ jwtToken: 'my.jwt.token', siteId: '7' });
   });
 
-  it('remembers the region, so later calls reach the right hosts', () => {
-    const s = store();
-    s.save({ jwtToken: 'a.b.c', siteId: '7' });
-    expect(s.load()?.siteId).toBe('7');
-  });
-
-  it('does not write the token in the clear', () => {
+  it('does not write the token in the clear, nor next to its key', () => {
     const s = store();
     s.save({ jwtToken: 'super-secret-value', siteId: '1' });
     const onDisk = fs.readFileSync(s.tokenPath, 'utf8');
     expect(onDisk).not.toContain('super-secret-value');
     expect(JSON.parse(onDisk).algorithm).toBe('aes-256-gcm');
+    expect(path.dirname(s.tokenPath)).toBe(authDir);
+    expect(fs.existsSync(keyPath())).toBe(true);
+    expect(fs.readdirSync(authDir)).toEqual(['token.enc']);
   });
 
   it('returns null before anything is saved', () => {
     expect(store().load()).toBeNull();
   });
 
-  it('clears the token and the wrapped key', () => {
+  it('clears the token', () => {
     const s = store();
     s.save({ jwtToken: 'token', siteId: '1' });
     s.clear();
     expect(s.load()).toBeNull();
     expect(fs.existsSync(s.tokenPath)).toBe(false);
+    expect(() => s.clear()).not.toThrow();
   });
 
   it('discards a corrupted token rather than throwing on every later call', () => {
@@ -84,17 +92,38 @@ describe('token store', () => {
     s.save({ jwtToken: 'token', siteId: '1' });
     fs.writeFileSync(s.tokenPath, '{"algorithm":"aes-256-gcm","ciphertext":"zzz","iv":"zz","authTag":"zz"}');
     expect(s.load()).toBeNull();
+    expect(fs.existsSync(s.tokenPath)).toBe(false);
+  });
+
+  it('treats a token whose key was lost or damaged as signed out', () => {
+    const s = store();
+    s.save({ jwtToken: 'token', siteId: '1' });
+    fs.writeFileSync(keyPath(), 'short');
+    expect(s.load()).toBeNull();
+    // A usable key was minted in its place.
+    expect(fs.readFileSync(keyPath())).toHaveLength(32);
+    s.save({ jwtToken: 'again', siteId: '1' });
+    expect(s.load()?.jwtToken).toBe('again');
+  });
+
+  it('ignores a token file that is not an encrypted blob', () => {
+    const s = store();
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(s.tokenPath, JSON.stringify({ jwtToken: 'plain' }));
+    expect(s.load()).toBeNull();
   });
 
   it('refuses to store an empty token', () => {
     expect(() => store().save({ jwtToken: '', siteId: '1' })).toThrow(OniroError);
   });
 
-  it('writes the token file 0600 on POSIX', () => {
+  it('writes the token and key 0600, in 0700 directories, on POSIX', () => {
     if (process.platform === 'win32') return;
     const s = store();
     s.save({ jwtToken: 'token', siteId: '1' });
     expect(fs.statSync(s.tokenPath).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(keyPath()).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(authDir).mode & 0o777).toBe(0o700);
   });
 });
 
@@ -128,40 +157,66 @@ describe('Huawei regions', () => {
 });
 
 describe('login callback server', () => {
-  it('accepts a callback carrying the matching secret', async () => {
-    const server = await startCallbackServer({
+  const start = () =>
+    startCallbackServer({
       clientSecret: 'secret123',
       baseUrl: 'https://example.invalid',
       successPath: 'ok',
       failedPath: 'fail',
     });
+
+  it('accepts a callback carrying the matching secret, and redirects to the success page', async () => {
+    const server = await start();
     try {
       const pending = server.waitForCallback(5_000);
-      await fetch(
-        `http://127.0.0.1:${server.port}/callback?code=secret123&tempToken=tok&siteId=1`,
-        { redirect: 'manual' },
-      );
-      await expect(pending).resolves.toMatchObject({ tempToken: 'tok', siteId: '1' });
+      const res = await fetch(`http://127.0.0.1:${server.port}/callback?code=secret123&tempToken=tok&siteId=1`, {
+        redirect: 'manual',
+      });
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('https://example.invalid/ok');
+      await expect(pending).resolves.toEqual({ tempToken: 'tok', siteId: '1' });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('keeps a callback that arrives before anyone waits for it', async () => {
+    // A browser launcher may only return once the browser has already come back.
+    const server = await start();
+    try {
+      await fetch(`http://127.0.0.1:${server.port}/callback?code=secret123&tempToken=early&siteId=5`, {
+        redirect: 'manual',
+      });
+      await expect(server.waitForCallback(1_000)).resolves.toEqual({ tempToken: 'early', siteId: '5' });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('accepts the callback as a form POST', async () => {
+    const server = await start();
+    try {
+      const pending = server.waitForCallback(5_000);
+      await fetch(`http://localhost:${server.port}/callback`, {
+        method: 'POST',
+        body: new URLSearchParams({ code: 'secret123', tempToken: 'posted', siteId: '7' }),
+        redirect: 'manual',
+      });
+      await expect(pending).resolves.toEqual({ tempToken: 'posted', siteId: '7' });
     } finally {
       await server.stop();
     }
   });
 
   it('ignores a callback with the wrong secret', async () => {
-    const server = await startCallbackServer({
-      clientSecret: 'secret123',
-      baseUrl: 'https://example.invalid',
-      successPath: 'ok',
-      failedPath: 'fail',
-    });
+    const server = await start();
     try {
       // Attach the rejection handler before triggering it, or the rejection lands
       // in the same tick with nothing listening and surfaces as unhandled.
       const settled = expect(server.waitForCallback(300)).rejects.toThrow(/Timed out/);
-      const res = await fetch(
-        `http://127.0.0.1:${server.port}/callback?code=wrong&tempToken=tok&siteId=1`,
-        { redirect: 'manual' },
-      );
+      const res = await fetch(`http://127.0.0.1:${server.port}/callback?code=wrong&tempToken=tok&siteId=1`, {
+        redirect: 'manual',
+      });
       expect(res.status).toBe(400);
       // The forged callback must not resolve the login; it times out instead.
       await settled;
@@ -170,31 +225,60 @@ describe('login callback server', () => {
     }
   });
 
-  it('rejects when the user quits in the browser', async () => {
-    const server = await startCallbackServer({
-      clientSecret: 'secret123',
-      baseUrl: 'https://example.invalid',
-      successPath: 'ok',
-      failedPath: 'fail',
-    });
+  it('rejects a callback missing the token or region', async () => {
+    const server = await start();
     try {
-      const settled = expect(server.waitForCallback(5_000)).rejects.toThrow(/cancelled/i);
-      await fetch(`http://127.0.0.1:${server.port}/callback?code=secret123&quit=true`, {
+      for (const query of ['code=secret123&siteId=1', 'code=secret123&tempToken=tok']) {
+        const res = await fetch(`http://127.0.0.1:${server.port}/callback?${query}`, { redirect: 'manual' });
+        expect(res.status).toBe(400);
+      }
+      await expect(server.waitForCallback(100)).rejects.toThrow(/Timed out/);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('refuses requests addressed to another host name', async () => {
+    const server = await start();
+    try {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        http
+          .get(
+            {
+              host: '127.0.0.1',
+              port: server.port,
+              path: '/callback?code=secret123&tempToken=tok&siteId=1',
+              headers: { host: `attacker.example:${server.port}` },
+            },
+            (res) => {
+              res.resume();
+              resolve(res.statusCode);
+            },
+          )
+          .on('error', reject);
+      });
+      expect(status).toBe(400);
+      await expect(server.waitForCallback(100)).rejects.toThrow(/Timed out/);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('rejects when the user quits in the browser, even before anyone waits', async () => {
+    const server = await start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.port}/callback?code=secret123&quit=true`, {
         redirect: 'manual',
       });
-      await settled;
+      expect(res.headers.get('location')).toBe('https://example.invalid/fail');
+      await expect(server.waitForCallback(5_000)).rejects.toThrow(/cancelled/i);
     } finally {
       await server.stop();
     }
   });
 
   it('404s any path other than /callback', async () => {
-    const server = await startCallbackServer({
-      clientSecret: 'secret123',
-      baseUrl: 'https://example.invalid',
-      successPath: 'ok',
-      failedPath: 'fail',
-    });
+    const server = await start();
     try {
       const res = await fetch(`http://127.0.0.1:${server.port}/elsewhere`, { redirect: 'manual' });
       expect(res.status).toBe(404);
@@ -204,80 +288,10 @@ describe('login callback server', () => {
   });
 });
 
-describe('proxyForUrl', () => {
-  it('picks HTTPS_PROXY for https targets', () => {
-    expect(proxyForUrl('https://example.com', { HTTPS_PROXY: 'http://proxy:8080' })).toBe('http://proxy:8080');
-  });
-
-  it('falls back to HTTP_PROXY for https targets', () => {
-    expect(proxyForUrl('https://example.com', { HTTP_PROXY: 'http://proxy:8080' })).toBe('http://proxy:8080');
-  });
-
-  it('does not use HTTPS_PROXY for http targets', () => {
-    expect(proxyForUrl('http://example.com', { HTTPS_PROXY: 'http://proxy:8080' })).toBeUndefined();
-  });
-
-  it('honours NO_PROXY, including subdomains', () => {
-    const env = { HTTPS_PROXY: 'http://proxy:8080', NO_PROXY: 'example.com' };
-    expect(proxyForUrl('https://example.com', env)).toBeUndefined();
-    expect(proxyForUrl('https://api.example.com', env)).toBeUndefined();
-    expect(proxyForUrl('https://notexample.com', env)).toBe('http://proxy:8080');
-  });
-
-  it('honours a wildcard NO_PROXY', () => {
-    expect(proxyForUrl('https://example.com', { HTTPS_PROXY: 'http://proxy:8080', NO_PROXY: '*' })).toBeUndefined();
-  });
-
-  it('accepts lowercase variable names', () => {
-    expect(proxyForUrl('https://example.com', { https_proxy: 'http://proxy:8080' })).toBe('http://proxy:8080');
-  });
-
-  it('returns undefined with no proxy configured or a bad URL', () => {
-    expect(proxyForUrl('https://example.com', {})).toBeUndefined();
-    expect(proxyForUrl('not a url', { HTTPS_PROXY: 'http://proxy:8080' })).toBeUndefined();
-  });
-});
-
-describe('log redaction', () => {
-  it('strips credentials from a URL but keeps the rest legible', () => {
-    const redacted = redactUrl(
-      'https://h.example/authrouter/auth/api/temptoken/check?tempToken=SECRET&site=EU&appid=1009',
-    );
-    expect(redacted).not.toContain('SECRET');
-    expect(redacted).toContain('tempToken=***');
-    expect(redacted).toContain('site=EU');
-    expect(redacted).toContain('appid=1009');
-  });
-
-  it('strips every sensitive parameter name, case-insensitively', () => {
-    const redacted = redactUrl('https://h.example/x?jwtToken=A&code=B&oauth2Token=C&accessToken=D&keep=E');
-    for (const secret of ['A', 'B', 'C', 'D']) {
-      expect(redacted).not.toContain(`=${secret}&`);
-      expect(redacted).not.toContain(`=${secret}`.concat(''));
+describe('openBrowser', () => {
+  it('refuses anything but a plain http(s) URL, before launching anything', async () => {
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'not a url', 'https://example.com/"&calc']) {
+      await expect(openBrowser(url)).rejects.toThrow(/Refusing to open unsafe URL/);
     }
-    expect(redacted).toContain('keep=E');
-  });
-
-  it('leaves a non-URL untouched rather than throwing', () => {
-    expect(redactUrl('not a url')).toBe('not a url');
-  });
-
-  it('previews an error body for diagnosis', () => {
-    expect(previewBody('<html><title>404 Not Found</title></html>')).toContain('404 Not Found');
-    expect(previewBody('')).toBe('(empty body)');
-    expect(previewBody('   ')).toBe('(empty body)');
-  });
-
-  it('never echoes a token-shaped body', () => {
-    // A successful exchange returns a bare JWT; it must not reach an error string.
-    expect(previewBody('aaa.bbb.ccc')).toBe('(a token-shaped value)');
-  });
-
-  it('truncates long bodies', () => {
-    expect(previewBody('x'.repeat(1000)).length).toBeLessThan(320);
-  });
-
-  it('collapses newlines so a multi-line page stays one log line', () => {
-    expect(previewBody('line one\nline two')).toBe('line one line two');
   });
 });

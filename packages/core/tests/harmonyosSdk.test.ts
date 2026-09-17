@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { findHarmonyOsSdk, findHarmonyOsTool, requireHarmonyOsSdk } from '../src/harmonyos/sdk.js';
 import { findJava } from '../src/harmonyos/java.js';
 import { staticConfig } from '../src/ports/config.js';
+import { getHdcPath } from '../src/sdk/paths.js';
 
 /** An install at `root` whose `sdk/` names itself `flavour` in sdk-pkg.json. */
 function makeInstall(root: string, flavour: 'HarmonyOS' | 'OpenHarmony' | 'none' = 'HarmonyOS'): string {
@@ -114,5 +115,46 @@ describe('findJava', () => {
 
   it('says how to get a runtime when there is none', () => {
     expect(() => findJava(sdk(), { PATH: '' })).toThrow(/JAVA_HOME/);
+  });
+});
+
+describe('getHdcPath with a HarmonyOS SDK', () => {
+  let tmp: string;
+  const HDC = process.platform === 'win32' ? 'hdc.exe' : 'hdc';
+  const hdcIn = (sdkDir: string) => {
+    const file = path.join(sdkDir, 'default', 'openharmony', 'toolchains', HDC);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '');
+    return file;
+  };
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-hdc-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("uses the HarmonyOS SDK's hdc when there are no OpenHarmony command-line tools", () => {
+    const harmonyHdc = hdcIn(makeInstall(path.join(tmp, 'hos')));
+    expect(getHdcPath(staticConfig({ cmdToolsPath: path.join(tmp, 'absent'), harmonyosSdkPath: path.join(tmp, 'hos') }))).toBe(
+      harmonyHdc,
+    );
+  });
+
+  it("keeps the command-line tools' hdc first, and an explicit override above both", () => {
+    hdcIn(makeInstall(path.join(tmp, 'hos')));
+    const cmdToolsHdc = hdcIn(path.join(tmp, 'oh', 'sdk'));
+    const config = { cmdToolsPath: path.join(tmp, 'oh'), harmonyosSdkPath: path.join(tmp, 'hos') };
+    expect(getHdcPath(staticConfig(config))).toBe(cmdToolsHdc);
+    expect(getHdcPath(staticConfig({ ...config, hdcPath: '/custom/hdc' }))).toBe('/custom/hdc');
+  });
+
+  it('still names the command-line tools path when neither has an hdc', () => {
+    makeInstall(path.join(tmp, 'hos'));
+    expect(getHdcPath(staticConfig({ cmdToolsPath: path.join(tmp, 'oh'), harmonyosSdkPath: path.join(tmp, 'hos') }))).toMatch(
+      new RegExp(`^${path.join(tmp, 'oh', 'sdk').replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}`),
+    );
   });
 });

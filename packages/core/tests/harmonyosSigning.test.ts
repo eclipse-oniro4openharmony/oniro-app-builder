@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -7,7 +7,7 @@ import { X509Certificate } from 'node:crypto';
 import { SIGNING_ERRORS, mapAgcError } from '../src/harmonyos/signing/errors.js';
 import { createAgcClient } from '../src/harmonyos/signing/agc.js';
 import { resolveSigningMaterialPaths, sanitizeNamePart } from '../src/harmonyos/signing/paths.js';
-import { redactArgs } from '../src/harmonyos/signing/keystore.js';
+import { generateKeystoreAndCsr, redactArgs } from '../src/harmonyos/signing/keystore.js';
 import {
   extractProfileJson,
   keystoreHoldsKey,
@@ -19,6 +19,7 @@ import { collectAclPermissions } from '../src/harmonyos/signing/project.js';
 import type { HarmonyOsHttpClient, HttpResponse } from '../src/harmonyos/http.js';
 import { staticConfig } from '../src/ports/config.js';
 import { ChecksumMismatchError } from '../src/ports/errors.js';
+import type { Logger } from '../src/ports/logger.js';
 
 describe('mapAgcError', () => {
   it('maps a proxy-blocked 403 to a network error, any other 403 to permissions', () => {
@@ -77,6 +78,38 @@ describe('AGC client', () => {
     await expect(agc.addCertificate('c', 'csr')).rejects.toThrow(SIGNING_ERRORS.CERT_LIMIT);
   });
 
+  it('pages through every registered device', async () => {
+    const all = Array.from({ length: 150 }, (_, i) => ({ id: `d${i}`, udid: `u${i}` }));
+    const pages: unknown[] = [];
+    const http: HarmonyOsHttpClient = {
+      get: async (_url, opts) => {
+        pages.push(opts?.query);
+        const { start, pageSize } = opts!.query as { start: number; pageSize: number };
+        const list = all.slice((start - 1) * pageSize, start * pageSize);
+        return { data: JSON.stringify({ ret: { code: 0 }, list, totalCount: all.length }), statusCode: 200, statusText: 'OK' };
+      },
+      post: async () => ({ data: '', statusCode: 500, statusText: '' }),
+      delete: async () => ({ data: '', statusCode: 500, statusText: '' }),
+      getBinary: async () => Buffer.from(''),
+    };
+    await expect(createAgcClient(http, auth).listDevices()).resolves.toEqual(all);
+    expect(pages).toEqual([
+      { encodeFlag: 0, start: 1, pageSize: 100 },
+      { encodeFlag: 0, start: 2, pageSize: 100 },
+    ]);
+  });
+
+  it('maps an HTTP failure to its remedy', async () => {
+    await expect(client({ statusCode: 401, data: '' }).listDevices()).rejects.toThrow(SIGNING_ERRORS.UNAUTHORIZED);
+    await expect(client({ statusCode: 500, data: 'oops' }).deleteProfile('p')).rejects.toThrow(SIGNING_ERRORS.PROFILE_ADD);
+  });
+
+  it('fails a download AGC offers no URL for', async () => {
+    await expect(client({ data: JSON.stringify({ ret: { code: 0 }, urlsInfo: [] }) }).download('profile', 'o', '/unused')).rejects.toThrow(
+      SIGNING_ERRORS.PROFILE_ADD,
+    );
+  });
+
   it('writes a download only when its digest matches', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-agc-'));
     try {
@@ -121,6 +154,77 @@ describe('signing material paths', () => {
     const redacted = redactArgs(['generate-keypair', '-keyAlias', 'debugKey', '-keyPwd', 'hunter2', '-keystorePwd', 'hunter2']);
     expect(redacted).not.toContain('hunter2');
     expect(redacted).toContain('debugKey');
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('generateKeystoreAndCsr', () => {
+  let tmp: string;
+  let sdk: { sdkPath: string; installRoot: string };
+  const debug: string[] = [];
+  const logger: Logger = { debug: (m) => debug.push(m), info() {}, warn() {}, error() {} };
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-keystore-'));
+    sdk = { sdkPath: path.join(tmp, 'sdk'), installRoot: tmp };
+    const lib = path.join(sdk.sdkPath, 'default', 'openharmony', 'toolchains', 'lib');
+    fs.mkdirSync(lib, { recursive: true });
+    fs.writeFileSync(path.join(lib, 'hap-sign-tool.jar'), '');
+    // A `java` that logs its argv, writes any -outFile, and fails when asked to.
+    const bin = path.join(tmp, 'jdk', 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(
+      path.join(bin, 'java'),
+      [
+        '#!/bin/sh',
+        `echo "$*" >> "${tmp}/argv.log"`,
+        '[ -n "$FAKE_JAVA_FAIL" ] && { echo "keytool error: boom" >&2; exit 3; }',
+        'prev=""; for a in "$@"; do [ "$prev" = "-outFile" ] && printf "CSR-CONTENT" > "$a"; prev="$a"; done',
+        'exit 0',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    vi.stubEnv('JAVA_HOME', path.join(tmp, 'jdk'));
+    debug.length = 0;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const generate = () =>
+    generateKeystoreAndCsr({
+      sdk,
+      p12Path: path.join(tmp, 'material', 'app.p12'),
+      csrPath: path.join(tmp, 'material', 'app.csr'),
+      logger,
+    });
+
+  it("generates an ECC key pair and a CSR with the SDK's hap-sign-tool, under a random password", async () => {
+    const { keyPwd, csr } = await generate();
+    expect(csr).toBe('CSR-CONTENT');
+    expect(keyPwd).toMatch(/^[A-Za-z0-9]{12,}$/);
+    await expect(generate()).resolves.not.toMatchObject({ keyPwd });
+
+    const jar = path.join(sdk.sdkPath, 'default', 'openharmony', 'toolchains', 'lib', 'hap-sign-tool.jar');
+    const store = `-keyAlias debugKey -keystoreFile ${path.join(tmp, 'material', 'app.p12')} -keystorePwd ${keyPwd} -keyPwd ${keyPwd}`;
+    expect(fs.readFileSync(path.join(tmp, 'argv.log'), 'utf8').split('\n').slice(0, 2)).toEqual([
+      `-jar ${jar} generate-keypair -keyAlg ECC -keySize NIST-P-256 ${store}`,
+      `-jar ${jar} generate-csr -subject CN=DebugKey -signAlg SHA256withECDSA -outFile ${path.join(tmp, 'material', 'app.csr')} ${store}`,
+    ]);
+    // The password is never logged.
+    expect(debug.length).toBeGreaterThan(0);
+    expect(debug.join('\n')).not.toContain(keyPwd);
+  });
+
+  it("reports hap-sign-tool's own error", async () => {
+    vi.stubEnv('FAKE_JAVA_FAIL', '1');
+    await expect(generate()).rejects.toThrow(/hap-sign-tool failed to generate the key pair \(exit 3\)\.\nkeytool error: boom/);
+  });
+
+  it('names an SDK without hap-sign-tool as incomplete', async () => {
+    fs.rmSync(sdk.sdkPath, { recursive: true });
+    await expect(generate()).rejects.toThrow(/hap-sign-tool\.jar not found .* looks incomplete/);
   });
 });
 
@@ -201,13 +305,25 @@ describe('keystore and certificate agreement', () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     });
 
-    const verify = (cer: string, issuedFor: string) => {
+    const verify = (cer: string, issuedFor: string, now?: Date, cerContent = pem(cer)) => {
       const cerPath = path.join(tmp, 'x.cer');
       const profilePath = path.join(tmp, 'x.p7b');
-      fs.writeFileSync(cerPath, pem(cer));
+      fs.writeFileSync(cerPath, cerContent);
       fs.writeFileSync(profilePath, fakeProfile({ 'bundle-info': { 'development-certificate': pem(issuedFor) } }));
-      verifySigningMaterial({ profilePath, cerPath, p12Path: P12, keyAlias: 'debugKey', keyPwd: P12_PWD });
+      verifySigningMaterial({ profilePath, cerPath, p12Path: P12, keyAlias: 'debugKey', keyPwd: P12_PWD, now });
     };
+
+    it('names a certificate outside its validity window', () => {
+      const { validFrom, validTo } = new X509Certificate(pem('debug'));
+      expect(() => verify('debug', 'debug', new Date(Date.parse(validFrom) - 1000))).toThrow(SIGNING_ERRORS.CERT_EXPIRED);
+      expect(() => verify('debug', 'debug', new Date(Date.parse(validTo) + 1000))).toThrow(SIGNING_ERRORS.CERT_EXPIRED);
+    });
+
+    it('names a certificate file that holds no usable certificate', () => {
+      expect(() => verify('debug', 'debug', undefined, 'not a certificate')).toThrow(SIGNING_ERRORS.CERT_INVALID);
+      const garbled = '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n';
+      expect(() => verify('debug', 'debug', undefined, garbled)).toThrow(SIGNING_ERRORS.CERT_INVALID);
+    });
 
     it('accepts agreeing material', () => {
       expect(() => verify('debug', 'debug')).not.toThrow();
