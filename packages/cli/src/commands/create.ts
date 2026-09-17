@@ -22,7 +22,7 @@ interface CreateOpts {
 export function registerCreateCommand(program: Command): void {
   program
     .command('create')
-    .description('Scaffold a new Oniro/OpenHarmony app from a template. All flags are required (non-interactive).')
+    .description('Scaffold a new Oniro/OpenHarmony or HarmonyOS app from a template. All flags are required (non-interactive).')
     .requiredOption('--name <name>', 'Project folder name (letters, digits, ._- only)')
     .requiredOption('--bundle <bundleName>', 'Bundle name in reverse-DNS form, e.g. com.example.myapp')
     .requiredOption('--location <dir>', 'Parent directory where the new project folder will be created')
