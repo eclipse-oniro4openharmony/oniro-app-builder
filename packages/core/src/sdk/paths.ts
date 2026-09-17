@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ConfigProvider, defaultPaths } from '../ports/config.js';
 import { getOsFolder } from './platform.js';
+import { findHarmonyOsSdk } from '../harmonyos/sdk.js';
 
 export function getSdkRootDir(config: ConfigProvider): string {
   return config.get('sdkRootDir', defaultPaths.sdkRootDir());
@@ -91,7 +92,17 @@ export function getOhpmPath(config: ConfigProvider): string {
 export function getHdcPath(config: ConfigProvider): string {
   const override = config.get('hdcPath', '');
   if (override) return override;
-  const base = path.join(getCmdToolsPath(config), 'sdk', 'default', 'openharmony', 'toolchains');
+  const hdc = hdcInSdk(path.join(getCmdToolsPath(config), 'sdk'));
+  if (fs.existsSync(hdc)) return hdc;
+  // A HarmonyOS-only machine has no OpenHarmony command-line tools; the HarmonyOS
+  // SDK ships an hdc of its own, at the same place inside the SDK.
+  const harmonySdk = findHarmonyOsSdk({ config });
+  const harmonyHdc = harmonySdk ? hdcInSdk(harmonySdk.sdkPath) : undefined;
+  return harmonyHdc && fs.existsSync(harmonyHdc) ? harmonyHdc : hdc;
+}
+
+function hdcInSdk(sdkDir: string): string {
+  const base = path.join(sdkDir, 'default', 'openharmony', 'toolchains');
   if (os.platform() === 'win32') {
     return pickExisting([
       path.join(base, 'hdc.exe'),

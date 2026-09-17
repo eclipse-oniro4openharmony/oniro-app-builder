@@ -265,6 +265,39 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `decideInstallMethod` / `decideReboot` | — | The pure (tested) decision functions behind `applyChanges`. |
 | `diffHapAssets` / `diffEntryNames` | — | Diff two HAP archives' file manifests (drives the cache-invalidation reboot). |
 
+### HarmonyOS
+
+HarmonyOS support is additive: a project is HarmonyOS only when its product declares
+`runtimeOS: "HarmonyOS"`, and every OpenHarmony API behaves as before. `buildHap`,
+`runHvigorw` and `createScaffold` pick the HarmonyOS SDK for such projects themselves.
+
+| Export | Description |
+| --- | --- |
+| `detectRuntimeOs(projectDir, productName?)` | `'HarmonyOS'` or `'OpenHarmony'`, from `build-profile.json5`. |
+| `findHarmonyOsSdk({ config, logger? })` / `requireHarmonyOsSdk(...)` | Locate a HarmonyOS SDK (`harmonyosSdkPath`, then DevEco Studio's default location, then `cmdToolsPath` when it is the HarmonyOS edition), with its release as `version`, e.g. `6.1.1(24)`; `null` or an actionable error when there is none. |
+| `harmonyOsSdkLabelForApi(api)`, `HARMONYOS_SDK_VERSIONS` | The `"<version>(<api>)"` label HarmonyOS products declare. |
+| `createHarmonyOsSession(opts)` | `login` / `logout` / `getUserInfo` / `listTeams` / `resolveAgcAuth` / `getDeveloperAgreement` for a Huawei developer account. The token is stored encrypted, with the account's region. |
+| `harmonyOsAutoSign(opts)` | Keystore + CSR → AGC debug certificate → device registration → debug profile → `build-profile.json5`, reusing still-valid material. |
+| `readProvisionProfile(path)` | Bundle name, team, expiry, devices and ACLs of a `.p7b`. |
+| `HUAWEI_SITES` | Each region's sign-in and AppGallery Connect hosts. |
+
+```ts
+import { createHarmonyOsSession, harmonyOsAutoSign, staticConfig } from '@oniroproject/core';
+
+const config = staticConfig();
+const session = createHarmonyOsSession({ config, onLoginUrl: (url) => console.log(url) });
+if (!(await session.getUserInfo())) await session.login();
+
+const result = await harmonyOsAutoSign({ config, session, projectDir: '/path/to/project' });
+console.log(result.paths.profilePath, result.deviceIds);
+```
+
+Signing calls private, undocumented AppGallery Connect APIs, and needs a Huawei developer
+account that is real-name verified or has accepted the HUAWEI Developer Basic Service
+Agreement. Accounts from every region work: calls go to the account's own region, as in
+DevEco Studio. Parts of this subtree are adapted from the MIT-licensed
+`openharmony-sig/deveco-cli`; see [`src/harmonyos/NOTICE.md`](src/harmonyos/NOTICE.md).
+
 ## Conventions
 
 - **Configuration.** Pass a `ConfigProvider`. `staticConfig({...})` is the quick path; a frontend can read settings, env vars, etc. Unset keys fall back to `defaultPaths`.

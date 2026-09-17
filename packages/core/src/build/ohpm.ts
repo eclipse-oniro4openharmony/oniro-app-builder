@@ -9,6 +9,11 @@ export interface RunOhpmOptions {
   config: ConfigProvider;
   projectDir: string;
   args: readonly string[];
+  /**
+   * Explicit ohpm binary. HarmonyOS projects pass the one from their own install;
+   * when omitted the OpenHarmony command-line tools' ohpm is used.
+   */
+  ohpmPath?: string;
   timeoutMs?: number;
   abortSignal?: AbortSignal;
   onOutput?: OutputSink;
@@ -18,7 +23,7 @@ export interface RunOhpmOptions {
 /** Run `ohpm <args>` in the project directory. Resolves with the raw result (any exit code). */
 export function runOhpm(opts: RunOhpmOptions): Promise<HdcExecResult> {
   return runProcess({
-    command: getOhpmPath(opts.config),
+    command: opts.ohpmPath ?? getOhpmPath(opts.config),
     args: [...opts.args],
     cwd: opts.projectDir,
     timeoutMs: opts.timeoutMs ?? 600_000,
@@ -36,6 +41,8 @@ export function runOhpm(opts: RunOhpmOptions): Promise<HdcExecResult> {
 export async function ensureOhModules(opts: {
   config: ConfigProvider;
   projectDir: string;
+  /** See {@link RunOhpmOptions.ohpmPath}. */
+  ohpmPath?: string;
   abortSignal?: AbortSignal;
   onOutput?: OutputSink;
   logger?: Logger;
@@ -46,6 +53,7 @@ export async function ensureOhModules(opts: {
   const res = await runOhpm({
     config: opts.config,
     projectDir: opts.projectDir,
+    ohpmPath: opts.ohpmPath,
     args: ['install', '--all'],
     abortSignal: opts.abortSignal,
     onOutput: opts.onOutput,

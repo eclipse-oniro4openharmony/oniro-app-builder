@@ -7,6 +7,8 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { CancelledError, CmdToolsNotInstalledError, OniroError } from '../ports/errors.js';
 import { getHvigorwPath, getOhosBaseSdkHome, getCmdToolsPath, toLongPath } from '../sdk/paths.js';
+import { detectRuntimeOs } from '../harmonyos/target.js';
+import { findHarmonyOsTool, requireHarmonyOsSdk } from '../harmonyos/sdk.js';
 
 export interface RunHvigorwOptions {
   config: ConfigProvider;
@@ -76,11 +78,25 @@ export function runHvigorw(opts: RunHvigorwOptions): Promise<RunHvigorwResult> {
   if (!fs.existsSync(path.join(projectDir, 'build-profile.json5'))) {
     throw new OniroError(`Not an OpenHarmony project: ${projectDir} (build-profile.json5 not found).`);
   }
-  if (!fs.existsSync(getCmdToolsPath(config))) {
-    throw new CmdToolsNotInstalledError(getCmdToolsPath(config));
+
+  let hvigorw: string;
+  let sdkEnv: NodeJS.ProcessEnv;
+  if (detectRuntimeOs(projectDir, opts.product) === 'HarmonyOS') {
+    // Nothing comes from the OpenHarmony command-line tools: the SDK is passed as
+    // DEVECO_SDK_HOME, and hvigorw is the project's own or the HarmonyOS install's.
+    const sdk = requireHarmonyOsSdk({ config, logger });
+    sdkEnv = { DEVECO_SDK_HOME: sdk.sdkPath };
+    const resolved = getHvigorwPath(config, projectDir);
+    hvigorw = resolved.startsWith(projectDir) ? resolved : (findHarmonyOsTool(sdk, 'hvigorw') ?? resolved);
+    logger.info(`[build] Building for HarmonyOS against the SDK at ${sdk.sdkPath}.`);
+  } else {
+    if (!fs.existsSync(getCmdToolsPath(config))) {
+      throw new CmdToolsNotInstalledError(getCmdToolsPath(config));
+    }
+    sdkEnv = { OHOS_BASE_SDK_HOME: getOhosBaseSdkHome(config) };
+    hvigorw = getHvigorwPath(config, projectDir);
   }
 
-  const hvigorw = getHvigorwPath(config, projectDir);
   if (!fs.existsSync(hvigorw)) {
     throw new OniroError(`hvigorw wrapper not found at ${hvigorw}.`);
   }
@@ -91,10 +107,7 @@ export function runHvigorw(opts: RunHvigorwOptions): Promise<RunHvigorwResult> {
     try { fs.chmodSync(hvigorw, 0o755); } catch { /* best effort */ }
   }
 
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    OHOS_BASE_SDK_HOME: getOhosBaseSdkHome(config),
-  };
+  const env: NodeJS.ProcessEnv = { ...process.env, ...sdkEnv };
 
   return new Promise((resolve, reject) => {
     if (opts.abortSignal?.aborted) {
