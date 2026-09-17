@@ -3,7 +3,7 @@
  * (`src/utils/http-client.ts`), Copyright (c) 2026 Huawei Device Co., Ltd.,
  * licensed under the MIT License. See packages/core/src/harmonyos/NOTICE.md.
  */
-import { ProxyAgent, type Dispatcher } from 'undici';
+import { EnvHttpProxyAgent, fetch, type Response } from 'undici';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
@@ -49,35 +49,6 @@ export interface HarmonyOsHttpClient {
   getBinary(url: string, opts?: HttpRequestOptions): Promise<Buffer>;
 }
 
-/**
- * The proxy for `url` from the standard environment variables, honouring
- * NO_PROXY. Node's fetch ignores them.
- *
- * @internal exposed for tests.
- */
-export function proxyForUrl(url: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return undefined;
-  }
-
-  const noProxy = env.NO_PROXY ?? env.no_proxy ?? '';
-  if (noProxy.trim() === '*') return undefined;
-  const host = parsed.hostname.toLowerCase();
-  for (const raw of noProxy.split(',')) {
-    const entry = raw.trim().toLowerCase().replace(/^\./, '');
-    if (entry && (host === entry || host.endsWith(`.${entry}`))) return undefined;
-  }
-
-  const proxy =
-    parsed.protocol === 'https:'
-      ? env.HTTPS_PROXY ?? env.https_proxy ?? env.HTTP_PROXY ?? env.http_proxy
-      : env.HTTP_PROXY ?? env.http_proxy;
-  return proxy?.trim() || undefined;
-}
-
 /** Query parameters that carry credentials for the user's Huawei account. */
 const SENSITIVE_PARAMS = new Set(['temptoken', 'jwttoken', 'code', 'oauth2token', 'accesstoken']);
 
@@ -119,20 +90,6 @@ export function describeResponse(response: HttpResponse): string {
   return `${status}: ${previewBody(response.data)}`;
 }
 
-/** One ProxyAgent per proxy URL: each keeps a connection pool. */
-const proxyAgents = new Map<string, ProxyAgent>();
-
-function dispatcherFor(url: string): Dispatcher | undefined {
-  const proxy = proxyForUrl(url);
-  if (!proxy) return undefined;
-  let agent = proxyAgents.get(proxy);
-  if (!agent) {
-    agent = new ProxyAgent(proxy);
-    proxyAgents.set(proxy, agent);
-  }
-  return agent;
-}
-
 function buildUrl(url: string, query?: Record<string, unknown>): string {
   if (!query) return url;
   const parsed = new URL(url);
@@ -145,6 +102,8 @@ function buildUrl(url: string, query?: Record<string, unknown>): string {
 /** The HTTP client for the HarmonyOS auth and signing flows. */
 export function createHttpClient(opts: { logger?: Logger } = {}): HarmonyOsHttpClient {
   const logger = opts.logger ?? noopLogger;
+  // Node's own fetch ignores HTTPS_PROXY / HTTP_PROXY / NO_PROXY; this agent honours them.
+  const dispatcher = new EnvHttpProxyAgent();
 
   async function send(method: string, url: string, options: HttpRequestOptions): Promise<Response> {
     const target = buildUrl(url, options.query);
@@ -164,8 +123,8 @@ export function createHttpClient(opts: { logger?: Logger } = {}): HarmonyOsHttpC
         headers,
         body,
         signal: AbortSignal.timeout(timeoutMs),
-        dispatcher: dispatcherFor(target),
-      } as RequestInit & { dispatcher?: Dispatcher });
+        dispatcher,
+      });
     } catch (err) {
       const reason =
         err instanceof Error && err.name === 'TimeoutError'

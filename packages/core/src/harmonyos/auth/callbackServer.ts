@@ -21,7 +21,7 @@ const MAX_BODY_BYTES = 65_536;
 export interface CallbackServer {
   /** Port the loopback listener bound to. Handed to the login page as `?port=`. */
   readonly port: number;
-  /** Resolves when the browser redirects back with a temp token. */
+  /** Resolves with the browser's callback, including one that arrived before this was called. */
   waitForCallback(timeoutMs: number): Promise<LoginCallback>;
   stop(): Promise<void>;
 }
@@ -59,8 +59,16 @@ export interface StartCallbackServerOptions {
 export async function startCallbackServer(
   opts: StartCallbackServerOptions,
 ): Promise<CallbackServer> {
-  let resolveCallback: ((value: LoginCallback) => void) | null = null;
-  let rejectCallback: ((reason: Error) => void) | null = null;
+  // Settled by the first valid callback, whenever it arrives: the browser can come
+  // back before anyone is waiting for it.
+  let resolveCallback!: (value: LoginCallback) => void;
+  let rejectCallback!: (reason: Error) => void;
+  const callback = new Promise<LoginCallback>((resolve, reject) => {
+    resolveCallback = resolve;
+    rejectCallback = reject;
+  });
+  // A cancellation nobody waits for yet must not surface as an unhandled rejection.
+  callback.catch(() => {});
 
   const server = http.createServer((req, res) => {
     // Reject requests that did not address us by our own loopback authority —
@@ -89,7 +97,7 @@ export async function startCallbackServer(
       if (isQuit(params.get('quit'))) {
         res.writeHead(302, { Location: `${opts.baseUrl}/${opts.failedPath}` });
         res.end();
-        rejectCallback?.(new CancelledError('Login was cancelled in the browser.'));
+        rejectCallback(new CancelledError('Login was cancelled in the browser.'));
         return;
       }
       const tempToken = params.get('tempToken');
@@ -101,7 +109,7 @@ export async function startCallbackServer(
       }
       res.writeHead(302, { Location: `${opts.baseUrl}/${opts.successPath}` });
       res.end();
-      resolveCallback?.({ tempToken, siteId });
+      resolveCallback({ tempToken, siteId });
     };
 
     if (req.method === 'POST') {
@@ -135,19 +143,14 @@ export async function startCallbackServer(
     port,
 
     waitForCallback(timeoutMs: number): Promise<LoginCallback> {
-      return new Promise<LoginCallback>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          reject(new OniroError(`Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the browser login to complete.`));
-        }, timeoutMs);
-        resolveCallback = (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        };
-        rejectCallback = (reason) => {
-          clearTimeout(timer);
-          reject(reason);
-        };
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new OniroError(`Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the browser login to complete.`)),
+          timeoutMs,
+        );
       });
+      return Promise.race([callback, timeout]).finally(() => clearTimeout(timer));
     },
 
     stop(): Promise<void> {

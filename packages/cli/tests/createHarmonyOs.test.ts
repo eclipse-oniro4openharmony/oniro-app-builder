@@ -90,7 +90,23 @@ describe('HarmonyOSApp template', () => {
 
   it('fails before creating anything for an API level with no known HarmonyOS release', async () => {
     await expect(scaffold({ sdkApi: 99 })).rejects.toThrow(/No HarmonyOS release is known for API 99/);
+    await expect(scaffold({ sdkApi: 98, installed: '6.1.1(24)' })).rejects.toThrow(/and the installed SDK's 6\.1\.1\(24\)\./);
     expect(fs.existsSync(path.join(location, 'HarmonyDemo'))).toBe(false);
+  });
+
+  it('warns, without failing, when no HarmonyOS SDK is installed to build with', async () => {
+    const warnings: string[] = [];
+    const logger: Logger = { debug() {}, info() {}, warn: (m) => warnings.push(m), error() {} };
+    await scaffold({ sdkApi: 24, logger });
+    expect(warnings).toEqual([expect.stringContaining('No HarmonyOS SDK found; set ONIRO_HARMONYOS_SDK_PATH')]);
+  });
+
+  it('stays quiet when the installed SDK is the requested release', async () => {
+    const warnings: string[] = [];
+    const logger: Logger = { debug() {}, info() {}, warn: (m) => warnings.push(m), error() {} };
+    const { projectDir } = await scaffold({ sdkApi: 24, installed: '6.1.1(24)', logger });
+    expect(readProfile(projectDir).app.products[0]!.compileSdkVersion).toBe('6.1.1(24)');
+    expect(warnings).toEqual([]);
   });
 
   it('produces a project detected as HarmonyOS', async () => {

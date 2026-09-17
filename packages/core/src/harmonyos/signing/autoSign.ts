@@ -19,7 +19,7 @@ import { createHttpClient, type HarmonyOsHttpClient } from '../http.js';
 import { requireHarmonyOsSdk } from '../sdk.js';
 import type { HarmonyOsSession } from '../auth/session.js';
 import { createAgcClient } from './agc.js';
-import { registerDevices } from './devices.js';
+import { collectLocalDevices, registerDevices } from './devices.js';
 import { AgcError, SIGNING_ERRORS } from './errors.js';
 import { KEY_ALIAS, SIGN_ALG, generateKeystoreAndCsr } from './keystore.js';
 import { resolveSigningMaterialPaths, type SigningMaterialPaths } from './paths.js';
@@ -165,12 +165,11 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
 
   const sdk = requireHarmonyOsSdk({ config: opts.config, logger });
   const auth = await opts.session.resolveAgcAuth({ teamId: opts.teamId });
-  const agc = createAgcClient(opts.http ?? createHttpClient({ logger }), auth);
   const aclPermissions = collectAclPermissions(projectDir, logger);
   const paths = resolveSigningMaterialPaths(opts.config, productName, projectDir);
   logger.info(`[harmonyos] Signing ${bundleName} (product '${productName}', team ${auth.teamId}).`);
 
-  const { deviceIds, connectedUdids } = await registerDevices(agc, opts.config, logger);
+  const connected = await collectLocalDevices(opts.config, logger);
   const result = (regenerated: boolean): HarmonyOsSigningResult => ({
     bundleName,
     teamId: auth.teamId,
@@ -185,7 +184,7 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
     productName,
     bundleName,
     teamId: auth.teamId,
-    connectedUdids,
+    connectedUdids: connected.map((d) => d.udid),
     aclPermissions,
     force: opts.force,
   });
@@ -194,6 +193,10 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
     return result(false);
   }
   logger.info(`[harmonyos] Regenerating signing material: ${reason}.`);
+
+  // Before anything is deleted: a profile must name at least one device.
+  const agc = createAgcClient(opts.http ?? createHttpClient({ logger }), auth);
+  const deviceIds = await registerDevices(agc, connected, logger);
   for (const file of Object.values(paths)) fs.rmSync(file, { force: true });
 
   // AGC will not issue a second certificate under one name, so ours is replaced.

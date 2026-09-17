@@ -54,7 +54,11 @@ two are independent implementations of the same DevEco Studio on-disk format.
 
 - Singletons are replaced by explicit factories taking a `ConfigProvider` and
   `Logger`, so core stays frontend-agnostic and testable.
-- `axios` + `proxy-from-env` are replaced by `fetch` + `undici`'s `ProxyAgent`.
+- `axios` + `proxy-from-env` are replaced by `undici`'s `fetch` and
+  `EnvHttpProxyAgent`, which honours `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`.
+- The stored token is encrypted directly with a key kept outside the auth
+  directory, with no separately wrapped data key: every key lives on the same
+  disk, so a second layer would protect nothing the first does not.
 - Device enumeration reuses this package's `hdc` layer instead of shelling out
   through `execa`.
 - Telemetry is not ported. oniro-app does not report usage.

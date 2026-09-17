@@ -34,7 +34,7 @@
     "node-forge": "^1.4.0",
     "node-stream-zip": "^1.15.0",
     "tar": "^7.4.3",
-    "undici": "^8.10.2"
+    "undici": "^7.29.1"
   },
   "devDependencies": {
     "@types/follow-redirects": "^1.14.4",

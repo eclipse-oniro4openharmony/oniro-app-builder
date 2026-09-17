@@ -18,8 +18,7 @@ const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32;
 const IV_LENGTH = 12;
 const TOKEN_FILE = 'token.enc';
-const WRAPPED_DEK_FILE = 'token.dek';
-const KEK_FILE = 'kek.bin';
+const KEY_FILE = 'kek.bin';
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
@@ -29,20 +28,9 @@ interface EncryptedBlob {
   ciphertext: string;
   iv: string;
   authTag: string;
-  timestamp: number;
 }
 
-/**
- * Envelope encryption for the account token at rest.
- *
- * The token is encrypted with a random data key (DEK); the DEK is itself
- * encrypted with a key-encryption key (KEK) kept in a *different* directory.
- * Both halves live on the same disk, so this is defence against a stray copy of
- * one directory — a config-dir backup, a synced dotfile repo — not against a
- * local attacker who can read the user's whole home. Treat the token as a
- * credential regardless.
- */
-function encryptWith(key: Buffer, plaintext: Buffer): EncryptedBlob {
+function encrypt(key: Buffer, plaintext: Buffer): EncryptedBlob {
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -52,17 +40,13 @@ function encryptWith(key: Buffer, plaintext: Buffer): EncryptedBlob {
     ciphertext: ciphertext.toString('base64'),
     iv: iv.toString('base64'),
     authTag: cipher.getAuthTag().toString('base64'),
-    timestamp: Date.now(),
   };
 }
 
-function decryptWith(key: Buffer, blob: EncryptedBlob): Buffer {
+function decrypt(key: Buffer, blob: EncryptedBlob): Buffer {
   const decipher = crypto.createDecipheriv(ALGORITHM, key, Buffer.from(blob.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(blob.authTag, 'base64'));
-  return Buffer.concat([
-    decipher.update(Buffer.from(blob.ciphertext, 'base64')),
-    decipher.final(),
-  ]);
+  return Buffer.concat([decipher.update(Buffer.from(blob.ciphertext, 'base64')), decipher.final()]);
 }
 
 function isEncryptedBlob(value: unknown): value is EncryptedBlob {
@@ -83,7 +67,6 @@ function permissionHint(dir: string): string {
 }
 
 function ensureDir(dir: string): void {
-  if (fs.existsSync(dir)) return;
   try {
     fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   } catch (err) {
@@ -120,48 +103,28 @@ export interface CreateTokenStoreOptions {
 /**
  * Persist the Huawei account JWT under the configured auth directory
  * (`ONIRO_HARMONYOS_AUTH_DIR`, default `~/.oniro/harmonyos`).
+ *
+ * The token is encrypted with a random key kept in a *different* directory, so a
+ * stray copy of one of them — a config-dir backup, a synced dotfile repo — does not
+ * yield the token. Both live on the same disk, so this is no defence against a local
+ * attacker who can read the user's whole home. Treat the token as a credential.
  */
 export function createTokenStore(opts: CreateTokenStoreOptions): TokenStore {
   const logger = opts.logger ?? noopLogger;
   const authDir = opts.config.get('harmonyosAuthDir', defaultPaths.harmonyosAuthDir());
   const tokenPath = path.join(authDir, TOKEN_FILE);
-  const wrappedDekPath = path.join(authDir, WRAPPED_DEK_FILE);
-  // Deliberately outside the auth dir, so the two halves are not backed up together.
-  const kekPath = path.join(os.homedir(), '.local', 'share', 'oniro-app', 'keys', KEK_FILE);
+  const keyPath = path.join(os.homedir(), '.local', 'share', 'oniro-app', 'keys', KEY_FILE);
 
-  function loadOrCreateKek(): Buffer {
-    ensureDir(path.dirname(kekPath));
-    if (fs.existsSync(kekPath)) {
-      const existing = fs.readFileSync(kekPath);
+  function loadOrCreateKey(): Buffer {
+    if (fs.existsSync(keyPath)) {
+      const existing = fs.readFileSync(keyPath);
       if (existing.length === KEY_LENGTH) return existing;
-      logger.warn('[harmonyos] KEK file was malformed; regenerating (you will need to log in again).');
+      logger.warn('[harmonyos] The token key file was malformed; regenerating (you will need to log in again).');
     }
-    const kek = crypto.randomBytes(KEY_LENGTH);
-    fs.writeFileSync(kekPath, kek, { mode: FILE_MODE });
-    return kek;
-  }
-
-  function loadOrCreateDek(): Buffer {
-    const kek = loadOrCreateKek();
-    if (fs.existsSync(wrappedDekPath)) {
-      try {
-        const wrapped: unknown = JSON.parse(fs.readFileSync(wrappedDekPath, 'utf8'));
-        if (isEncryptedBlob(wrapped)) {
-          const dek = decryptWith(kek, wrapped);
-          if (dek.length === KEY_LENGTH) return dek;
-        }
-      } catch {
-        // A DEK we cannot unwrap is as good as absent: fall through and mint a new
-        // one. The token encrypted under the old DEK becomes unreadable, which
-        // `load()` reports as "not logged in".
-      }
-    }
-    const dek = crypto.randomBytes(KEY_LENGTH);
-    ensureDir(authDir);
-    fs.writeFileSync(wrappedDekPath, JSON.stringify(encryptWith(kek, dek), null, 2), {
-      mode: FILE_MODE,
-    });
-    return dek;
+    ensureDir(path.dirname(keyPath));
+    const key = crypto.randomBytes(KEY_LENGTH);
+    fs.writeFileSync(keyPath, key, { mode: FILE_MODE });
+    return key;
   }
 
   return {
@@ -169,12 +132,10 @@ export function createTokenStore(opts: CreateTokenStoreOptions): TokenStore {
 
     save(session: StoredSession): void {
       if (!session.jwtToken) throw new OniroError('Refusing to store an empty token.');
-      const dek = loadOrCreateDek();
-      ensureDir(authDir);
       const payload = Buffer.from(JSON.stringify(session), 'utf8');
-      fs.writeFileSync(tokenPath, JSON.stringify(encryptWith(dek, payload), null, 2), {
-        mode: FILE_MODE,
-      });
+      const blob = encrypt(loadOrCreateKey(), payload);
+      ensureDir(authDir);
+      fs.writeFileSync(tokenPath, JSON.stringify(blob, null, 2), { mode: FILE_MODE });
     },
 
     load(): StoredSession | null {
@@ -182,7 +143,7 @@ export function createTokenStore(opts: CreateTokenStoreOptions): TokenStore {
       try {
         const blob: unknown = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
         if (!isEncryptedBlob(blob)) return null;
-        const { jwtToken, siteId } = JSON.parse(decryptWith(loadOrCreateDek(), blob).toString('utf8')) as Partial<StoredSession>;
+        const { jwtToken, siteId } = JSON.parse(decrypt(loadOrCreateKey(), blob).toString('utf8')) as Partial<StoredSession>;
         return typeof jwtToken === 'string' && jwtToken && typeof siteId === 'string' ? { jwtToken, siteId } : null;
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
@@ -204,12 +165,10 @@ export function createTokenStore(opts: CreateTokenStoreOptions): TokenStore {
     },
 
     clear(): void {
-      for (const file of [tokenPath, wrappedDekPath]) {
-        try {
-          fs.rmSync(file, { force: true });
-        } catch (err) {
-          throw new OniroError(`Failed to remove ${file}.`, err);
-        }
+      try {
+        fs.rmSync(tokenPath, { force: true });
+      } catch (err) {
+        throw new OniroError(`Failed to remove ${tokenPath}.`, err);
       }
     },
   };
