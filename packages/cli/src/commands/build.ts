@@ -16,7 +16,10 @@ interface BuildOpts {
 export function registerBuildCommand(program: Command): void {
   program
     .command('build [project-dir]')
-    .description('Build an OpenHarmony app via hvigorw. Defaults to the current directory.')
+    .description(
+      'Build an OpenHarmony or HarmonyOS app via hvigorw. Defaults to the current directory. ' +
+        'Projects declaring runtimeOS "HarmonyOS" build against the HarmonyOS SDK (ONIRO_HARMONYOS_SDK_PATH or an installed DevEco Studio).',
+    )
     .option('--product <product>', 'hvigor product name', 'default')
     .option('--module <module>', 'restrict the build to a specific module')
     .option('--mode <mode>', 'hvigor build mode (e.g. release, debug)')

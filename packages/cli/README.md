@@ -103,7 +103,7 @@ All flags are required except where a default is shown (non-interactive). On suc
 | `--bundle <bundleName>` | Bundle name in reverse-DNS form, e.g. `com.example.myapp`. |
 | `--location <dir>` | Parent directory the new project folder is created in. |
 | `--sdk <api>` | Target SDK API level (e.g. `18`, `20`). |
-| `--template <id>` | Template id (default `EmptyAbility`). |
+| `--template <id>` | Template id (default `EmptyAbility`; `HarmonyOSApp` targets HarmonyOS). |
 | `--module <name>` | Module folder name (defaults to the template default, usually `entry`). |
 | `--overwrite` | Replace the destination if it already exists. |
 
@@ -112,6 +112,17 @@ All flags are required except where a default is shown (non-interactive). On suc
 | Command | Description |
 | --- | --- |
 | `templates list [--json]` | List the project templates shipped with the CLI. |
+
+#### `auth` — sign in to a Huawei developer account
+
+Only needed for HarmonyOS signing; see [HarmonyOS apps](#harmonyos-apps).
+
+| Command | Description |
+| --- | --- |
+| `auth login [--timeout <s>]` | Sign in via the browser (default timeout 600s). |
+| `auth logout` | Delete the locally stored token. |
+| `auth status [--json]` | Show the signed-in account; exits non-zero when signed out. |
+| `auth team list [--json]` | List AGC teams. |
 
 #### `sign` — generate signing keys, certs, and `signingConfigs`
 
@@ -123,6 +134,10 @@ All flags are required except where a default is shown (non-interactive). On suc
 | `--app-feature <feature>` | `hos_normal_app` or `hos_system_app`. Defaults follow `--apl`. |
 | `--acls <list>` | Comma-separated permissions to write into the profile's `acls.allowed-acls`. |
 | `--bootstrap` | No-op if signing material is already present; otherwise generate it. |
+| `--harmonyos` | Sign a HarmonyOS project via AppGallery Connect instead of the offline flow. See [HarmonyOS apps](#harmonyos-apps). |
+| `--team-id <id>` | With `--harmonyos`: AGC team to sign under. |
+| `--product <name>` | With `--harmonyos`: product to sign (default `default`). |
+| `--force` | With `--harmonyos`: regenerate even when the existing material is still valid. |
 | `--store-password <pwd>` / `--key-password <pwd>` | Keystore passwords (default `123456`, the SDK keystore password). |
 
 #### `build` — build the app via `hvigorw`
@@ -300,6 +315,9 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 | `ONIRO_EMULATOR_URL` | Latest `oniro_emulator.zip` | Emulator download URL |
 | `ONIRO_TMP_DIR` | `<install root>/.oniro-tmp` | Scratch directory for download/extract temporaries (see [Temporary space](#temporary-space)) |
 | `ONIRO_APPLICATION_CERT_PATH` | (unset) | External application-cert chain to use when signing system apps |
+| `ONIRO_HARMONYOS_SDK_PATH` | autodetected | HarmonyOS SDK: a DevEco Studio or HarmonyOS command-line-tools install, or its `sdk` directory |
+| `ONIRO_HARMONYOS_AUTH_DIR` | `~/.oniro/harmonyos` | Where the encrypted Huawei account token is stored |
+| `ONIRO_HARMONYOS_SIGNING_DIR` | `~/.ohos/config` | Where generated HarmonyOS signing material (p12/csr/cer/p7b) is written |
 | `ONIRO_DEBUG` | (unset) | Set to `1` for full stack traces on error |
 
 ### Temporary space
@@ -331,6 +349,103 @@ it needed, whether that directory is RAM-backed, and this flag — rather than c
 through.
 
 **Command-line tools on Windows / macOS.** The Huawei mirror only publishes a Linux build of the command-line tools. On Windows and macOS you must either download the ZIP manually from the Huawei developer portal and install it with `oniro-app cmdtools install --from-zip path/to/commandline-tools-<platform>.zip`, or host the archive yourself and set `ONIRO_CMD_TOOLS_URL_WINDOWS` / `ONIRO_CMD_TOOLS_URL_MAC` so `cmdtools install` can fetch it.
+
+## HarmonyOS apps
+
+`oniro-app` builds and signs **HarmonyOS** projects as well as OpenHarmony ones. A project
+is HarmonyOS when its product declares `runtimeOS: "HarmonyOS"` in `build-profile.json5`, as
+DevEco Studio writes; every other project is OpenHarmony and behaves exactly as before.
+
+The two paths differ in one way that matters:
+
+| | OpenHarmony | HarmonyOS |
+| --- | --- | --- |
+| SDK | `oniro-app sdk install` downloads it | Ships inside DevEco Studio or the HarmonyOS command-line tools. Found automatically in Studio's default location or at the command-line-tools path; otherwise set `ONIRO_HARMONYOS_SDK_PATH` |
+| Signing | `oniro-app sign` — fully offline, uses the SDK's development certificate | `oniro-app sign --harmonyos` — AppGallery Connect issues the certificate and profile |
+| Account | none | a Huawei developer account (`oniro-app auth login`) |
+| Network | none | required |
+| Device | not required | one registered to the AGC team — a debug profile names the devices it is valid for |
+
+### Workflow
+
+```bash
+oniro-app auth login                       # once per machine
+oniro-app create --name MyApp --bundle com.example.myapp \
+                 --location ~/projects --sdk 24 --template HarmonyOSApp
+cd ~/projects/MyApp
+oniro-app sign --harmonyos                 # registers any connected device
+oniro-app build
+oniro-app app install && oniro-app app launch
+```
+
+Pass `--sdk` the API level of the installed HarmonyOS SDK (`apiVersion` in its
+`default/sdk-pkg.json`). hvigor builds a HarmonyOS project only against the release its
+`compileSdkVersion` names ("SDK component missing" otherwise), so `create` writes the
+installed SDK's release, e.g. `6.1.1(24)`, and warns when `--sdk` asks for another one.
+
+### `oniro-app auth`
+
+| Command | What it does |
+| --- | --- |
+| `auth login [--timeout <s>]` | Opens the Huawei sign-in page and waits for the browser to redirect back to a loopback port. The URL is also printed, so a headless host can be signed in from another machine. |
+| `auth logout` | Deletes the locally stored token. |
+| `auth status [--json]` | Prints the signed-in account, and warns when it is not allowed to sign. Exits non-zero when signed out. |
+| `auth team list [--json]` | Lists AGC teams; pass an id to `sign --harmonyos --team-id`. |
+
+The token is stored encrypted under `ONIRO_HARMONYOS_AUTH_DIR`. It is a credential: the
+directory is created `0700` and the files `0600`.
+
+### `oniro-app sign --harmonyos`
+
+Mirrors DevEco Studio's automatic signing:
+
+1. generates a local p12 keystore and a CSR (via the SDK's `hap-sign-tool.jar`, so a JDK is needed — DevEco Studio's bundled JBR is used when present);
+2. has AppGallery Connect issue a debug certificate for that CSR;
+3. registers every connected device's UDID with the team — no device is needed when the team already has some registered (from another machine, or by DevEco Studio);
+4. issues a debug provisioning profile naming that certificate, all of the team's registered devices, and any ACL-gated permissions the project requests;
+5. writes an encrypted `signingConfigs` entry into `build-profile.json5`, leaving other entries untouched.
+
+Material lands in `ONIRO_HARMONYOS_SIGNING_DIR` (default `~/.ohos/config`, the directory
+DevEco Studio also uses) and is **reused**, without contacting AGC for anything, while it is
+still valid: same bundle name and team, unexpired, naming the attached devices and requested
+permissions, and wired into this project's `build-profile.json5`. Certificates are a small
+per-team quota; `--force` regenerates anyway.
+
+The AGC certificate is named `oniro_debug_<team>.cer`, distinct from DevEco Studio's
+`auto_debug_<team>.cer`: each tool replaces only its own certificate when regenerating, so
+using both on one team does not revoke the other's signing material.
+
+| Flag | Meaning |
+| --- | --- |
+| `--harmonyos` | Use the AGC path instead of the offline OpenHarmony one |
+| `--team-id <id>` | AGC team to issue under (default: the account's own id) |
+| `--product <name>` | Product to sign (default `default`) |
+| `--force` | Regenerate even when the existing material is still valid |
+
+### Account regions
+
+Accounts from every Huawei region can sign. Sign-in redirects to the account's own region,
+which then decides the hosts every later call goes to — the ones DevEco Studio resolves
+through Huawei's routing service:
+
+| Region | Sign-in host | AGC signing host |
+| --- | --- | --- |
+| `CN` | `cn.devecostudio.huawei.com` | `connect-api.cloud.huawei.com` |
+| `EU` | `de.devecostudio.huawei.com` | `connect-api-dre.cloud.huawei.com` |
+| `SG` | `sg.devecostudio.huawei.com` | `connect-api-dra.cloud.huawei.com` |
+| `RU` | `ru.devecostudio.huawei.com` | `connect-api-drru.cloud.huawei.com` |
+
+The whole flow has been run with an `EU` account. Huawei's own CLI accepts only `CN` accounts.
+
+### Limitations
+
+- **Real-name verification is not required**, but an account without it must have accepted
+  the current HUAWEI Developer Basic Service Agreement — in AppGallery Connect, or by running
+  automatic signing once in DevEco Studio. `oniro-app auth status --json` reports it as
+  `developerAgreement`; `oniro-app` checks it but never accepts it for you.
+- A refusal from AGC surfaces as a permissions or not-enrolled error, not as a crash.
+- The AGC endpoints are private and undocumented, and can change without notice. See
+  `packages/core/src/harmonyos/NOTICE.md` for provenance and attribution.
 
 ## Signing apps that need system permissions
 

@@ -5,6 +5,7 @@ import { registerCmdToolsCommand } from '../commands/cmdtools.js';
 import { registerEmulatorCommand } from '../commands/emulator.js';
 import { registerBuildCommand } from '../commands/build.js';
 import { registerSignCommand } from '../commands/sign.js';
+import { registerAuthCommand } from '../commands/auth.js';
 import { registerAppCommand } from '../commands/app.js';
 import { registerCreateCommand } from '../commands/create.js';
 import { registerTemplatesCommand } from '../commands/templates.js';
@@ -38,6 +39,7 @@ function buildProgram(): Command {
   registerEmulatorCommand(program);
   registerBuildCommand(program);
   registerSignCommand(program);
+  registerAuthCommand(program);
   registerAppCommand(program);
   registerCreateCommand(program);
   registerTemplatesCommand(program);

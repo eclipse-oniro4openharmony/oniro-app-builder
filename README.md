@@ -7,7 +7,7 @@ Cross-platform tooling for **Oniro / OpenHarmony** app development. This monorep
 | [`@oniroproject/core`](packages/core) | A vscode-agnostic library wrapping SDK install, build, sign, emulator lifecycle, and the full `hdc` device surface. | [**API reference →**](packages/core/README.md) |
 | [`@oniroproject/oniro-app`](packages/cli) | The `oniro-app` CLI built on the core. Non-interactive: explicit flags, results on stdout, logs on stderr, exit codes reflect success. | [**Command reference →**](packages/cli/README.md) |
 
-The CLI runs on Linux, macOS, and Windows. Everything in the OpenHarmony inner loop — SDK install → scaffold → sign → build → install on device → launch, plus screenshot / UI-layout dump / input / hilog for driving a running app — can be scripted from `oniro-app`. Nothing in this repo touches firmware or device images.
+The CLI runs on Linux, macOS, and Windows, and targets **both OpenHarmony and HarmonyOS** — the runtime is read from the project's `build-profile.json5`. HarmonyOS apps additionally need a Huawei developer account for signing (`oniro-app auth login` → `oniro-app sign --harmonyos`); OpenHarmony signing stays fully offline. Everything in the OpenHarmony inner loop — SDK install → scaffold → sign → build → install on device → launch, plus screenshot / UI-layout dump / input / hilog for driving a running app — can be scripted from `oniro-app`. Nothing in this repo touches firmware or device images.
 
 ## Install
 
