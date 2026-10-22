@@ -9,6 +9,12 @@ export interface SdkRelease {
    * truth read by `getSdkFilename()`.
    */
   tarballStrip: { linuxWindows: number; darwin: number };
+  /**
+   * Appended to the archive basename when the mirror re-published a release under a
+   * dated name (e.g. 7.0 ships `ohos-sdk-windows_linux-public_20260829.tar.gz`, whose
+   * components are the `-Release` build; the undated archive holds `-Beta` ones).
+   */
+  archiveSuffix?: string;
 }
 
 /**
@@ -26,6 +32,7 @@ export const ALL_SDKS: readonly SdkRelease[] = [
   { version: '5.1.1', api: '19', tarballStrip: { linuxWindows: 1, darwin: 3 } },
   { version: '6.0', api: '20', tarballStrip: { linuxWindows: 0, darwin: 3 } },
   { version: '6.1', api: '23', tarballStrip: { linuxWindows: 0, darwin: 3 } },
+  { version: '7.0', api: '26', tarballStrip: { linuxWindows: 1, darwin: 3 }, archiveSuffix: '_20260829' },
 ];
 
 export const OHOS_URL_BASE = 'https://repo.huaweicloud.com/openharmony/os';

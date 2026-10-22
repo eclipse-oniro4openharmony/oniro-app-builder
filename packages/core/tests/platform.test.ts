@@ -34,6 +34,17 @@ describe('getSdkFilename', () => {
     expect(getSdkFilename('5.1.1').strip).toBe(os.platform() === 'darwin' ? 3 : 1);
   });
 
+  it('uses the dated 7.0 (API 26) release archive, one component stripped on linux/windows', () => {
+    const info = getSdkFilename('7.0');
+    if (os.platform() === 'darwin') {
+      expect(info.filename).toMatch(/^(L2-SDK-MAC-M1-PUBLIC|ohos-sdk-mac-public)_20260829\.tar\.gz$/);
+      expect(info.strip).toBe(3);
+    } else {
+      expect(info.filename).toBe('ohos-sdk-windows_linux-public_20260829.tar.gz');
+      expect(info.strip).toBe(1);
+    }
+  });
+
   it('reads the strip count from the ALL_SDKS table for every release', () => {
     for (const r of ALL_SDKS) {
       const expected = os.platform() === 'darwin' ? r.tarballStrip.darwin : r.tarballStrip.linuxWindows;

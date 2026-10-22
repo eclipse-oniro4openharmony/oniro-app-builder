@@ -50,6 +50,14 @@ describe('oniro-app sdk list', () => {
     expect(found?.api).toBe('23');
   });
 
+  it('includes SDK 7.0 (api 26) in the known list', () => {
+    const r = runCli(['sdk', 'list', '--json']);
+    const parsed = JSON.parse(r.stdout) as Array<{ version: string; api: string }>;
+    const found = parsed.find((s) => s.version === '7.0');
+    expect(found).toBeDefined();
+    expect(found?.api).toBe('26');
+  });
+
   it('plain output exits 0 and uses an asterisk to mark installs', () => {
     const r = runCli(['sdk', 'list']);
     expect(r.status).toBe(0);
