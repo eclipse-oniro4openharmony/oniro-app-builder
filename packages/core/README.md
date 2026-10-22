@@ -99,7 +99,7 @@ The injection points every frontend implements, plus their defaults.
 | `getInstalledSdks` | `(config) => string[]` | Versions with at least one OS-folder install. |
 | `removeSdk` | `(config, api) => boolean` | Remove an installed SDK by API level across OS folders. |
 | `detectProjectSdkVersion` | `(projectRoot, logger?) => number \| undefined` | Read `compileSdkVersion` from a project's `build-profile.json5`. |
-| `ALL_SDKS` / `SdkRelease` | — | Catalog of known releases (`version`, `api`, `tarballStrip`). |
+| `ALL_SDKS` / `SdkRelease` | — | Catalog of known releases (`version`, `api`, `tarballStrip`, optional `archiveSuffix`). |
 | `OHOS_URL_BASE` | — | Default SDK mirror base URL. |
 | `getOsFolder()` / `getSdkFilename(version?)` | — | Map the host platform to its OS folder / SDK archive (`SdkArchiveInfo`). |
 
