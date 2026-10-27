@@ -9,6 +9,8 @@ export * from './lifecycle.js';
 export * from './screen.js';
 export * from './input.js';
 export * from './dump.js';
+export * from './ime.js';
+export * from './uiActions.js';
 export * from './project.js';
 export * from './app.js';
 export * from './hilog.js';

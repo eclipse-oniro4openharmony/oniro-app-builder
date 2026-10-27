@@ -23,12 +23,74 @@ export interface SendInputOptions {
   pxY2?: number;
   /** Velocity for swipe/drag/fling. */
   speed?: number;
-  /** Key id or symbolic name (Back/Home/Power) for keyEvent. */
+  /** Key for keyEvent: a KeyCode id, a name (Back, Delete, Enter, …), or a combo like `Ctrl+A`. See {@link resolveKeyEvent}. */
   key?: string | number;
   /** Text for inputText. */
   text?: string;
   deviceSerial?: string;
   logger?: Logger;
+}
+
+// uitest accepts these key names itself.
+const UITEST_KEY_NAMES = ['Back', 'Home', 'Power'];
+
+// OpenHarmony KeyCode ids (@ohos.multimodalInput.keyCode) for keys addressed by name.
+const KEY_IDS: Record<string, number> = {
+  back: 2,
+  home: 1,
+  power: 18,
+  volumeup: 16,
+  volumedown: 17,
+  up: 2012,
+  down: 2013,
+  left: 2014,
+  right: 2015,
+  alt: 2045,
+  shift: 2047,
+  tab: 2049,
+  space: 2050,
+  enter: 2054,
+  delete: 2055,
+  backspace: 2055,
+  pageup: 2068,
+  pagedown: 2069,
+  escape: 2070,
+  esc: 2070,
+  forwarddelete: 2071,
+  ctrl: 2072,
+  meta: 2076,
+  movehome: 2081,
+  moveend: 2082,
+};
+
+function keyId(name: string): number {
+  const k = name.trim().toLowerCase();
+  if (/^\d+$/.test(k)) return Number(k);
+  if (/^[a-z]$/.test(k)) return 2017 + (k.charCodeAt(0) - 97); // KEYCODE_A..KEYCODE_Z
+  const id = KEY_IDS[k];
+  if (id === undefined) {
+    throw new OniroError(
+      `Unknown key "${name}". Use a numeric KeyCode id, a letter, or one of: ` +
+        `${Object.keys(KEY_IDS).join(', ')}. Combine up to three with "+", e.g. Ctrl+A.`,
+    );
+  }
+  return id;
+}
+
+/**
+ * Resolve a key spec to `uitest uiInput keyEvent` arguments. Accepts uitest's
+ * own names (Back/Home/Power), numeric KeyCode ids, named keys (Delete, Enter,
+ * Tab, Escape, MoveHome, …), single letters, and combos of up to three keys
+ * joined by "+" (e.g. `Ctrl+A`) or given as space-separated ids. Pure.
+ */
+export function resolveKeyEvent(key: string | number): string {
+  const spec = String(key).trim();
+  if (spec === '') throw new OniroError('send input "keyEvent" requires a key.');
+  const native = UITEST_KEY_NAMES.find((n) => n.toLowerCase() === spec.toLowerCase());
+  if (native) return native;
+  const parts = spec.includes('+') ? spec.split('+') : spec.split(/\s+/);
+  if (parts.length > 3) throw new OniroError(`uitest injects at most three keys at once; got "${spec}".`);
+  return parts.map(keyId).join(' ');
 }
 
 function reqNum(value: number | undefined, name: string, type: string): number {
@@ -59,7 +121,7 @@ export function buildInputCommand(opts: SendInputOptions): string {
     }
     case 'keyEvent':
       if (opts.key === undefined || opts.key === '') throw new OniroError('send input "keyEvent" requires a key.');
-      return `uitest uiInput keyEvent ${opts.key}`;
+      return `uitest uiInput keyEvent ${resolveKeyEvent(opts.key)}`;
     case 'inputText': {
       const t = String(opts.text ?? '').replace(/'/g, `'\\''`);
       if (opts.pxX !== undefined && opts.pxY !== undefined) {

@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
-import { buildGridSvg, renderWithGrid, buildContactSheet, frameDiffs } from '../src/lib/screenshotImage.js';
+import {
+  buildGridSvg,
+  renderWithGrid,
+  buildContactSheet,
+  frameDiffs,
+  parseCropRect,
+  padCropRect,
+  cropImage,
+} from '../src/lib/screenshotImage.js';
 
 // sharp's first SVG composite pays a librsvg/native cold-start that can exceed
 // vitest's 5s default on slow CI runners (observed flaky on windows-latest).
@@ -92,5 +100,48 @@ describe('frameDiffs', () => {
 
   it('returns an empty array for no frames', async () => {
     expect(await frameDiffs([])).toEqual([]);
+  });
+});
+
+describe('parseCropRect', () => {
+  it('parses four 0-1 fractions', () => {
+    expect(parseCropRect('0.1, 0.2,0.9,1')).toEqual([0.1, 0.2, 0.9, 1]);
+  });
+
+  it('rejects malformed, out-of-range, and empty regions', () => {
+    expect(() => parseCropRect('0.1,0.2,0.9')).toThrow(/four 0-1 fractions/);
+    expect(() => parseCropRect('0,0,1.5,1')).toThrow(/four 0-1 fractions/);
+    expect(() => parseCropRect('a,0,1,1')).toThrow(/four 0-1 fractions/);
+    expect(() => parseCropRect('0.5,0,0.5,1')).toThrow(/x1 < x2/);
+    expect(() => parseCropRect('0,0.8,1,0.2')).toThrow(/y1 < y2/);
+  });
+});
+
+describe('padCropRect', () => {
+  it('grows the rect on every side, clamped to 0-1', () => {
+    const [x1, y1, x2, y2] = padCropRect([0.01, 0.5, 0.6, 0.99], 0.02);
+    expect(x1).toBe(0);
+    expect(y1).toBeCloseTo(0.48);
+    expect(x2).toBeCloseTo(0.62);
+    expect(y2).toBe(1);
+  });
+});
+
+describe('cropImage', () => {
+  it('crops at full resolution when the region fits within maxDim', async () => {
+    const src = await solidJpeg(1000, 2000, 50, 60, 70);
+    const out = await cropImage(src, [0.1, 0.1, 0.5, 0.3], { maxDim: 1024 });
+    expect(out).toMatchObject({ left: 100, top: 200, cropWidth: 400, cropHeight: 400, width: 400, height: 400 });
+    const meta = await sharp(out.buf).metadata();
+    expect(meta.format).toBe('jpeg');
+    expect([meta.width, meta.height]).toEqual([400, 400]);
+  });
+
+  it('downscales a large region to maxDim on its longest side', async () => {
+    const src = await solidJpeg(1000, 2000, 0, 0, 0);
+    const out = await cropImage(src, [0, 0, 1, 0.5], { maxDim: 256 });
+    expect(out.cropWidth).toBe(1000);
+    expect(out.cropHeight).toBe(1000);
+    expect([out.width, out.height]).toEqual([256, 256]);
   });
 });

@@ -143,6 +143,62 @@ describe('oniro-app device-loop command validation (no device)', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/type/);
   });
+
+  it('input --help lists the element, fraction, and keyboard options', () => {
+    const r = runCli(['input', '--help']);
+    expect(r.status).toBe(0);
+    for (const flag of ['--target <text>', '--target-index', '--fx <fraction>', '--fy2 <fraction>', '--clear', '--hide-keyboard', 'clearText', 'hideKeyboard']) {
+      expect(r.stdout).toContain(flag);
+    }
+  });
+
+  it('input rejects an out-of-range fraction before touching a device', () => {
+    const r = runCli(['input', '--type', 'click', '--fx', '1.5', '--fy', '0.5']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/--fx must be a fraction between 0 and 1/);
+  });
+
+  it('input rejects a start point given two ways', () => {
+    const r = runCli(['input', '--type', 'click', '--target', 'OK', '--x', '1', '--y', '2']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/start point one way/);
+  });
+
+  it('input rejects an unknown key name', () => {
+    const r = runCli(['input', '--type', 'keyEvent', '--key', 'Hyper']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/Unknown key "Hyper"/);
+  });
+
+  it('input rejects a blank --target', () => {
+    const r = runCli(['input', '--type', 'click', '--target', ' ']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/must not be blank/);
+  });
+
+  it('gesture --fractions rejects waypoints outside 0-1', () => {
+    const r = runCli(['gesture', '--fractions', '--waypoints', '[{"x":0.5,"y":0.5,"t":0},{"x":1.2,"y":0.5,"t":100}]']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/must be 0-1; got 1.2,0.5/);
+  });
+
+  it('dump rejects --raw with --flat', () => {
+    const r = runCli(['dump', 'layout', '--raw', '--flat']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/--raw and --flat/);
+  });
+
+  it('screenshot rejects a malformed --crop', () => {
+    const r = runCli(['screenshot', '--crop', '0.5,0.5,0.2,0.9']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/x1 < x2/);
+  });
+
+  it('screenshot rejects --crop with --grid', () => {
+    const r = runCli(['screenshot', '--crop', '0,0,1,1', '--grid']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/cannot be combined/);
+  });
 });
 
 describe('oniro-app sign --bootstrap (no device, no java)', () => {
