@@ -41,8 +41,14 @@ on:
         required: true
       launcher_bundle:
         type: string
-        default: com.ohos.launcher
-        description: Home/launcher bundle to wait for after reboot.
+        default: ''
+        description: >-
+          Home/launcher bundle to wait for after reboot. Empty detects it from the image:
+          com.ohos.sceneboard on SceneBoard images (OpenHarmony 7.0), else com.ohos.launcher.
+      probe_bundle:
+        type: string
+        default: com.ohos.settings
+        description: Preinstalled app launched to tell when the keyguard has gone after boot.
       device_artifacts:
         type: string
         default: emulator-device-artifacts
@@ -62,6 +68,7 @@ jobs:
       BUNDLE: ${{ inputs.bundle_name }}
       ENTRY_ABILITY: ${{ inputs.entry_ability }}
       LAUNCHER_BUNDLE: ${{ inputs.launcher_bundle }}
+      PROBE_BUNDLE: ${{ inputs.probe_bundle }}
       PROJECT: ${{ github.workspace }}/project
       HAP: ${{ github.workspace }}/hap/${{ inputs.hap_file }}
       # hdc address of the emulator. Passed explicitly to `reboot` so the post-reboot
@@ -143,17 +150,43 @@ jobs:
       - name: Wait for boot (wait --boot)
         run: oniro-app wait --boot --timeout 120000
 
+      - name: Wait for boot to complete and find the home bundle
+        run: |
+          # wait --boot only proves hdc answers. On a first boot the system is still
+          # installing its apps after that, so wait for bootevent.boot.completed before
+          # looking at the installed bundles.
+          for attempt in $(seq 1 60); do
+            if [ "$(hdc shell param get bootevent.boot.completed | tr -d '\r\n ')" = true ]; then
+              echo "Boot completed (after attempt $attempt)."
+              break
+            fi
+            sleep 3
+          done
+          # SceneBoard images (OpenHarmony 7.0) have no com.ohos.launcher: the home
+          # screen is part of com.ohos.sceneboard.
+          home="$LAUNCHER_BUNDLE"
+          if [ -z "$home" ]; then
+            if hdc shell bm dump -a | tr -d '\r' | grep -qx '[[:space:]]*com\.ohos\.sceneboard'; then
+              home=com.ohos.sceneboard
+            else
+              home=com.ohos.launcher
+            fi
+          fi
+          echo "Home bundle: $home"
+          echo "HOME_BUNDLE=$home" >> "$GITHUB_ENV"
+
       - name: Wait until the device accepts launches (keyguard auto-dismiss)
         run: |
           # The emulator boots with the keyguard up, but it auto-dismisses a few seconds
           # after boot — no swipe needed. aa start is refused while locked
           # (Error 10106102: "screen is locked ... unlock screen failed"), so poll
-          # readiness by launching a preinstalled app (the launcher) until it succeeds.
-          # Once the launcher comes up, the screen is unlocked and the test-app launch
-          # below will not race the keyguard.
+          # readiness by launching a preinstalled app until it succeeds. The probe is
+          # Settings, which every image has (com.ohos.launcher, the old probe, is gone on
+          # SceneBoard images). Once Settings comes up, the screen is unlocked and the
+          # test-app launch below will not race the keyguard.
           hdc shell power-shell wakeup || true
           for attempt in $(seq 1 20); do
-            if oniro-app app launch --bundle "$LAUNCHER_BUNDLE"; then
+            if oniro-app app launch --bundle "$PROBE_BUNDLE"; then
               echo "Device unlocked and accepting launches (after attempt $attempt)."
               exit 0
             fi
@@ -254,11 +287,11 @@ jobs:
       - name: Uninstall the app (app uninstall)
         run: oniro-app app uninstall "$BUNDLE"
 
-      - name: Reboot and wait for the launcher (reboot)
+      - name: Reboot and wait for the home screen (reboot)
         continue-on-error: true
         # --device makes the target a TCP serial so the post-reboot wait reconnects via
         # `hdc tconn` (hdc does not auto-reconnect TCP sessions across a reboot).
-        run: oniro-app reboot --mode system --wait-bundle "$LAUNCHER_BUNDLE" --device "$DEVICE" --timeout 300000
+        run: oniro-app reboot --mode system --wait-bundle "$HOME_BUNDLE" --device "$DEVICE" --timeout 300000
 
       - name: Stop emulator
         if: always()
