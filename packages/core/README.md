@@ -206,17 +206,23 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `takeScreenshot` | `(ScreenshotOptions) => Promise<Screenshot>` | `{ pixels: Buffer, width, height }` — raw JPEG, no decode. |
 | `captureBurst` | `(CaptureBurstOptions) => Promise<Buffer[]>` | N frames `intervalMs` apart, pulled back in order. |
 | `getDisplaySize` | `(config, opts?) => Promise<DisplaySize \| null>` | Render resolution from `hidumper` (no image work). |
-| `dumpLayout` | `(DumpLayoutOptions) => Promise<DumpLayoutResult>` | `uitest dumpLayout` → pruned, 0–1-normalized `LayoutNode` tree. |
-| `parseBounds` / `pruneLayout` | — | Pure helpers behind `dumpLayout`. |
+| `dumpLayout` | `(DumpLayoutOptions) => Promise<DumpLayoutResult>` | `uitest dumpLayout` → pruned, 0–1-normalized `LayoutNode` tree, with `hint`, `disabled`, and `covered` (painted over by a later filled layer). `detectKeyboard` adds `keyboard: KeyboardState`. |
+| `parseBounds` / `pruneLayout` / `findCoveredNodes` | — | Pure helpers behind `dumpLayout`. |
+| `flattenLayout` / `findLayoutNodes` / `pickTarget` | — | Pure: flatten a tree (nodes tagged with their `window`), match a `LayoutSelector` (`text` / `id` / `type`), and choose one uncovered, preferably clickable node (throws `TargetNotFoundError` with `reason` `none` / `covered` / `ambiguous`). |
+| `getImeBundles` / `parseImeBundles` / `findKeyboardWindow` | — | Installed input methods (`hidumper -s 3703`) and the soft-keyboard window in a layout. |
 
 ### hdc — input injection
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `sendInput` | `(SendInputOptions) => Promise<void>` | One `uitest uiInput` action in **pixel** space (`InputType`: click/doubleClick/longClick/swipe/drag/fling/keyEvent/inputText). |
+| `sendInput` | `(SendInputOptions) => Promise<void>` | One `uitest uiInput` action in **pixel** space (`InputType`: click/doubleClick/longClick/swipe/drag/fling/keyEvent/inputText). `key` accepts names and combos (see `resolveKeyEvent`). |
+| `performInput` | `(PerformInputOptions) => Promise<PerformInputResult>` | `sendInput` plus a start point from an element selector (`target`), 0–1 fractions, or pixels; `clearText`, `inputText` with `clear`, and keyboard-aware `hideKeyboard`. |
+| `locateTarget` | `(LocateTargetOptions) => Promise<LocatedTarget>` | Resolve a selector against the live layout to one element and its pixel center, dismissing the keyboard if it hides the element. |
+| `hideKeyboard` | `(opts) => Promise<boolean>` | Press Back only when the soft keyboard is shown. |
+| `waitForTarget` | `(WaitForTargetOptions) => Promise<FlatLayoutNode \| null>` | Poll the layout until an uncovered element matches (or, with `gone`, until none does). |
 | `sendGesture` | `(SendGestureOptions) => Promise<void>` | Multi-`Waypoint` path; routes through `uinput` when `holdStartMs`/`holdEndMs` need real press timing. |
 | `sendRawTouch` | `(SendRawTouchOptions) => Promise<void>` | Low-level `uinput -T` down/move/up events. |
-| `buildInputCommand` / `buildGestureCommands` / `buildRawTouchCommand` | — | Pure command builders (unit-testable). |
+| `buildInputCommand` / `buildGestureCommands` / `buildRawTouchCommand` / `resolveKeyEvent` | — | Pure command builders (unit-testable). |
 
 ### hdc — logging (hilog)
 

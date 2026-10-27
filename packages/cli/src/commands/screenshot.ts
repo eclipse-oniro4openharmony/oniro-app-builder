@@ -1,14 +1,24 @@
 import { Command } from 'commander';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { takeScreenshot, captureBurst } from '@oniroproject/core';
+import { takeScreenshot, captureBurst, locateTarget, describeLayoutNode } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
-import { renderWithGrid, buildContactSheet, frameDiffs } from '../lib/screenshotImage.js';
+import {
+  renderWithGrid,
+  buildContactSheet,
+  frameDiffs,
+  cropImage,
+  parseCropRect,
+  padCropRect,
+  type CropRect,
+} from '../lib/screenshotImage.js';
+import { addTargetOptions, selectorFrom, targetIndexFrom, type TargetOpts } from '../lib/target.js';
 
-interface ScreenshotOpts {
+interface ScreenshotOpts extends TargetOpts {
   output: string;
   grid?: boolean;
   maxDim: string;
+  crop?: string;
   contactSheet?: boolean;
   burst?: string;
   interval: string;
@@ -17,6 +27,8 @@ interface ScreenshotOpts {
 }
 
 const DEFAULT_CONTACT_SHEET_FRAMES = 8;
+// Margin kept around a --target element when cropping to it, as a fraction of the display.
+const TARGET_CROP_PAD = 0.02;
 
 function clampMaxDim(raw: string): number {
   const n = Number(raw);
@@ -25,16 +37,20 @@ function clampMaxDim(raw: string): number {
 }
 
 export function registerScreenshotCommand(program: Command): void {
-  program
+  const screenshot = program
     .command('screenshot')
     .description(
       'Capture the screen. Default: full-resolution raw JPEG. ' +
         '--grid: downscaled JPEG with a 10x10 grid (axes 0.0-1.0) for picking tap coordinates. ' +
+        '--crop / --target: a full-resolution crop of one region or element, for checking detail cheaply. ' +
         '--contact-sheet: capture a burst and tile it into one image with per-frame change diffs.',
     )
     .option('-o, --output <file>', 'Output file path.', 'screenshot.jpeg')
     .option('--grid', 'Downscale (to --max-dim) and overlay a 10x10 coordinate grid.')
-    .option('--max-dim <px>', 'Longest-side cap for --grid / --contact-sheet (256-4096).', '1024')
+    .option('--max-dim <px>', 'Longest-side cap for --grid / --crop / --target / --contact-sheet (256-4096).', '1024')
+    .option('--crop <x1,y1,x2,y2>', 'Crop to this region, given as 0-1 fractions of the screen.');
+  addTargetOptions(screenshot, 'Crop to');
+  screenshot
     .option('--contact-sheet', 'Capture a burst and composite it into one tiled contact sheet.')
     .option('--burst <count>', 'Capture N frames; writes <base>-<i><ext> (or feeds --contact-sheet).')
     .option('--interval <ms>', 'Delay between burst frames, ms.', '50')
@@ -44,6 +60,42 @@ export function registerScreenshotCommand(program: Command): void {
       const { config, logger } = getRuntime();
       const maxDim = clampMaxDim(opts.maxDim);
       const intervalMs = Number(opts.interval) || 50;
+
+      // --- Crop: one region (or element) at full resolution ---
+      const selector = selectorFrom(opts);
+      if (opts.crop !== undefined || selector) {
+        if (opts.crop !== undefined && selector) throw new Error('Use either --crop or --target*, not both.');
+        if (opts.grid || opts.contactSheet || opts.burst) {
+          throw new Error('--crop / --target cannot be combined with --grid, --contact-sheet, or --burst.');
+        }
+        let rect: CropRect;
+        let label: string;
+        if (selector) {
+          // Leave the keyboard alone: dismissing it would change what we are capturing.
+          const located = await locateTarget({
+            config,
+            selector,
+            index: targetIndexFrom(opts),
+            hideKeyboard: false,
+            deviceSerial: opts.device,
+            logger,
+          });
+          if (!located.node.b) throw new Error(`${describeLayoutNode(located.node)} has no bounds to crop to.`);
+          rect = padCropRect(located.node.b, TARGET_CROP_PAD);
+          label = describeLayoutNode(located.node);
+        } else {
+          rect = parseCropRect(opts.crop!);
+          label = rect.map((n) => n.toFixed(3)).join(',');
+        }
+        const shot = await takeScreenshot({ config, deviceSerial: opts.device, logger });
+        const cropped = await cropImage(shot.pixels, rect, { maxDim });
+        fs.writeFileSync(opts.output, cropped.buf);
+        logger.info(
+          `Wrote ${opts.output} (${cropped.width}x${cropped.height} from a ${cropped.cropWidth}x${cropped.cropHeight} ` +
+            `crop at ${cropped.left},${cropped.top}: ${label}).`,
+        );
+        return;
+      }
 
       // --- Contact sheet: burst -> one tiled image + per-frame diffs ---
       if (opts.contactSheet) {

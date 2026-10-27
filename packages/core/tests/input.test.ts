@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildInputCommand, buildGestureCommands, buildRawTouchCommand, buildGestureUitestCommand } from '../src/hdc/input.js';
+import {
+  buildInputCommand,
+  buildGestureCommands,
+  buildRawTouchCommand,
+  buildGestureUitestCommand,
+  resolveKeyEvent,
+} from '../src/hdc/input.js';
 import { OniroError } from '../src/ports/errors.js';
 
 describe('buildInputCommand', () => {
@@ -20,6 +26,7 @@ describe('buildInputCommand', () => {
 
   it('builds keyEvent and inputText (with and without coords), escaping quotes', () => {
     expect(buildInputCommand({ config: {} as never, type: 'keyEvent', key: 'Back' })).toBe('uitest uiInput keyEvent Back');
+    expect(buildInputCommand({ config: {} as never, type: 'keyEvent', key: 'Ctrl+A' })).toBe('uitest uiInput keyEvent 2072 2017');
     expect(buildInputCommand({ config: {} as never, type: 'inputText', text: 'hello' })).toBe("uitest uiInput text 'hello'");
     expect(buildInputCommand({ config: {} as never, type: 'inputText', pxX: 5, pxY: 6, text: 'hi' })).toBe(
       "uitest uiInput inputText 5 6 'hi'",
@@ -31,6 +38,35 @@ describe('buildInputCommand', () => {
     expect(() => buildInputCommand({ config: {} as never, type: 'click', pxX: 1 })).toThrow(OniroError);
     expect(() => buildInputCommand({ config: {} as never, type: 'swipe', pxX: 1, pxY: 2, pxX2: 3 })).toThrow(/pxY2/);
     expect(() => buildInputCommand({ config: {} as never, type: 'keyEvent' })).toThrow(/requires a key/);
+  });
+});
+
+describe('resolveKeyEvent', () => {
+  it('passes uitest key names and numeric ids through', () => {
+    expect(resolveKeyEvent('back')).toBe('Back');
+    expect(resolveKeyEvent('Home')).toBe('Home');
+    expect(resolveKeyEvent(2055)).toBe('2055');
+  });
+
+  it('maps named keys and letters to KeyCode ids', () => {
+    expect(resolveKeyEvent('Delete')).toBe('2055');
+    expect(resolveKeyEvent('backspace')).toBe('2055');
+    expect(resolveKeyEvent('Enter')).toBe('2054');
+    expect(resolveKeyEvent('MoveEnd')).toBe('2082');
+    expect(resolveKeyEvent('a')).toBe('2017');
+    expect(resolveKeyEvent('Z')).toBe('2042');
+  });
+
+  it('builds combos from "+" or space-separated keys', () => {
+    expect(resolveKeyEvent('Ctrl+A')).toBe('2072 2017');
+    expect(resolveKeyEvent('ctrl + shift + z')).toBe('2072 2047 2042');
+    expect(resolveKeyEvent('2072 2017')).toBe('2072 2017');
+  });
+
+  it('rejects unknown keys and more than three keys', () => {
+    expect(() => resolveKeyEvent('Hyper')).toThrow(/Unknown key "Hyper"/);
+    expect(() => resolveKeyEvent('Ctrl+Alt+Shift+A')).toThrow(/at most three/);
+    expect(() => resolveKeyEvent(' ')).toThrow(/requires a key/);
   });
 });
 

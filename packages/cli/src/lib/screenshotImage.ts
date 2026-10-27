@@ -98,6 +98,62 @@ export async function renderWithGrid(jpeg: Buffer, opts: RenderWithGridOptions):
   return { buf, width, height, originalWidth, originalHeight };
 }
 
+/** A region as [x1, y1, x2, y2] fractions (0–1) of the image. */
+export type CropRect = [number, number, number, number];
+
+/** Parse `"x1,y1,x2,y2"` (0–1 fractions, x1<x2, y1<y2) into a {@link CropRect}. */
+export function parseCropRect(spec: string): CropRect {
+  const parts = spec.split(',').map((s) => Number(s.trim()));
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n) || n < 0 || n > 1)) {
+    throw new Error(`--crop expects four 0-1 fractions "x1,y1,x2,y2"; got "${spec}".`);
+  }
+  const [x1, y1, x2, y2] = parts as CropRect;
+  if (!(x2 > x1 && y2 > y1)) throw new Error(`--crop needs x1 < x2 and y1 < y2; got "${spec}".`);
+  return [x1, y1, x2, y2];
+}
+
+/** Grow a rect by `pad` (a fraction) on every side, clamped to 0–1. */
+export function padCropRect(r: CropRect, pad: number): CropRect {
+  return [Math.max(0, r[0] - pad), Math.max(0, r[1] - pad), Math.min(1, r[2] + pad), Math.min(1, r[3] + pad)];
+}
+
+export interface CropResult {
+  /** Encoded JPEG. */
+  buf: Buffer;
+  /** Rendered (post-downscale) dimensions. */
+  width: number;
+  height: number;
+  /** The cropped region in source pixels. */
+  left: number;
+  top: number;
+  cropWidth: number;
+  cropHeight: number;
+}
+
+/**
+ * Crop a JPEG to a 0–1 region at full resolution, then downscale so the longest
+ * side is <= `maxDim` (never upscaling). Detail where it is needed, at a
+ * fraction of a full-resolution screenshot's size.
+ */
+export async function cropImage(jpeg: Buffer, rect: CropRect, opts: { maxDim: number }): Promise<CropResult> {
+  const meta = await sharp(jpeg).metadata();
+  const w = meta.width ?? 1;
+  const h = meta.height ?? 1;
+  const left = Math.min(w - 1, Math.floor(rect[0] * w));
+  const top = Math.min(h - 1, Math.floor(rect[1] * h));
+  const cropWidth = Math.max(1, Math.min(w, Math.ceil(rect[2] * w)) - left);
+  const cropHeight = Math.max(1, Math.min(h, Math.ceil(rect[3] * h)) - top);
+  const scale = Math.min(1, opts.maxDim / Math.max(cropWidth, cropHeight));
+  const width = Math.max(1, Math.round(cropWidth * scale));
+  const height = Math.max(1, Math.round(cropHeight * scale));
+  const buf = await sharp(jpeg)
+    .extract({ left, top, width: cropWidth, height: cropHeight })
+    .resize(width, height)
+    .jpeg({ quality: 85 })
+    .toBuffer();
+  return { buf, width, height, left, top, cropWidth, cropHeight };
+}
+
 export interface ContactSheetOptions {
   /** Longest-side cap for the whole sheet; per-tile size derives from this. */
   maxDim: number;

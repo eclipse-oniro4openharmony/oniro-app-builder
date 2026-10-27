@@ -45,8 +45,8 @@ Once a device or emulator is connected you can inspect and drive it:
 ```bash
 oniro-app devices --json
 oniro-app screenshot -o shot.jpeg
-oniro-app dump layout --json
-oniro-app input --type click --x 200 --y 400
+oniro-app dump layout --flat
+oniro-app input --type click --target "Sign in"
 oniro-app watch --log 'error|fault' --for 5000 --json
 ```
 
@@ -214,7 +214,7 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 
 #### `wait` — wait for a device condition
 
-Specify exactly one of `--log`, `--boot`, or `--bundle`.
+Specify exactly one of `--log`, `--boot`, `--bundle`, or an element selector (`--target` / `--target-id` / `--target-type`).
 
 | Flag | Description |
 | --- | --- |
@@ -223,9 +223,13 @@ Specify exactly one of `--log`, `--boot`, or `--bundle`.
 | `--bundle <bundle>` | With `--log`: filter to this bundle. Alone: wait until this bundle is running. |
 | `--pid-of <name>` | With `--boot`: also require this process to have a pid. |
 | `--domain <domain>` | With `--log`: hilog domain filter (e.g. `0xD003900`). |
+| `--target <text>` | Resolve when an uncovered element whose text, description, or placeholder matches is on screen (case-insensitive; exact matches win, else substring). |
+| `--target-id <id>` / `--target-type <type>` | Match the element by id/key, or restrict it to a component type (e.g. `Button`). |
+| `--gone` | With a selector: resolve when no uncovered element matches any more. |
+| `--interval <ms>` | With a selector: poll interval (default `500`; each poll is a layout dump). |
 | `--timeout <ms>` | Max wait (default `30000`). |
 | `--device <serial>` | Target device serial. |
-| `--json` | With `--log`: emit the matched entry as JSON. |
+| `--json` | With `--log` or a selector: emit the matched entry or element as JSON. |
 
 #### `watch` — collect matching hilog lines for a fixed duration
 
@@ -241,50 +245,82 @@ Specify exactly one of `--log`, `--boot`, or `--bundle`.
 
 #### `screenshot` — capture the screen as a JPEG
 
-Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP screenshot (downscaled + grid overlay). `--contact-sheet` captures a burst (default 8 frames) into one tiled sheet and prints per-frame diffs (0..1) on stdout — one image instead of N, pointing you at the frame where something changed.
+Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP screenshot (downscaled + grid overlay). `--crop` / `--target` write a full-resolution crop of one region or element — detail where it is needed without the cost of a full-resolution screenshot. `--contact-sheet` captures a burst (default 8 frames) into one tiled sheet and prints per-frame diffs (0..1) on stdout — one image instead of N, pointing you at the frame where something changed.
 
 | Flag | Description |
 | --- | --- |
 | `-o, --output <file>` | Output path (default `screenshot.jpeg`). |
 | `--grid` | Downscale to `--max-dim` and overlay a 10x10 grid (axes 0.0–1.0) for picking tap coordinates. |
-| `--max-dim <px>` | Longest-side cap for `--grid` / `--contact-sheet` (256–4096, default `1024`). On its own, downscales without a grid. |
+| `--max-dim <px>` | Longest-side cap for `--grid` / `--crop` / `--target` / `--contact-sheet` (256–4096, default `1024`). On its own, downscales without a grid. |
+| `--crop <x1,y1,x2,y2>` | Crop to this region, given as 0–1 fractions of the screen (as in `dump layout` and the grid). |
+| `--target <text>` | Crop to the element whose text, description, or placeholder matches, plus a small margin. Also `--target-id`, `--target-type`, `--target-index`. |
 | `--contact-sheet` | Capture a burst and composite it into one tiled image with per-frame change diffs. |
 | `--burst <count>` | Capture N frames; writes `<base>-<i><ext>` (or sets the `--contact-sheet` frame count). |
 | `--interval <ms>` | Delay between burst frames (default `50`). |
 | `--json` | With `--contact-sheet`, emit the full result object as JSON on stdout. |
 | `--device <serial>` | Target device serial. |
 
-#### `dump` — dump device state as JSON
+#### `dump` — dump device state
 
 | Command | Description |
 | --- | --- |
-| `dump [layout]` | Dump the on-screen UI layout (the default and currently only target) as a pruned, 0–1-normalized tree to stdout. |
+| `dump [layout]` | Dump the on-screen UI layout (the default and currently only target) to stdout: a pruned, 0–1-normalized JSON tree, or one line per element with `--flat`. |
 
 | Flag | Description |
 | --- | --- |
 | `--bundle <bundle>` | Filter the layout to a single window/bundle. |
-| `--raw` | Return the unpruned tree. |
+| `--flat` | One line per labelled or interactive element, grouped by window: type, label, `#id`, center `c=x,y` (0–1 fractions), and flags (`click`, `focus`, `disabled`, `covered`, …). The soft keyboard collapses to one `[keyboard …]` line. |
+| `--raw` | Return the unpruned tree (no keyboard detection; not combinable with `--flat`). |
 | `--device <serial>` | Target device serial. |
+
+The pruned output marks elements as `covered` when a later layer with a visible background (a dialog scrim, an overlay, the keyboard) paints over their center, so a tap there would land on that layer instead. A fully transparent layer that only intercepts touches is not detected. Placeholder text is reported as `hint`, and disabled components as `disabled`. The JSON result also carries `keyboard: { shown, bundle, b }`.
+
+```text
+$ oniro-app dump layout --flat
+# display 1080x2400; c = element center as 0-1 fractions (input --fx/--fy), or act by label with input --target "<text>"
+[window com.example.app]
+Text "Sign in" c=0.500,0.180
+TextInput hint="you@example.com" c=0.500,0.320 click focus
+Button "Sign in" c=0.500,0.520 click
+[keyboard dev.patrickgold.florisboard] up — dismiss with input --type hideKeyboard
+```
 
 #### `input` / `gesture` — inject UI input
 
-`input` injects a single event in **pixel** coordinates via `uitest uiInput`:
+`input` injects a single event via `uitest uiInput`. Give the start point one way: an on-screen element (`--target`), 0–1 fractions of the display (`--fx`/`--fy`, as read from `dump layout` or the screenshot grid), or pixels (`--x`/`--y`).
 
 | Flag | Description |
 | --- | --- |
-| `--type <type>` | **Required.** One of `click`, `doubleClick`, `longClick`, `swipe`, `drag`, `fling`, `keyEvent`, `inputText`. |
-| `--x <px>` / `--y <px>` | Start coordinate (click / swipe start). |
-| `--x2 <px>` / `--y2 <px>` | End coordinate (swipe / drag / fling). |
+| `--type <type>` | **Required.** One of `click`, `doubleClick`, `longClick`, `swipe`, `drag`, `fling`, `keyEvent`, `inputText`, `clearText`, `hideKeyboard`. |
+| `--target <text>` | Act on the center of the element whose text, description, or placeholder matches (case-insensitive; exact matches win, else substring). Covered elements and soft-keyboard keys are skipped and clickable ones preferred; if the keyboard hides the element, it is dismissed first. |
+| `--target-id <id>` / `--target-type <type>` | Match by id/key, or restrict to a component type (e.g. `Button`, `TextInput`). |
+| `--target-index <n>` | Pick the n-th (0-based) of several matching elements; without it, an ambiguous match fails and lists the candidates. |
+| `--fx <fraction>` / `--fy <fraction>` | Start point as 0–1 fractions of the display. |
+| `--fx2 <fraction>` / `--fy2 <fraction>` | End point as fractions (swipe / drag / fling). |
+| `--x <px>` / `--y <px>` | Start point in pixels. |
+| `--x2 <px>` / `--y2 <px>` | End point in pixels (swipe / drag / fling). |
 | `--speed <px-per-s>` | Velocity for swipe / drag / fling. |
-| `--key <key>` | Key id or symbolic name (`Back` / `Home` / `Power`) for `keyEvent`. |
+| `--key <key>` | For `keyEvent`: `Back` / `Home` / `Power`, a name (`Delete`, `Enter`, `Tab`, `Escape`, `MoveHome`, `MoveEnd`, `ForwardDelete`, …), a letter, a KeyCode id, or a combo of up to three keys like `Ctrl+A`. |
 | `--text <text>` | Text for `inputText`. |
+| `--clear` | `inputText`: clear the field (Ctrl+A, Delete) before typing. |
+| `--hide-keyboard` | Dismiss the soft keyboard afterwards, if it is up. |
 | `--device <serial>` | Target device serial. |
+
+`clearText` taps the field, then sends Ctrl+A and Delete. `hideKeyboard` presses Back only when the soft keyboard is on screen, so it never navigates away.
+
+```bash
+oniro-app input --type inputText --target "you@example.com" --text 'me@example.com'
+oniro-app input --type inputText --target-id password --clear --text 'secret' --hide-keyboard
+oniro-app input --type click --target "Sign in" --target-type Button
+oniro-app input --type swipe --fx 0.5 --fy 0.8 --fx2 0.5 --fy2 0.3
+```
 
 `gesture` injects a multi-waypoint path:
 
 | Flag | Description |
 | --- | --- |
 | `--waypoints <json>` | **Required.** JSON array of pixel waypoints `[{"x":..,"y":..,"t":..}]` (`t` = ms from start). |
+| `--fractions` | Waypoint `x`/`y` are 0–1 fractions of the display instead of pixels. |
 | `--hold-start <ms>` / `--hold-end <ms>` | Hold at the first/last point before moving/lifting (routes via `uinput`). |
 | `--device <serial>` | Target device serial. |
 
@@ -294,7 +330,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log`, `watch`, `lint`, `app apply`, `build`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` always emits JSON; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `app apply`, `build`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). Set `ONIRO_DEBUG=1` to also print full stack traces.
 
