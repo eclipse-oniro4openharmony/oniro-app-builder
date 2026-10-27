@@ -78,3 +78,73 @@ exit 0
     expect(tconnCalls()).toContain('127.0.0.1:55555');
   });
 });
+
+// A fake `hdc` whose server has wedged on a dead TCP session, as seen after an
+// OpenHarmony 7.0 emulator reboot: `tconn` answers "Target is connected, repeat
+// operation" and every command fails with "session is dead" until `hdc start -r`.
+// With `HEALTHY=1` it instead models a live session whose bundle needs a few polls
+// to start: tconn still says "repeat operation", but commands answer.
+describe.skipIf(isWin)('reboot wait recovers a wedged hdc server (fake hdc)', () => {
+  let root: string;
+  let toolchains: string;
+
+  const writeHdc = (healthy: boolean): void => {
+    const hdc = path.join(toolchains, 'hdc');
+    fs.writeFileSync(
+      hdc,
+      `#!/bin/sh
+D='${toolchains}'
+if [ "$1" = "-t" ]; then shift 2; fi
+case "$1" in
+  start) echo "$*" >> "$D/restarts.log"; touch "$D/restarted"; exit 0 ;;
+  tconn)
+    if [ -e "$D/restarted" ]; then echo 'Connect OK'; else echo '[Info]Target is connected, repeat operation'; fi
+    exit 0 ;;
+  shell)
+    if [ ${healthy ? 1 : 0} = 0 ] && [ ! -e "$D/restarted" ]; then echo '[Fail]Bind tartget session is dead'; exit 1; fi
+    case "$2" in
+      echo*) printf 'oniro_ping\\n' ;;
+      pidof*)
+        n=$(cat "$D/pidof.count" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$D/pidof.count"
+        if [ ${healthy ? 1 : 0} = 0 ] || [ $n -gt 3 ]; then printf '12345\\n'; fi ;;
+    esac
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+`,
+    );
+    fs.chmodSync(hdc, 0o755);
+  };
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-wedged-'));
+    toolchains = path.join(root, 'sdk', 'default', 'openharmony', 'toolchains');
+    fs.mkdirSync(toolchains, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const config = () => staticConfig({ cmdToolsPath: root });
+  const restarts = (): string[] => {
+    const log = path.join(toolchains, 'restarts.log');
+    return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [];
+  };
+
+  it('waitForBundle restarts the hdc server once when tconn claims a dead session', async () => {
+    writeHdc(false);
+    await expect(
+      waitForBundle({ config: config(), bundle: 'com.ohos.sceneboard', deviceSerial: '127.0.0.1:55555', timeoutMs: 20_000 }),
+    ).resolves.toBeUndefined();
+    expect(restarts()).toEqual(['start -r']);
+  }, 30_000);
+
+  it('waitForBundle does NOT restart the server while a live session waits for the bundle', async () => {
+    writeHdc(true);
+    await expect(
+      waitForBundle({ config: config(), bundle: 'com.ohos.sceneboard', deviceSerial: '127.0.0.1:55555', timeoutMs: 20_000 }),
+    ).resolves.toBeUndefined();
+    expect(restarts()).toEqual([]);
+  }, 30_000);
+});

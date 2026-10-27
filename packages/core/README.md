@@ -182,7 +182,7 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `reboot` | `(RebootOptions) => Promise<void>` | `system` (via `param set ohos.startup.powerctrl reboot`), `bootloader`, or `recovery`. Optionally waits for a bundle to return (and reconnects a TCP target across the reboot). |
+| `reboot` | `(RebootOptions) => Promise<void>` | `system` (via `param set ohos.startup.powerctrl reboot`), `bootloader`, or `recovery`. Optionally waits for a bundle to return (and reconnects a TCP target across the reboot, restarting the hdc server if it keeps the dead session). |
 | `waitForBundle` | `(WaitForBundleOptions) => Promise<void>` | Poll `pidof <bundle>` until it has a clean numeric pid. |
 | `waitForBoot` | `(WaitForBootOptions) => Promise<void>` | Poll until reachable (and optionally `untilPidOf` has a pid). Tolerant of the reboot disconnect. |
 | `waitForCondition` | `(WaitForConditionOptions) => Promise<void>` | Generic deadline + poll + heartbeat loop. A throwing probe counts as "not yet". |

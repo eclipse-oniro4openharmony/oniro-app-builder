@@ -23,6 +23,12 @@ async function isReachable(config: ConfigProvider, deviceSerial?: string): Promi
 const TCP_SERIAL_RE = /^.+:\d+$/;
 
 /**
+ * Polls in a row on which `hdc tconn` says a TCP target is already connected while it
+ * does not answer, before the hdc server is restarted.
+ */
+const WEDGED_POLLS_BEFORE_RESTART = 3;
+
+/**
  * Re-establish the hdc connection to a TCP target, best-effort. hdc auto-reconnects
  * a USB device when it re-enumerates, but a TCP target must be reconnected explicitly
  * with `hdc tconn` after the session drops — which is exactly what a reboot does, so
@@ -30,14 +36,42 @@ const TCP_SERIAL_RE = /^.+:\d+$/;
  * times out. A no-op for USB serials or when no serial is given, so it is safe to call
  * before every poll; failure is swallowed (the device may still be down, and the probe
  * that follows reports not-ready so we simply poll again).
+ *
+ * After a reboot the hdc server can also wedge on the old session: it keeps the target
+ * "Connected", answers `tconn` with "Target is connected, repeat operation" and fails
+ * every command ("session is dead") until the server restarts. Seen intermittently
+ * with the OpenHarmony 7.0 emulator. So the returned function counts the polls on
+ * which tconn claims a connection the target does not answer, and after
+ * {@link WEDGED_POLLS_BEFORE_RESTART} of them in a row restarts the server with
+ * `hdc start -r`, as `attemptHdcConnection` does, and reconnects. The count lives in
+ * the closure, so create one reconnector per wait.
  */
-async function reconnectIfTcp(config: ConfigProvider, deviceSerial: string | undefined, logger: Logger): Promise<void> {
-  if (!deviceSerial || !TCP_SERIAL_RE.test(deviceSerial)) return;
-  try {
-    await hdcExec({ config, args: ['tconn', deviceSerial], timeoutMs: 5_000, logger });
-  } catch {
-    /* still down — the following probe reports not-ready and we poll again */
-  }
+function tcpReconnector(config: ConfigProvider, deviceSerial: string | undefined, logger: Logger): () => Promise<void> {
+  let wedgedPolls = 0;
+  return async () => {
+    if (!deviceSerial || !TCP_SERIAL_RE.test(deviceSerial)) return;
+    let claimsConnected = false;
+    try {
+      const res = await hdcExec({ config, args: ['tconn', deviceSerial], timeoutMs: 5_000, logger });
+      claimsConnected = /already connected|repeat operation/i.test(`${res.stdout}\n${res.stderr}`);
+    } catch {
+      /* still down — the following probe reports not-ready and we poll again */
+    }
+    // A healthy session also answers "repeat operation"; only an unreachable one counts.
+    if (!claimsConnected || (await isReachable(config, deviceSerial))) {
+      wedgedPolls = 0;
+      return;
+    }
+    if (++wedgedPolls < WEDGED_POLLS_BEFORE_RESTART) return;
+    wedgedPolls = 0;
+    logger.warn(`hdc reports ${deviceSerial} as connected but it does not answer; restarting the hdc server.`);
+    try {
+      await hdcExec({ config, args: ['start', '-r'], timeoutMs: 15_000, logger });
+      await hdcExec({ config, args: ['tconn', deviceSerial], timeoutMs: 5_000, logger });
+    } catch {
+      /* the next poll tries again */
+    }
+  };
 }
 
 export interface WaitForBundleOptions {
@@ -56,9 +90,10 @@ export interface WaitForBundleOptions {
 export async function waitForBundle(opts: WaitForBundleOptions): Promise<void> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
   const timeoutMs = opts.timeoutMs ?? 180_000;
+  const reconnectIfTcp = tcpReconnector(opts.config, opts.deviceSerial, logger);
   await waitForCondition({
     probe: async () => {
-      await reconnectIfTcp(opts.config, opts.deviceSerial, logger);
+      await reconnectIfTcp();
       return (
         (await findRunningProcess({ config: opts.config, bundle: opts.bundle, deviceSerial: opts.deviceSerial, timeoutMs: 8_000 })) !== null
       );
@@ -89,9 +124,10 @@ export interface WaitForBootOptions {
 export async function waitForBoot(opts: WaitForBootOptions): Promise<void> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
   const timeoutMs = opts.timeoutMs ?? 180_000;
+  const reconnectIfTcp = tcpReconnector(opts.config, opts.deviceSerial, logger);
   await waitForCondition({
     probe: async () => {
-      await reconnectIfTcp(opts.config, opts.deviceSerial, logger);
+      await reconnectIfTcp();
       if (!(await isReachable(opts.config, opts.deviceSerial))) return false;
       if (!opts.untilPidOf) return true;
       return (

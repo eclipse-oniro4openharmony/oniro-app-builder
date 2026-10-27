@@ -210,7 +210,7 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 | `--mode <mode>` | `system` (default), `bootloader`, or `recovery`. |
 | `--wait-bundle <bundle>` | After a system reboot, wait until this bundle is running again. |
 | `--timeout <ms>` | Max time to wait for the bundle (default `180000`). |
-| `--device <serial>` | Target device serial. For a TCP target (an emulator at `host:port`), passing this reconnects the session across the reboot. |
+| `--device <serial>` | Target device serial. For a TCP target (an emulator at `host:port`), passing this reconnects the session across the reboot, restarting the hdc server if it keeps the dead session. |
 
 #### `wait` — wait for a device condition
 
