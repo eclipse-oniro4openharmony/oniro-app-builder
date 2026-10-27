@@ -1,5 +1,29 @@
 # @oniroproject/oniro-app
 
+## 0.12.0
+
+### Minor Changes
+
+- 0363671: Add OpenHarmony 7.0 (API 26) to the known SDKs, so `oniro-app sdk list` shows it and
+  `oniro-app sdk install 7.0` downloads it.
+
+  The mirror re-published 7.0 under dated archive names (`…_20260829.tar.gz`); the
+  undated archives hold `-Beta` components. `SdkRelease` gains an optional
+  `archiveSuffix`, which `getSdkFilename` appends to the archive basename, and 7.0 uses
+  it to fetch the `-Release` build.
+
+### Patch Changes
+
+- 838a2a5: Recover the hdc connection to a TCP device (e.g. the emulator) that wedges after a
+  reboot. The hdc server can keep the old session "Connected": `hdc tconn` answers
+  "Target is connected, repeat operation" and every command fails until the server is
+  restarted, so `oniro-app reboot --wait-bundle` and `oniro-app wait` timed out. The
+  post-reboot waits now restart the hdc server (`hdc start -r`) and reconnect when tconn
+  claims a connection the device does not answer on three polls in a row.
+- Updated dependencies [838a2a5]
+- Updated dependencies [0363671]
+  - @oniroproject/core@0.12.0
+
 ## 0.11.0
 
 ### Minor Changes
