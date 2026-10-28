@@ -22,15 +22,18 @@ function makeInstall(root: string, flavour: 'HarmonyOS' | 'OpenHarmony' | 'none'
 
 describe('findHarmonyOsSdk', () => {
   let tmp: string;
-  // Point autodetection at an empty dir so a real install on this machine cannot interfere.
+  const originalProgramFiles = process.env.ProgramFiles;
   const config = (values: Record<string, string>) =>
     staticConfig({ cmdToolsPath: path.join(tmp, 'no-cmdtools'), ...values });
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-hos-sdk-'));
+    process.env.ProgramFiles = path.join(tmp, 'program-files');
   });
 
   afterEach(() => {
+    if (originalProgramFiles === undefined) delete process.env.ProgramFiles;
+    else process.env.ProgramFiles = originalProgramFiles;
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -54,6 +57,12 @@ describe('findHarmonyOsSdk', () => {
   it('autodetects HarmonyOS command-line tools at cmdToolsPath', () => {
     makeInstall(tmp);
     expect(findHarmonyOsSdk({ config: staticConfig({ cmdToolsPath: tmp }) })?.installRoot).toBe(tmp);
+  });
+
+  it.skipIf(process.platform !== 'win32')('autodetects DevEco Studio at its default install location', () => {
+    const studioRoot = path.join(process.env.ProgramFiles!, 'Huawei', 'DevEco Studio');
+    makeInstall(studioRoot);
+    expect(findHarmonyOsSdk({ config: config({}) })?.installRoot).toBe(studioRoot);
   });
 
   it('does not mistake the OpenHarmony command-line tools for a HarmonyOS install', () => {

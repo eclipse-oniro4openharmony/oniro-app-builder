@@ -12,16 +12,21 @@ import { getBundledTemplateRoot } from '../src/lib/templateRoot.js';
 describe('HarmonyOSApp template', () => {
   const root = getBundledTemplateRoot();
   let location: string;
+  let originalProgramFiles: string | undefined;
 
   beforeEach(() => {
     location = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-harmonyos-'));
+    originalProgramFiles = process.env.ProgramFiles;
+    process.env.ProgramFiles = path.join(location, 'program-files');
   });
 
   afterEach(() => {
+    if (originalProgramFiles === undefined) delete process.env.ProgramFiles;
+    else process.env.ProgramFiles = originalProgramFiles;
     fs.rmSync(location, { recursive: true, force: true });
   });
 
-  // Autodetection looks at an empty dir, so a HarmonyOS install on this machine cannot interfere.
+  // Autodetection sees only the test's isolated Studio location and command-line-tools path.
   const scaffold = (overrides: { sdkApi?: number; installed?: string; logger?: Logger } = {}) =>
     createScaffold({
       config: staticConfig({
