@@ -16,7 +16,7 @@ describe('oniro-app --help / --version', () => {
     expect(r.status).toBe(0);
     for (const cmd of [
       'sdk', 'cmdtools', 'emulator', 'build', 'sign', 'auth', 'app', 'create', 'templates',
-      'reboot', 'wait', 'watch', 'screenshot', 'dump', 'devices', 'file', 'lint', 'input', 'gesture',
+      'reboot', 'wait', 'watch', 'logs', 'screenshot', 'dump', 'devices', 'file', 'lint', 'input', 'gesture',
     ]) {
       expect(r.stdout).toContain(cmd);
     }
