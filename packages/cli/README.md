@@ -221,6 +221,40 @@ Local paths may be relative, or absolute with either slash. A device path that a
 | `--domain <domain>` | hilog domain filter (e.g. `0xD003900`). |
 | `--device <serial>` | Target device serial. |
 
+#### `logs collect` — create a diagnostic bundle
+
+```bash
+oniro-app logs collect --redact --package com.example.app
+```
+
+The command requires exactly one connected device unless `--device` (or
+`ONIRO_DEVICE_SERIAL`) selects one. It captures the current `hilog -x` buffer,
+faultlog evidence, device information, process list, and memory/thread snapshots.
+`hilog -x` has no duration argument, so the manifest explicitly records that a
+time window was not applied. `--pid`, `--tag`, and `--level` create an additional
+filtered HiLog view only when its records can be parsed reliably. `--package`
+targets `hidumper -e --print <bundle> -n 5` for faultlog evidence.
+
+`--redact` creates a sibling `incident-...-redacted` directory and ZIP; the
+archive is built only from that redacted copy. Without `--redact`, the archive
+contains raw sensitive data. Redaction is heuristic, fails closed on binary or
+unknown-encoding files, and does not guarantee that a bundle is safe to publish.
+Collection continues after individual command failures and records each result
+in `manifest.json`; the CLI exits non-zero for a partial bundle. The default
+output is under `~/.oniro/incident-bundles`; bundle files are created with
+owner-only permissions where the host OS supports POSIX modes.
+
+| Flag | Description |
+| --- | --- |
+| `-o, --output <directory>` | Parent directory for bundles (default `~/.oniro/incident-bundles`). |
+| `--device <serial>` | Target device serial. |
+| `--package <bundle>` | Bundle name for package-specific faultlog collection. |
+| `--pid <pid>` | Create an exact-PID filtered HiLog view. |
+| `--tag <tag>` | Create an exact-tag filtered HiLog view. |
+| `--level <level>` | Create a filtered view for `V`, `D`, `I`, `W`, `E`, or `F`. |
+| `--redact` | Redact text evidence; create the archive only from the redacted copy. |
+| `--json` | Emit bundle paths and completion status as JSON. |
+
 #### `hdc` — run the bundled hdc
 
 `hdc [args...]` runs the `hdc` binary oniro-app itself uses (the one `cmdtools status` shows), with stdio passed through, so it needs nothing on `PATH`. Device commands are addressed at `--device` or `ONIRO_DEVICE_SERIAL` unless the arguments start with `-t`. `hdc --path` prints the binary's location. The exit code is hdc's own, which is 0 even for a `[Fail]` line.
