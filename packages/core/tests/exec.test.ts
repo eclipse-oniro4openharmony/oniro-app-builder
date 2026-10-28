@@ -105,6 +105,14 @@ describe('runProcess', () => {
     expect(chunks).toContainEqual(['stderr', 'b']);
   });
 
+  it('preserves UTF-8 characters split across stdout chunks', async () => {
+    const r = await runProcess({
+      command: NODE,
+      args: ['-e', 'const b=Buffer.from([0xe4,0xb8,0xad]);process.stdout.write(b.subarray(0,1));setTimeout(()=>process.stdout.write(b.subarray(1)),20)'],
+    });
+    expect(r.stdout).toBe('\u4e2d');
+  });
+
   it('rejects with a timeout error and kills the process', async () => {
     await expect(
       runProcess({ command: NODE, args: ['-e', 'setInterval(()=>{},1000)'], timeoutMs: 100 }),

@@ -230,9 +230,13 @@ oniro-app logs collect --redact --package com.example.app
 The command requires exactly one connected device unless `--device` (or
 `ONIRO_DEVICE_SERIAL`) selects one. It captures the current `hilog -x` buffer,
 faultlog evidence, device information, process list, and memory/thread snapshots.
-`hilog -x` has no duration argument, so the manifest explicitly records that a
-time window was not applied. `--pid`, `--tag`, and `--level` create an additional
-filtered HiLog view only when its records can be parsed reliably. `--package`
+Because `hilog -x` has no duration argument, `--duration` filters recognized
+HiLog timestamps locally using device clock readings before and after the snapshot.
+If the clock or log format cannot be parsed reliably, the manifest records the
+window as unapplied, the command exits non-zero, and the full snapshot is omitted
+from the redacted archive (it remains only in the local raw bundle).
+`--pid`, `--tag`, and `--level` create an additional filtered HiLog view from the
+time-bounded records when their format can be parsed reliably. `--package`
 targets `hidumper -e --print <bundle> -n 5` for faultlog evidence.
 
 `--redact` creates a sibling `incident-...-redacted` directory and ZIP; the
@@ -252,6 +256,7 @@ owner-only permissions where the host OS supports POSIX modes.
 | `--pid <pid>` | Create an exact-PID filtered HiLog view. |
 | `--tag <tag>` | Create an exact-tag filtered HiLog view. |
 | `--level <level>` | Create a filtered view for `V`, `D`, `I`, `W`, `E`, or `F`. |
+| `--duration <seconds>` | Include HiLog records from the last N seconds (default `600`; maximum `31536000`). |
 | `--redact` | Redact text evidence; create the archive only from the redacted copy. |
 | `--json` | Emit bundle paths and completion status as JSON. |
 

@@ -11,6 +11,7 @@ export interface CollectLogBundleOptions {
   pid?: string;
   tag?: string;
   level?: string;
+  durationSeconds?: number;
   redact: boolean;
   execute?: (args: readonly string[], deviceSerial?: string) => Promise<HdcExecResult>;
 }
@@ -36,7 +37,7 @@ const LEVELS: Record<string, string> = {
   V: 'V', VERBOSE: 'V', D: 'D', DEBUG: 'D', I: 'I', INFO: 'I',
   W: 'W', WARN: 'W', WARNING: 'W', E: 'E', ERROR: 'E', F: 'F', FATAL: 'F',
 };
-const HILOG_RECORD = /^(?<date>\d{2}-\d{2})[ \t]+(?<time>\d{2}:\d{2}:\d{2}\.\d{3})[ \t]+(?<pid>\d+)[ \t]+\d+[ \t]+(?<level>[VDIWEF])[ \t]+(?:[A-Za-z][0-9A-Fa-f]{5,8}|[0-9A-Fa-f]{1,8})\/(?:(?:[^\s/]+)\/)*(?<tag>[^\s/]*):(?:[ \t].*|)$/;
+const HILOG_RECORD = /^(?<date>\d{2}-\d{2})[ \t]+(?<time>\d{2}:\d{2}:\d{2}\.\d{3})[ \t]+(?<pid>\d+)[ \t]+\d+[ \t]+(?<level>[VDIWEF])[ \t]+(?<tag>\S+):(?:[ \t]+.*|)$/;
 const FAILURE_TEXT = /^(?:\s*(?:\[(?:fail|error)\]|(?:error|failed|failure):|permission denied\b|no devices? connected\b|too many arguments\b|unknown option\b|invalid option\b|command not found\b)|\s*(?:hdc|device)\b.*\b(?:error|failed|no device|not connected|offline)\b)/im;
 
 function validateDate(date: string, time: string): boolean {
@@ -68,7 +69,9 @@ export function filterHilog(
       if (!validateDate(match.groups.date!, match.groups.time!)) return null;
       sawRecord = true;
       keep = Object.entries(criteria).every(([key, value]) => {
-        const field = match.groups![key];
+        const field = key === 'tag'
+          ? match.groups!.tag!.slice(match.groups!.tag!.lastIndexOf('/') + 1)
+          : match.groups![key];
         return key === 'pid' ? field?.replace(/^0+(?=\d)/, '') === value : field === value;
       });
     } else if (/^\s*\[?\d{1,4}[-/]/.test(content) || (!sawRecord && content.trim())) {
@@ -127,22 +130,34 @@ function decodeText(data: Buffer, relativePath: string): string {
     }
   }
   if (text.includes('\u0000')) throw new Error(`Binary data cannot be safely redacted: ${relativePath}`);
-  if (text.includes('\ufffd')) throw new Error(`Invalid text encoding cannot be safely redacted: ${relativePath}`);
   return text;
 }
 
-async function redactTree(source: string, destination: string, serials: readonly string[]): Promise<void> {
+async function redactTree(
+  source: string,
+  destination: string,
+  serials: readonly string[],
+  boundedHilog: string | null,
+): Promise<void> {
   await fs.mkdir(destination, { recursive: false, mode: 0o700 });
   try {
     const visit = async (directory: string): Promise<void> => {
       for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
         const sourcePath = path.join(directory, entry.name);
         const relative = path.relative(source, sourcePath);
+        const portableRelative = relative.split(path.sep).join('/');
         const destinationPath = path.join(destination, relative);
         if (entry.isDirectory()) {
           await fs.mkdir(destinationPath, { recursive: true, mode: 0o700 });
           await visit(sourcePath);
         } else if (entry.isFile()) {
+          if (portableRelative === 'logs/hilog.txt') {
+            const text = boundedHilog ?? 'HiLog omitted from this archive because the requested duration could not be reliably applied.\n';
+            await fs.mkdir(path.dirname(destinationPath), { recursive: true, mode: 0o700 });
+            await fs.writeFile(destinationPath, redactLogText(text, serials), { encoding: 'utf8', mode: 0o600 });
+            continue;
+          }
+          if (portableRelative === 'logs/hilog-filtered.txt' && boundedHilog === null) continue;
           const text = decodeText(await fs.readFile(sourcePath), relative);
           await fs.mkdir(path.dirname(destinationPath), { recursive: true, mode: 0o700 });
           await fs.writeFile(destinationPath, redactLogText(text, serials), { encoding: 'utf8', mode: 0o600 });
@@ -258,12 +273,17 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
   if (options.pid && !/^[1-9]\d*$/.test(options.pid)) throw new Error('pid must be a positive integer.');
   if (options.tag && !/^[^\s/\x00-\x1f\x7f]+$/.test(options.tag)) throw new Error('tag must be a single HiLog tag.');
   if (options.level && !LEVELS[options.level.toUpperCase()]) throw new Error('level is not a recognized HiLog level.');
+  const durationSeconds = options.durationSeconds ?? 600;
+  if (!Number.isSafeInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 31_536_000) {
+    throw new Error('durationSeconds must be an integer between 1 and 31536000.');
+  }
 
   const started = new Date();
   const stamp = started.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const bundleDirectory = await uniqueBundleDirectory(path.resolve(options.outputDirectory), stamp);
   const records: CommandRecord[] = [];
   const serials: string[] = [];
+  let replacementWarning = false;
   const execute = options.execute ?? ((args, deviceSerial) => args[0] === 'shell'
     ? shellChecked({ config: options.config, command: args.slice(1).join(' '), deviceSerial })
     : hdcExec({ config: options.config, args, deviceSerial }));
@@ -281,7 +301,7 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
       level: options.level ?? null,
       pid: options.pid ?? null,
       packageName: options.packageName ?? null,
-      durationSeconds: null,
+      durationSeconds,
     },
     filterStatus: {
       duration: 'not-applied',
@@ -298,7 +318,7 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
     files: [],
     notes: [
       'Collection is read-only on the target device.',
-      'hilog -x captures the current device buffer and does not support a duration filter.',
+      'hilog -x captures the current device buffer; duration is applied locally against device time when log timestamps are recognized.',
       'Redaction is heuristic and does not guarantee that a bundle is safe to publish.',
     ],
   };
@@ -312,6 +332,10 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
       result = await execute(args, deviceSerial);
       await fs.writeFile(outputPath, result.stdout, { encoding: 'utf8', mode: 0o600 });
       if (result.stderr) await fs.writeFile(`${outputPath}.stderr.txt`, result.stderr, { encoding: 'utf8', mode: 0o600 });
+      if (result.stdout.includes('\ufffd') || result.stderr.includes('\ufffd')) {
+        replacementWarning = true;
+        (manifest.notes as string[]).push(`${name} output contains Unicode replacement characters; review the redacted evidence before sharing.`);
+      }
       failure = commandFailure(result);
     } catch (error) {
       failure = errorMessage(error);
@@ -344,6 +368,9 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
   else if (targets.length > 1) targetError = 'multiple devices are connected; specify --device';
   else selectedDevice = targets[0]!.serial;
 
+  let boundedHilog: string | null = null;
+  let durationApplied = false;
+  let durationFailureReason = 'device clock or HiLog collection failed';
   if (targetError) {
     targetRecord.status = 'failed';
     targetRecord.error = targetError;
@@ -351,34 +378,60 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
   } else {
     manifest.target = selectedDevice;
     const shell = (args: readonly string[]) => run(args[0]!, args[1]!, args.slice(2), selectedDevice!);
-    await shell(['device-name', 'device/device-info.txt', 'shell', 'param', 'get', 'const.product.name']);
-    await shell(['process-list', 'device/process-list.txt', 'shell', 'ps', '-ef']);
-    await shell(['memory', 'device/memory.txt', 'shell', 'hidumper', '--mem']);
-    await shell(['threads', 'device/threads.txt', 'shell', 'hidumper', '-p']);
-
+    const captureStartedHostMs = Date.now();
+    const deviceTimeBefore = await shell([
+      'device-time-before', 'device/device-time-before.txt', 'shell', 'date', '+%Y-%m-%dT%H:%M:%S',
+    ]);
     const hilog = await shell(['hilog-snapshot', 'logs/hilog.txt', 'shell', 'hilog', '-x']);
+    const deviceTimeAfter = await shell([
+      'device-time-after', 'device/device-time-after.txt', 'shell', 'date', '+%Y-%m-%dT%H:%M:%S',
+    ]);
+    const hostElapsedMs = Date.now() - captureStartedHostMs;
+    if (deviceTimeBefore.status === 'success' && hilog.status === 'success' && deviceTimeAfter.status === 'success') {
+      const [beforeText, afterText, fullHilog] = await Promise.all([
+        fs.readFile(path.join(bundleDirectory, 'device/device-time-before.txt'), 'utf8'),
+        fs.readFile(path.join(bundleDirectory, 'device/device-time-after.txt'), 'utf8'),
+        fs.readFile(path.join(bundleDirectory, 'logs/hilog.txt'), 'utf8'),
+      ]);
+      const window = filterHilogWindow(fullHilog, beforeText, afterText, durationSeconds, hostElapsedMs);
+      if (window.text === null) durationFailureReason = window.reason;
+      else boundedHilog = window.text;
+    } else if (deviceTimeBefore.status !== 'success' || deviceTimeAfter.status !== 'success') {
+      durationFailureReason = 'device clock could not be read';
+    } else if (hilog.status !== 'success') {
+      durationFailureReason = 'HiLog snapshot collection failed';
+    }
+    durationApplied = boundedHilog !== null;
+    manifest.hilogWindowApplied = durationApplied;
     const faultArgs = options.packageName
       ? ['faultlog', 'logs/faultlog.txt', 'shell', 'hidumper', '-e', '--print', options.packageName, '-n', '5']
       : ['faultlog', 'logs/faultlog.txt', 'shell', 'hidumper', '-e', '--list', '-n', '20'];
     const faultlog = await shell(faultArgs);
     manifest.filterStatus = {
-      duration: 'not-applied',
+      duration: durationApplied ? 'applied' : 'not-applied',
       packageName: options.packageName ? (faultlog.status === 'success' ? 'applied' : 'failed') : 'not-requested',
       pid: options.pid ? 'not-applied' : 'not-requested',
       tag: options.tag ? 'not-applied' : 'not-requested',
       level: options.level ? 'not-applied' : 'not-requested',
     };
-    if (hilog.status === 'success' && (options.pid || options.tag || options.level)) {
-      const source = await fs.readFile(path.join(bundleDirectory, 'logs/hilog.txt'), 'utf8');
-      const filtered = filterHilog(source, { pid: options.pid, tag: options.tag, level: options.level });
+    if (!durationApplied) {
+      (manifest.notes as string[]).push(
+        `HiLog duration was not applied (${durationFailureReason}); the full snapshot is kept only in the local raw bundle and omitted from the redacted archive.`,
+      );
+    } else if (boundedHilog !== null && (options.pid || options.tag || options.level)) {
+      const filtered = filterHilog(boundedHilog, { pid: options.pid, tag: options.tag, level: options.level });
       if (filtered) {
         await fs.writeFile(path.join(bundleDirectory, 'logs/hilog-filtered.txt'), filtered.text, { encoding: 'utf8', mode: 0o600 });
         const status = manifest.filterStatus as Record<string, string>;
         for (const key of filtered.applied) status[key] = 'applied';
       } else {
-        (manifest.notes as string[]).push('Requested HiLog filters were not applied because the snapshot format could not be parsed reliably.');
+        (manifest.notes as string[]).push('Requested HiLog PID/tag/level filters were not applied because the windowed snapshot format could not be parsed reliably.');
       }
     }
+    await shell(['device-name', 'device/device-info.txt', 'shell', 'param', 'get', 'const.product.name']);
+    await shell(['process-list', 'device/process-list.txt', 'shell', 'ps', '-ef']);
+    await shell(['memory', 'device/memory.txt', 'shell', 'hidumper', '--mem']);
+    await shell(['threads', 'device/threads.txt', 'shell', 'hidumper', '-p']);
   }
 
   const ended = new Date();
@@ -391,6 +444,7 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
   manifest.files = files;
   await fs.writeFile(path.join(bundleDirectory, 'notes.txt'), 'Add reproduction steps and precise event timestamps here.\n', { encoding: 'utf8', mode: 0o600 });
 
+  const durationFailure = !durationApplied;
   const criticalFailure = Boolean(targetError) || records.some((record) => record.name === 'hilog-snapshot' && record.status !== 'success');
   const anyCommandFailure = records.some((record) => record.status !== 'success');
   let redactedDirectory: string | null = null;
@@ -400,10 +454,10 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
   try {
     if (options.redact) {
       redactedDirectory = `${bundleDirectory}-redacted`;
-      manifest.redactionStatus = 'success';
+      manifest.redactionStatus = replacementWarning ? 'review-required' : 'success';
       manifest.archiveStatus = { status: 'success', path: `${path.basename(redactedDirectory)}.zip` };
       await fs.writeFile(path.join(bundleDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-      await redactTree(bundleDirectory, redactedDirectory, serials);
+      await redactTree(bundleDirectory, redactedDirectory, serials, boundedHilog);
       archivePath = `${redactedDirectory}.zip`;
       await writeZip(redactedDirectory, archivePath);
     } else {
@@ -428,7 +482,88 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
     bundleDirectory,
     archivePath,
     redactedDirectory,
-    complete: !criticalFailure && !anyCommandFailure && !bundleError,
-    error: bundleError ?? (criticalFailure ? targetError ?? 'HiLog collection failed' : undefined),
+    complete: !criticalFailure && !anyCommandFailure && !bundleError && !replacementWarning && !durationFailure,
+    error: bundleError ?? (criticalFailure ? targetError ?? 'HiLog collection failed' : replacementWarning
+      ? 'Captured output contains Unicode replacement characters; review the manifest before sharing.'
+      : durationFailure ? `HiLog duration was not applied (${durationFailureReason}); the redacted archive omits the full snapshot.`
+      : undefined),
   };
+}
+
+function parseDeviceClock(value: string): number | null {
+  const match = /^\s*(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\s*$/.exec(value);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  const timestamp = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  const date = new Date(timestamp);
+  return date.getUTCFullYear() === Number(year) && date.getUTCMonth() === Number(month) - 1 &&
+    date.getUTCDate() === Number(day) && Number(hour) < 24 && Number(minute) < 60 && Number(second) < 60
+    ? timestamp
+    : null;
+}
+
+function parseHilogTimestamp(datePart: string, timePart: string, referenceMs: number): number | null {
+  if (!validateDate(datePart, timePart)) return null;
+  const [month, day] = datePart.split('-').map(Number);
+  const [hour, minute, second, millisecond] = timePart.split(/[:.]/).map(Number);
+  const referenceYear = new Date(referenceMs).getUTCFullYear();
+  const candidates = [referenceYear - 1, referenceYear, referenceYear + 1]
+    .map((year) => Date.UTC(year, month! - 1, day!, hour!, minute!, second!, millisecond!))
+    .filter((timestamp) => {
+      const candidate = new Date(timestamp);
+      return candidate.getUTCMonth() === month! - 1 && candidate.getUTCDate() === day;
+    })
+    .sort((left, right) => Math.abs(left - referenceMs) - Math.abs(right - referenceMs));
+  const closest = candidates[0];
+  return closest !== undefined && closest <= referenceMs + 2_000 ? closest : null;
+}
+
+export type HilogWindowResult = { text: string; reason?: undefined } | { text: null; reason: string };
+
+export function filterHilogWindow(
+  input: string,
+  deviceClockBefore: string,
+  deviceClockAfter: string,
+  durationSeconds: number,
+  hostElapsedMs: number,
+): HilogWindowResult {
+  if (!Number.isSafeInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 31_536_000) {
+    return { text: null, reason: 'requested duration is invalid' };
+  }
+  const beforeMs = parseDeviceClock(deviceClockBefore);
+  const afterMs = parseDeviceClock(deviceClockAfter);
+  if (beforeMs === null || afterMs === null) return { text: null, reason: 'device clock output was not recognized' };
+  const deviceElapsedMs = afterMs - beforeMs;
+  if (deviceElapsedMs < -1_000 || deviceElapsedMs > Math.max(0, hostElapsedMs) + 5_000) {
+    return { text: null, reason: 'device clock changed inconsistently during capture' };
+  }
+
+  const windowEnd = afterMs + 999;
+  const windowStart = windowEnd - durationSeconds * 1_000;
+  let sawRecord = false;
+  let keep = false;
+  let output = '';
+  for (const line of input.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
+    const content = line.replace(/[\r\n]+$/, '');
+    const match = HILOG_RECORD.exec(content);
+    if (match?.groups) {
+      if (!validateDate(match.groups.date!, match.groups.time!)) {
+        return { text: null, reason: 'HiLog contains an invalid timestamp' };
+      }
+      const timestamp = parseHilogTimestamp(match.groups.date!, match.groups.time!, afterMs);
+      if (timestamp === null || timestamp > windowEnd) {
+        return { text: null, reason: 'HiLog timestamps do not agree with the device clock' };
+      }
+      sawRecord = true;
+      keep = timestamp >= windowStart;
+    } else if (/^-{3,}\s*beginning of\b/i.test(content.trim())) {
+      continue;
+    } else if (/^\s*\[?\d{1,4}[-/]/.test(content) || /^\s*\d{2}:\d{2}:\d{2}/.test(content)) {
+      return { text: null, reason: 'HiLog contains timestamped lines in an unrecognized format' };
+    } else if (!sawRecord && content.trim()) {
+      return { text: null, reason: 'HiLog contains unclassified lines before the first record' };
+    }
+    if (keep) output += line;
+  }
+  return sawRecord ? { text: output } : { text: null, reason: 'no recognized timestamped HiLog records were found' };
 }

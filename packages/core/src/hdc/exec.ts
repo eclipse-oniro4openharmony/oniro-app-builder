@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { CancelledError, CommandFailedError, OniroError } from '../ports/errors.js';
@@ -88,6 +89,8 @@ export function runProcess(opts: RunProcessOptions): Promise<HdcExecResult> {
     let stderr = '';
     let settled = false;
     let timedOut = false;
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
 
     const cleanup = (): void => {
       clearTimeout(timer);
@@ -110,14 +113,14 @@ export function runProcess(opts: RunProcessOptions): Promise<HdcExecResult> {
     abortSignal?.addEventListener('abort', onAbort, { once: true });
 
     child.stdout?.on('data', (d: Buffer) => {
-      const s = d.toString();
+      const s = stdoutDecoder.write(d);
       stdout += s;
-      onOutput?.(s, 'stdout');
+      if (s) onOutput?.(s, 'stdout');
     });
     child.stderr?.on('data', (d: Buffer) => {
-      const s = d.toString();
+      const s = stderrDecoder.write(d);
       stderr += s;
-      onOutput?.(s, 'stderr');
+      if (s) onOutput?.(s, 'stderr');
     });
 
     child.on('error', (err) => {
@@ -131,6 +134,12 @@ export function runProcess(opts: RunProcessOptions): Promise<HdcExecResult> {
       if (settled) return;
       settled = true;
       cleanup();
+      const stdoutTail = stdoutDecoder.end();
+      const stderrTail = stderrDecoder.end();
+      stdout += stdoutTail;
+      stderr += stderrTail;
+      if (stdoutTail) onOutput?.(stdoutTail, 'stdout');
+      if (stderrTail) onOutput?.(stderrTail, 'stderr');
       if (timedOut) {
         reject(
           new OniroError(

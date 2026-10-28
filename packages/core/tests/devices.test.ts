@@ -24,6 +24,12 @@ describe('parseDeviceList', () => {
     ]);
   });
 
+  it('recognizes Ready UART endpoints instead of treating them as unknown devices', () => {
+    expect(parseDeviceList('COM3\tUART\tReady\tunknown...\thdc')).toEqual([
+      { serial: 'COM3', status: 'Ready', connection: 'UART' },
+    ]);
+  });
+
   it('defaults status to Unknown for a bare serial line', () => {
     expect(parseDeviceList('abc123def')).toEqual([{ serial: 'abc123def', status: 'Unknown' }]);
   });
