@@ -130,6 +130,7 @@ describe('harmonyOsAutoSign', () => {
   let signingDir: string;
   let agc: ReturnType<typeof fakeAgc>;
   let session: HarmonyOsSession & { resolveAgcAuth: ReturnType<typeof vi.fn> };
+  let originalProgramFiles: string | undefined;
 
   const writeProject = (bundleName: string) => {
     fs.mkdirSync(path.join(projectDir, 'AppScope'), { recursive: true });
@@ -154,6 +155,8 @@ describe('harmonyOsAutoSign', () => {
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-autosign-'));
+    originalProgramFiles = process.env.ProgramFiles;
+    process.env.ProgramFiles = path.join(tmp, 'program-files');
     projectDir = path.join(tmp, 'MyApp');
     signingDir = path.join(tmp, 'signing');
     fs.mkdirSync(path.join(tmp, 'sdk', 'default', 'openharmony'), { recursive: true });
@@ -185,6 +188,8 @@ describe('harmonyOsAutoSign', () => {
   });
 
   afterEach(() => {
+    if (originalProgramFiles === undefined) delete process.env.ProgramFiles;
+    else process.env.ProgramFiles = originalProgramFiles;
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
