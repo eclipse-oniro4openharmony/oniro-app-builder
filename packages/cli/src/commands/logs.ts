@@ -21,6 +21,7 @@ interface CollectOptions {
   pid?: string;
   tag?: string;
   level?: string;
+  duration: string;
   redact: boolean;
   json?: boolean;
 }
@@ -69,12 +70,14 @@ export function registerLogsCommand(program: Command): void {
   logs
     .command('collect')
     .description('Create a diagnostic bundle from a connected device.')
+    .allowExcessArguments(false)
     .option('-o, --output <directory>', 'Parent directory for incident bundles.', path.join(os.homedir(), '.oniro', 'incident-bundles'))
     .option('--device <serial>', 'Target device serial.')
     .option('--package <bundle>', 'Collect faultlog entries for this application bundle.')
     .option('--pid <pid>', 'Create a filtered HiLog view for this process.')
     .option('--tag <tag>', 'Create a filtered HiLog view for this tag.')
     .option('--level <level>', 'Create a filtered HiLog view for this level (V/D/I/W/E/F).')
+    .option('--duration <seconds>', 'Keep HiLog records from the last N seconds (default 600).', '600')
     .option('--redact', 'Redact sensitive values and archive only the redacted bundle.')
     .option('--json', 'Emit bundle paths and status as JSON.')
     .action(async (opts: CollectOptions) => {
@@ -87,6 +90,7 @@ export function registerLogsCommand(program: Command): void {
         pid: opts.pid,
         tag: opts.tag,
         level: opts.level,
+        durationSeconds: Number(opts.duration),
         redact: Boolean(opts.redact),
       });
       const output = opts.json

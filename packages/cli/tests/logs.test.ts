@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { staticConfig, type HdcExecResult } from '@oniroproject/core';
-import { collectLogBundle, filterHilog, redactLogText } from '../src/lib/logBundle.js';
+import { collectLogBundle, filterHilog, filterHilogWindow, redactLogText } from '../src/lib/logBundle.js';
 
 const roots: string[] = [];
 
@@ -29,10 +29,11 @@ const hilog = [
   '01-02 03:04:06.007 43 43 E D003900/OtherTag: buildVersion=1.2.3',
 ].join('\n') + '\n';
 
-function fakeHdc(overrides: Record<string, HdcExecResult> = {}) {
+function fakeHdc(overrides: Record<string, HdcExecResult> = {}, targetOutput = targets) {
   return vi.fn(async (args: readonly string[]): Promise<HdcExecResult> => {
     const command = args.join(' ');
-    if (command === 'list targets -v') return result(targets);
+    if (command === 'list targets -v') return result(targetOutput);
+    if (command === 'shell date +%Y-%m-%dT%H:%M:%S') return result('2026-01-02T03:10:00\n');
     if (command === 'shell hilog -x') return overrides.hilog ?? result(hilog);
     if (command.startsWith('shell hidumper -e')) return overrides.faultlog ?? result('faultlog entry\n');
     if (command.startsWith('shell param get')) return result('Oniro Test Device\n');
@@ -74,6 +75,50 @@ describe('filterHilog', () => {
 
   it('declines to filter an unknown timestamped format', () => {
     expect(filterHilog('2026-01-02 03:04:05 unknown format\n', { tag: 'MyTag' })).toBeNull();
+  });
+
+  it('accepts prefixed domains, nested tags, and verbose records', () => {
+    const input = '01-02 03:09:59.000 42 42 V 0xD003900/OHOS::RS: verbose detail\n';
+    const filtered = filterHilog(input, { tag: 'OHOS::RS', level: 'VERBOSE' });
+    expect(filtered?.text).toBe(input);
+    expect(filtered?.applied).toEqual(['tag', 'level']);
+  });
+});
+
+describe('filterHilogWindow', () => {
+  it('keeps records and continuation lines inside the device-time window', () => {
+    const input = [
+      '--------- beginning of main',
+      '01-02 03:09:01.000 42 42 I D003900/MyTag: inside',
+      '  continuation inside window',
+      '01-02 03:08:59.999 42 42 I D003900/MyTag: outside',
+      '01-02 03:09:59.999 43 43 E D003900/OtherTag: inside near end',
+    ].join('\n') + '\n';
+    const filtered = filterHilogWindow(
+      input,
+      '2026-01-02T03:09:58',
+      '2026-01-02T03:10:00',
+      60,
+      2_500,
+    );
+
+    expect(filtered.text).toContain('inside\n');
+    expect(filtered.text).toContain('continuation inside window');
+    expect(filtered.text).toContain('inside near end');
+    expect(filtered.text).not.toContain('outside');
+  });
+
+  it('handles a year boundary using the device clock', () => {
+    const input = '12-31 23:59:30.000 42 42 I D003900/MyTag: previous year\n';
+    const filtered = filterHilogWindow(input, '2026-01-01T00:00:00', '2026-01-01T00:00:02', 60, 2_500);
+    expect(filtered.text).toContain('previous year');
+  });
+
+  it('declines filtering when the clock moves backwards or log format is unknown', () => {
+    expect(filterHilogWindow(hilog, '2026-01-02T03:10:05', '2026-01-02T03:10:00', 60, 2_500).reason)
+      .toMatch(/clock changed/);
+    expect(filterHilogWindow('unknown format\n', '2026-01-02T03:09:58', '2026-01-02T03:10:00', 60, 2_500).reason)
+      .toMatch(/unclassified lines/);
   });
 });
 
@@ -143,6 +188,49 @@ describe('collectLogBundle', () => {
     expect(filtered).not.toContain('OtherTag');
     const manifest = JSON.parse(await fs.readFile(path.join(bundle.bundleDirectory, 'manifest.json'), 'utf8'));
     expect(manifest.filterStatus).toMatchObject({ packageName: 'applied', pid: 'applied', tag: 'applied', level: 'applied' });
+    expect(manifest.filterStatus.duration).toBe('applied');
+    expect(manifest.hilogWindowApplied).toBe(true);
+  });
+
+  it('puts only the requested HiLog window in the redacted archive', async () => {
+    const outputDirectory = await tempDirectory();
+    const fullHilog = [
+      '01-02 03:09:30.000 42 42 I D003900/MyTag: recent event',
+      '01-02 03:00:00.000 43 43 E D003900/OtherTag: old event',
+    ].join('\n') + '\n';
+    const execute = fakeHdc({ hilog: result(fullHilog) });
+    const bundle = await collectLogBundle({
+      config: staticConfig(), outputDirectory, redact: true, durationSeconds: 60, execute,
+    });
+
+    expect(bundle.complete).toBe(true);
+    const archiveFiles = readZipTextFiles(await fs.readFile(bundle.archivePath!));
+    const archivedHilog = archiveFiles.get('logs/hilog.txt')!;
+    const fullSnapshot = await fs.readFile(path.join(bundle.bundleDirectory, 'logs/hilog.txt'), 'utf8');
+    expect(archivedHilog).toContain('recent event');
+    expect(archivedHilog).not.toContain('old event');
+    expect(fullSnapshot).toContain('old event');
+    const manifest = JSON.parse(archiveFiles.get('manifest.json')!);
+    expect(manifest.filters.durationSeconds).toBe(60);
+    expect(manifest.filterStatus.duration).toBe('applied');
+    expect(manifest.hilogWindowApplied).toBe(true);
+  });
+
+  it('omits the full HiLog snapshot from the redacted ZIP when the window cannot be applied', async () => {
+    const outputDirectory = await tempDirectory();
+    const source = 'unbounded secret log line\n';
+    const execute = fakeHdc({ hilog: result(source) });
+    const bundle = await collectLogBundle({
+      config: staticConfig(), outputDirectory, redact: true, durationSeconds: 60, execute,
+    });
+
+    expect(bundle.complete).toBe(false);
+    expect(bundle.error).toMatch(/duration was not applied/i);
+    expect(await fs.readFile(path.join(bundle.bundleDirectory, 'logs/hilog.txt'), 'utf8')).toBe(source);
+    const archiveFiles = readZipTextFiles(await fs.readFile(bundle.archivePath!));
+    expect(archiveFiles.get('logs/hilog.txt')).toContain('omitted from this archive');
+    expect([...archiveFiles.values()].join('\n')).not.toContain('unbounded secret log line');
+    const manifest = JSON.parse(archiveFiles.get('manifest.json')!);
     expect(manifest.filterStatus.duration).toBe('not-applied');
     expect(manifest.hilogWindowApplied).toBe(false);
   });
@@ -181,7 +269,7 @@ describe('collectLogBundle', () => {
 
   it('refuses to create a redacted archive when output contains unknown binary data', async () => {
     const outputDirectory = await tempDirectory();
-    const execute = fakeHdc({ hilog: result('prefix\u0000binary\n') });
+    const execute = fakeHdc({ faultlog: result('prefix\u0000binary\n') });
     const bundle = await collectLogBundle({
       config: staticConfig(), outputDirectory, redact: true, execute,
     });
@@ -192,6 +280,20 @@ describe('collectLogBundle', () => {
     expect(manifest.redactionStatus).toBe('failed');
     expect(manifest.archiveStatus.status).toBe('failed');
     await expect(fs.stat(`${bundle.bundleDirectory}-redacted.zip`)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('redacts valid UTF-8 containing a replacement character and warns for review', async () => {
+    const outputDirectory = await tempDirectory();
+    const execute = fakeHdc({ hilog: result('01-02 03:09:59.000 42 42 I D003900/MyTag: message=valid-text\ufffd\n') });
+    const bundle = await collectLogBundle({
+      config: staticConfig(), outputDirectory, redact: true, execute,
+    });
+
+    expect(bundle.archivePath).not.toBeNull();
+    expect(bundle.complete).toBe(false);
+    const manifest = JSON.parse(await fs.readFile(path.join(bundle.redactedDirectory!, 'manifest.json'), 'utf8'));
+    expect(manifest.redactionStatus).toBe('review-required');
+    expect(manifest.notes.some((note: string) => note.includes('hilog-snapshot output contains Unicode replacement characters'))).toBe(true);
   });
 
   it('writes a host-only manifest when no device is connected', async () => {
@@ -207,6 +309,21 @@ describe('collectLogBundle', () => {
     const manifest = JSON.parse(await fs.readFile(path.join(bundle.bundleDirectory, 'manifest.json'), 'utf8'));
     expect(manifest.target).toBeNull();
     expect(manifest.commands[0].status).toBe('failed');
+  });
+
+  it('does not count UART Ready endpoints as connected devices', async () => {
+    const outputDirectory = await tempDirectory();
+    const execute = fakeHdc({}, [
+      '3DK0224924000072\tUSB\tConnected\tlocalhost\thdc',
+      'COM3\tUART\tReady\tunknown...\thdc',
+      'COM4\tUART\tReady\tunknown...\thdc',
+    ].join('\n'));
+    const bundle = await collectLogBundle({
+      config: staticConfig(), outputDirectory, redact: true, execute,
+    });
+
+    expect(bundle.complete).toBe(true);
+    expect(execute).toHaveBeenCalledWith(['shell', 'hilog', '-x'], '3DK0224924000072');
   });
 
   it('rejects unsafe package values before invoking hdc', async () => {

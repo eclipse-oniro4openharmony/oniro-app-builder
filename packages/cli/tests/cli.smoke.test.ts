@@ -118,6 +118,18 @@ describe('oniro-app create validation', () => {
 });
 
 describe('oniro-app device-loop command validation (no device)', () => {
+  it('logs collect rejects an unexpected positional argument', () => {
+    const r = runCli(['logs', 'collect', 'redact']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/too many arguments|unknown argument/i);
+  });
+
+  it('logs collect help documents its time window', () => {
+    const r = runCli(['logs', 'collect', '--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('--duration <seconds>');
+  });
+
   it('wait with no condition flag errors out', () => {
     const r = runCli(['wait']);
     expect(r.status).not.toBe(0);

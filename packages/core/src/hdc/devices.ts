@@ -6,7 +6,7 @@ import { hdcExec, resolveDeviceSerial } from './exec.js';
 export interface DeviceInfo {
   /** Connect key — a USB serial or a `host:port` for a TCP target. */
   serial: string;
-  /** 'Connected' | 'Offline' | 'Unauthorized' | … | 'Unknown' when not reported. */
+  /** 'Connected' | 'Ready' | 'Offline' | 'Unauthorized' | … | 'Unknown' when not reported. */
   status: string;
   /** 'USB' | 'TCP' | … when reported by `-v`. */
   connection?: string;
@@ -18,6 +18,7 @@ export interface DeviceInfo {
 // (we scan the row's tokens) so it tolerates hdc version differences in column order.
 const STATUS_TOKENS = new Set([
   'Connected',
+  'Ready',
   'Offline',
   'Unauthorized',
   'Authorizing',
