@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import {
   attemptHdcConnection,
+  getEmulatorStatus,
   installEmulator,
   isEmulatorInstalled,
   removeEmulator,
@@ -50,6 +51,29 @@ export function registerEmulatorCommand(program: Command): void {
         connect: opts.connect,
       });
       logger.info('Emulator start command complete.');
+    });
+
+  emu
+    .command('status')
+    .description(
+      'Report whether the Oniro emulator is installed, running, and connected to hdc, without starting it. ' +
+        'Exits 1 when it is not installed.',
+    )
+    .option('--address <addr>', 'hdc address the emulator listens on', '127.0.0.1:55555')
+    .option('--json', 'Emit machine-readable JSON.')
+    .action(async (opts: { address: string; json?: boolean }) => {
+      const { config, logger } = getRuntime();
+      const status = await getEmulatorStatus(config, { address: opts.address, logger });
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+      } else {
+        process.stdout.write(
+          `installed: ${status.installed ? 'yes' : 'no'} (${status.dir})\n` +
+            `running:   ${status.running ? 'yes' : 'no'}\n` +
+            `connected: ${status.connected ? 'yes' : 'no'} (${status.address})\n`,
+        );
+      }
+      if (!status.installed) process.exitCode = 1;
     });
 
   emu

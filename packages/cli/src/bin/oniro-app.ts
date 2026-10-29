@@ -18,6 +18,8 @@ import { registerDevicesCommand } from '../commands/devices.js';
 import { registerFileCommand } from '../commands/file.js';
 import { registerLintCommand } from '../commands/lint.js';
 import { registerInputCommand } from '../commands/input.js';
+import { registerLogsCommand } from '../commands/logs.js';
+import { registerHdcCommand } from '../commands/hdc.js';
 
 declare const __CLI_VERSION__: string;
 const CLI_VERSION = __CLI_VERSION__;
@@ -32,7 +34,9 @@ function buildProgram(): Command {
         'and a non-zero exit code indicates failure.',
     )
     .version(CLI_VERSION)
-    .showHelpAfterError();
+    .showHelpAfterError()
+    // Lets `hdc` pass its arguments through untouched; global options go before the command.
+    .enablePositionalOptions();
 
   registerSdkCommand(program);
   registerCmdToolsCommand(program);
@@ -52,6 +56,8 @@ function buildProgram(): Command {
   registerFileCommand(program);
   registerLintCommand(program);
   registerInputCommand(program);
+  registerLogsCommand(program);
+  registerHdcCommand(program);
 
   return program;
 }

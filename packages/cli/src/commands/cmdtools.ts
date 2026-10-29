@@ -28,7 +28,10 @@ export function registerCmdToolsCommand(program: Command): void {
 
   cmdtools
     .command('status')
-    .description('Report whether the command-line tools are installed and their version.')
+    .description(
+      'Report whether the command-line tools are installed, their version and flavour (HarmonyOS or ' +
+        'OpenHarmony), and the hdc binary every device command uses.',
+    )
     .option('--json', 'Emit machine-readable JSON.')
     .action((opts: { json?: boolean }) => {
       const { config } = getRuntime();
@@ -38,6 +41,9 @@ export function registerCmdToolsCommand(program: Command): void {
         return;
       }
       process.stdout.write(`${status.status}\n`);
+      process.stdout.write(`path:    ${status.path}\n`);
+      if (status.flavour) process.stdout.write(`flavour: ${status.flavour}\n`);
+      process.stdout.write(`hdc:     ${status.hdc.path}${status.hdc.exists ? '' : ' (missing)'}\n`);
       if (!status.installed) process.exit(1);
     });
 

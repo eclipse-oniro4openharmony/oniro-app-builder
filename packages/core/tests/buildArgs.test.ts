@@ -32,7 +32,7 @@ describe('parseCodelinterFindings', () => {
       'entry/src/main/ets/Bar.ets:3: warning: Missing semicolon\n' +
       'random noise that is not a finding\n';
     expect(parseCodelinterFindings(out)).toEqual([
-      { file: 'entry/src/main/ets/Foo.ets', line: 12, severity: 'error', code: '@typescript-eslint/no-var', message: 'Unexpected var' },
+      { file: 'entry/src/main/ets/Foo.ets', line: 12, column: 5, severity: 'error', code: '@typescript-eslint/no-var', message: 'Unexpected var' },
       { file: 'entry/src/main/ets/Bar.ets', line: 3, severity: 'warning', code: '', message: 'Missing semicolon' },
     ]);
   });

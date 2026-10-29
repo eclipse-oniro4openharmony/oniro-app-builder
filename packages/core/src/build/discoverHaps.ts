@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { OniroError } from '../ports/errors.js';
 
 export interface ModuleHaps {
   signed: string[];
@@ -31,7 +32,8 @@ function moduleOfHap(hapFileName: string): string {
  * by build module name (parsed from the HAP filename). Skips `node_modules` /
  * `oh_modules` / `.git`. Ported from the proven MCP `findHaps`, extended with
  * per-module grouping so multi-module projects can install the right HAP.
- * Empty object when nothing is built.
+ * Each list is newest first, so a fresh build wins over HAPs committed to the
+ * repository. Empty object when nothing is built.
  */
 export async function discoverHaps(opts: DiscoverHapsOptions): Promise<Record<string, ModuleHaps>> {
   const { projectDir } = opts;
@@ -56,5 +58,41 @@ export async function discoverHaps(opts: DiscoverHapsOptions): Promise<Record<st
   };
 
   await walk(projectDir, 0);
+  const mtime = (p: string): number => fs.statSync(p).mtimeMs;
+  for (const bucket of Object.values(result)) {
+    bucket.signed.sort((a, b) => mtime(b) - mtime(a));
+    bucket.unsigned.sort((a, b) => mtime(b) - mtime(a));
+  }
   return result;
+}
+
+export interface PickedHap {
+  module: string;
+  path: string;
+  /** False for an `*-unsigned.hap`, which only the HarmonyOS emulator installs. */
+  signed: boolean;
+}
+
+/**
+ * The HAP to install from {@link discoverHaps} output: a module's newest signed
+ * HAP, else its newest unsigned one. Without `module`, the single module that
+ * has a signed HAP, else the single one that has any HAP. Null when nothing is
+ * built; throws when several modules qualify and none was named.
+ */
+export function pickHap(haps: Record<string, ModuleHaps>, module?: string): PickedHap | null {
+  const pick = (name: string): PickedHap | null => {
+    const signed = haps[name]?.signed[0];
+    if (signed) return { module: name, path: signed, signed: true };
+    const unsigned = haps[name]?.unsigned[0];
+    return unsigned ? { module: name, path: unsigned, signed: false } : null;
+  };
+  if (module) return pick(module);
+  const names = Object.keys(haps);
+  const withSigned = names.filter((n) => haps[n]!.signed.length > 0);
+  const candidates = withSigned.length > 0 ? withSigned : names.filter((n) => haps[n]!.unsigned.length > 0);
+  if (candidates.length === 0) return null;
+  if (candidates.length > 1) {
+    throw new OniroError(`Multiple modules have built HAPs (${candidates.join(', ')}). Pass a module to choose.`);
+  }
+  return pick(candidates[0]!);
 }

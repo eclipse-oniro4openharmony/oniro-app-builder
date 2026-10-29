@@ -5,18 +5,20 @@ import type { ConfigProvider } from '../ports/config.js';
 import { defaultPaths } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger, scopedLogger } from '../ports/logger.js';
-import { OniroError } from '../ports/errors.js';
+import { CommandFailedError, OniroError } from '../ports/errors.js';
 import { getHdcPath } from '../sdk/paths.js';
+import { discoverHaps, pickHap } from '../build/discoverHaps.js';
 import { killProcessTree, spawnCompat } from './spawnCompat.js';
-import { hdcExec, shell, ensureOk } from './exec.js';
+import { hdcExec, hdcTargetArgs, shell, ensureOk, type HdcExecResult } from './exec.js';
 import { getBundleName, getMainAbility } from './project.js';
 
 export interface InstallAppOptions {
   config: ConfigProvider;
   projectDir: string;
   /**
-   * Explicit path (absolute, or relative to projectDir) to the signed `.hap`.
-   * Falls back to the `hapPath` config key, then to the well-known default.
+   * Explicit path (absolute, or relative to projectDir) to the `.hap`. Falls back
+   * to the `hapPath` config key, then to the well-known signed entry HAP, then to
+   * the HAPs the build produced (signed first, else unsigned).
    */
   hapPath?: string;
   deviceSerial?: string;
@@ -33,14 +35,44 @@ export interface InstallAppResult {
   output: string;
 }
 
+/**
+ * The bundle manager's rejection in `hdc install` output, or null when the
+ * install went through. hdc exits 0 either way: success prints `msg:install
+ * bundle successfully.`, a rejection `msg:error: failed to install bundle.`
+ * with a `code:95xxxxx`. Pure/testable.
+ */
+export function detectInstallFailure(output: string): string | null {
+  return /\[Fail\]|msg:\s*error|error:\s*failed to install|code:\s*95\d{5}/i.test(output) ? output.trim() : null;
+}
+
+/** Throw a typed {@link CommandFailedError} when hdc or the bundle manager rejected an install. */
+export function ensureInstallOk(result: HdcExecResult, command: string): HdcExecResult {
+  ensureOk(result, command);
+  const failure = detectInstallFailure(`${result.stdout}\n${result.stderr}`);
+  if (failure) throw new CommandFailedError(command, 1, failure);
+  return result;
+}
+
+async function resolveInstallHap(opts: InstallAppOptions, logger: Logger): Promise<string> {
+  const configured = opts.hapPath ?? opts.config.get('hapPath', '');
+  const relative = configured || defaultPaths.hapPath;
+  const hapPath = path.isAbsolute(relative) ? relative : path.join(opts.projectDir, relative);
+  if (fs.existsSync(hapPath) || configured) {
+    if (!fs.existsSync(hapPath)) throw new OniroError(`HAP file not found at: ${hapPath}. Build the app first.`);
+    return hapPath;
+  }
+  // No explicit HAP and no signed entry HAP: take what the build produced.
+  const picked = pickHap(await discoverHaps({ projectDir: opts.projectDir }));
+  if (!picked) throw new OniroError(`No HAP found under ${opts.projectDir}. Build the app first (\`oniro-app build\`).`);
+  if (!picked.signed) {
+    logger.warn(`Installing the unsigned ${path.basename(picked.path)}: only the HarmonyOS emulator accepts unsigned HAPs.`);
+  }
+  return picked.path;
+}
+
 export async function installApp(opts: InstallAppOptions): Promise<InstallAppResult> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
-  const relativeHapPath = opts.hapPath ?? opts.config.get('hapPath', defaultPaths.hapPath);
-  const hapPath = path.isAbsolute(relativeHapPath) ? relativeHapPath : path.join(opts.projectDir, relativeHapPath);
-
-  if (!fs.existsSync(hapPath)) {
-    throw new OniroError(`HAP file not found at: ${hapPath}. Build and sign the app first.`);
-  }
+  const hapPath = await resolveInstallHap(opts, logger);
 
   const result = await hdcExec({
     config: opts.config,
@@ -50,7 +82,7 @@ export async function installApp(opts: InstallAppOptions): Promise<InstallAppRes
   });
   if (result.stdout.trim()) logger.info(result.stdout.trim());
   if (result.stderr.trim()) logger.warn(result.stderr.trim());
-  ensureOk(result, `hdc install ${hapPath}`);
+  ensureInstallOk(result, `hdc install ${hapPath}`);
 
   let bundleName = '';
   try {
@@ -59,6 +91,24 @@ export async function installApp(opts: InstallAppOptions): Promise<InstallAppRes
     // bundleName is informational; a HAP from a project without AppScope still installs.
   }
   return { installed: true, bundleName, hapPath, output: `${result.stdout}${result.stderr}`.trim() };
+}
+
+/**
+ * Whether `bm dump -n <bundle>` finds the bundle on the device. A missing bundle
+ * prints `error: failed to get information…`; an installed one, `<bundle>:` and
+ * its JSON.
+ */
+export async function isBundleInstalled(opts: BundleOptions): Promise<boolean> {
+  const safe = opts.bundle.replace(/'/g, `'\\''`);
+  const res = await shell({
+    config: opts.config,
+    command: `bm dump -n '${safe}'`,
+    deviceSerial: opts.deviceSerial,
+    timeoutMs: opts.timeoutMs ?? 15_000,
+    logger: opts.logger,
+  });
+  ensureOk(res, `hdc shell bm dump -n ${opts.bundle}`);
+  return res.stdout.includes('{') && !/failed to get information/i.test(res.stdout);
 }
 
 export interface LaunchAppOptions {
@@ -189,7 +239,7 @@ export interface RunningProcess {
  */
 export function listRunningProcesses(
   config: ConfigProvider,
-  options: { targetProcessName?: string; timeoutMs?: number; logger?: Logger } = {},
+  options: { targetProcessName?: string; timeoutMs?: number; deviceSerial?: string; logger?: Logger } = {},
 ): Promise<RunningProcess[] | string> {
   const logger = options.logger ?? noopLogger;
   const timeoutMs = options.timeoutMs ?? 1000;
@@ -202,7 +252,7 @@ export function listRunningProcesses(
     // failure is funnelled into the same rejection as the 'error' event below.
     let proc: ChildProcess;
     try {
-      proc = spawnCompat(hdc, ['track-jpid']);
+      proc = spawnCompat(hdc, [...hdcTargetArgs(options.deviceSerial), 'track-jpid']);
     } catch (err) {
       reject(new OniroError(`Failed to spawn ${hdc}: ${err instanceof Error ? err.message : String(err)}`, err));
       return;
@@ -302,7 +352,11 @@ export async function findRunningProcess(opts: BundleOptions): Promise<RunningPr
   // Fallback: the bundle may only be alive as an extension process. track-jpid
   // names them "<bundle>/<bundle>:<ext>" (vs bare "<bundle>" for the main).
   try {
-    const list = await listRunningProcesses(opts.config, { timeoutMs: 1200, logger: opts.logger });
+    const list = await listRunningProcesses(opts.config, {
+      timeoutMs: 1200,
+      deviceSerial: opts.deviceSerial,
+      logger: opts.logger,
+    });
     if (Array.isArray(list)) {
       const mine = (name: string): boolean =>
         name === opts.bundle || name.startsWith(`${opts.bundle}/`) || name.startsWith(`${opts.bundle}:`);
