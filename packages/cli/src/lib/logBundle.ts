@@ -242,9 +242,7 @@ async function writeZip(source: string, archivePath: string): Promise<void> {
 function commandFailure(result: HdcExecResult): string | null {
   if (result.code !== 0) return `hdc exited with code ${result.code}`;
   if (result.stderr.trim()) return 'hdc wrote to stderr';
-  const lines = result.stdout.trim().split(/\r?\n/);
-  const content = lines.length === 1 ? lines[0] : lines.find((line) => /^\s*(?:\[(?:fail|error)\]|(?:hdc|device)\b.*\b(?:error|failed|no device|not connected|offline))(?=\s|$)/i.test(line));
-  const contentError = content && FAILURE_TEXT.test(content) ? content.trim() : null;
+  const contentError = result.stdout.split(/\r?\n/).find((line) => FAILURE_TEXT.test(line))?.trim() ?? null;
   return contentError ? `command output indicates failure: ${contentError}` : null;
 }
 
