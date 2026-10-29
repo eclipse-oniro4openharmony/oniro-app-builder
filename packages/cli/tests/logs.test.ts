@@ -157,6 +157,31 @@ describe('redactLogText', () => {
     expect(redacted).toContain('0000007f12345678 /system/lib64/libsample.so');
   });
 
+  it('preserves JS and native crash evidence while redacting adjacent private values', () => {
+    const peerAddress = ['192', '168', '1', '42'].join('.');
+    const version = ['10', '20', '30', '40'].join('.');
+    const redacted = redactLogText([
+      'Error name: ExampleError',
+      `buildVersion=${version} versionCode=123456789012345`,
+      `peer=${peerAddress}:5555 token=second-secret`,
+      'at EntryAbility.onCreate (C:\\Users\\alice\\app\\EntryAbility.ets:16:11)',
+      '#00 pc 0000007f12345678 /system/lib64/libsample.so',
+      '#01 pc 00000000000007e8 /data/app/el1/bundle/com.example/lib/arm64/libentry.so',
+      'buildVersion=10.20.30.40 versionCode=123456789012345',
+      'peer=192.168.1.42:5555 token=secret alice@example.com',
+    ].join('\n'));
+
+    expect(redacted).toContain('C:\\Users\\[REDACTED_USER]\\app\\EntryAbility.ets:16:11');
+    expect(redacted).toContain('#00 pc 0000007f12345678 /system/lib64/libsample.so');
+    expect(redacted).toContain(`buildVersion=${version} versionCode=123456789012345`);
+    expect(redacted).toContain('#01 pc 00000000000007e8 /data/app/el1/bundle/com.example/lib/arm64/libentry.so');
+    expect(redacted).toContain('buildVersion=10.20.30.40 versionCode=123456789012345');
+    expect(redacted).toContain('peer=[REDACTED_IP]:5555');
+    expect(redacted).not.toContain('token=secret');
+    expect(redacted).not.toContain('second-secret');
+    expect(redacted).not.toContain('alice@example.com');
+  });
+
   it('redacts credentials, user paths, and selected device IDs', () => {
     const redacted = redactLogText(
       'token=abc123 home=C:\\Users\\alice\\logs unix=/home/bob/project auth=Basic YWJjMTIz email=alice@example.com phone=+1 415 555 0132',
@@ -275,6 +300,25 @@ describe('collectLogBundle', () => {
     });
     const archived = readZipTextFiles(await fs.readFile(bundle.archivePath!));
     expect(archived.has('logs/faultlog.txt')).toBe(true);
+  });
+
+  it('detects ordinary Error lines in multiline output when hdc exits zero', async () => {
+    const outputDirectory = await tempDirectory();
+    const execute = fakeHdc({ faultlog: result('partial fault data\nError: faultlog read failed\n') });
+    const bundle = await collectLogBundle({
+      config: staticConfig(), outputDirectory, redact: true, execute,
+    });
+
+    expect(bundle.complete).toBe(false);
+    expect(bundle.archivePath).not.toBeNull();
+    const manifest = JSON.parse(await fs.readFile(path.join(bundle.bundleDirectory, 'manifest.json'), 'utf8'));
+    const faultlog = manifest.commands.find((command: { name: string }) => command.name === 'faultlog');
+    expect(faultlog).toMatchObject({
+      status: 'failed',
+      exitCode: 0,
+      error: 'command output indicates failure: Error: faultlog read failed',
+    });
+    expect(manifest.commands.find((command: { name: string }) => command.name === 'threads').status).toBe('success');
   });
 
   it('records stderr as failure even when hdc exits zero and continues collecting', async () => {
