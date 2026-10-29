@@ -4,7 +4,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { CommandFailedError, OniroError, SdkNotInstalledError } from '../src/ports/errors.js';
 import { staticConfig } from '../src/ports/config.js';
-import { detectInstallFailure, ensureInstallOk } from '../src/hdc/app.js';
+import {
+  detectInstallFailure,
+  ensureInstallOk,
+  existingHapOrUnsigned,
+  installFailureReason,
+  isUnsignedHap,
+  unsignedHapRejection,
+} from '../src/hdc/app.js';
 import { pickHap } from '../src/build/discoverHaps.js';
 import { diagnoseBuildFailure } from '../src/build/buildHap.js';
 import { findMissingProjectSdk } from '../src/sdk/detectProjectSdk.js';
@@ -27,6 +34,60 @@ describe('detectInstallFailure', () => {
 
   it('catches hdc refusing to pick a device', () => {
     expect(detectInstallFailure('[Fail]ExecuteCommand need connect-key? please confirm a device by help info')).not.toBeNull();
+  });
+});
+
+describe('unsigned HAP rejections', () => {
+  // As an OpenHarmony device prints it, all on the install line.
+  const noSignature =
+    '[Info]App install path:C:\\p\\entry-default-unsigned.hap msg:error: failed to install bundle. code:9568320 error: no signature file. \n';
+  const notAHap = '[Info]App install path:C:\\p\\x-unsigned.hap msg:error: failed to install bundle.\ncode:9568337\nerror: install parse unexpected.\n';
+
+  it("reads the bundle manager's code and reason, on one line or several", () => {
+    expect(installFailureReason(noSignature)).toBe('code 9568320: no signature file');
+    expect(installFailureReason(notAHap)).toBe('code 9568337: install parse unexpected');
+    expect(installFailureReason('[Fail]ExecuteCommand need connect-key?\n')).toBe('[Fail]ExecuteCommand need connect-key?');
+  });
+
+  it('says what was tried and how to sign when the target wants a signature', () => {
+    const message = unsignedHapRejection(noSignature, { path: '/p/entry-default-unsigned.hap', fallback: true });
+    expect(message).toMatch(/^No signed HAP was found, so the unsigned entry-default-unsigned\.hap was tried/);
+    expect(message).toContain('(code 9568320: no signature file)');
+    expect(message).toContain('`oniro-app sign`');
+    expect(message).toContain('`oniro-app sign --harmonyos`');
+  });
+
+  it('gives no signing advice for a rejection signing would not fix', () => {
+    expect(unsignedHapRejection(notAHap, { path: '/p/x-unsigned.hap' })).toBe(
+      'The target rejected the unsigned x-unsigned.hap (code 9568337: install parse unexpected).',
+    );
+  });
+
+  it('replaces the raw hdc output for an unsigned HAP only', () => {
+    const result = { code: 0, stdout: noSignature, stderr: '' };
+    const unsigned = { path: '/p/entry-default-unsigned.hap', fallback: true };
+    expect(() => ensureInstallOk(result, 'hdc install', unsigned)).toThrow(/No signed HAP was found/);
+    expect(() => ensureInstallOk(result, 'hdc install', unsigned)).not.toThrow(CommandFailedError);
+    expect(() => ensureInstallOk(result, 'hdc install', { path: '/p/entry-default-signed.hap' })).toThrow(CommandFailedError);
+    // Not the bundle manager's verdict: keep hdc's own message and its targeting hint.
+    const noTarget = { code: 1, stdout: '[Fail]ExecuteCommand need connect-key?', stderr: '' };
+    expect(() => ensureInstallOk(noTarget, 'hdc install', unsigned)).toThrow(CommandFailedError);
+  });
+
+  it("falls back from a missing signed HAP to its unsigned sibling", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-sibling-'));
+    try {
+      const signed = path.join(dir, 'entry-default-signed.hap');
+      expect(existingHapOrUnsigned(signed)).toBeUndefined();
+      fs.writeFileSync(path.join(dir, 'entry-default-unsigned.hap'), 'hap');
+      expect(existingHapOrUnsigned(signed)).toEqual({ path: path.join(dir, 'entry-default-unsigned.hap'), fallback: true });
+      fs.writeFileSync(signed, 'hap');
+      expect(existingHapOrUnsigned(signed)).toEqual({ path: signed });
+      expect(isUnsignedHap(signed)).toBe(false);
+      expect(isUnsignedHap(path.join(dir, 'entry-default-unsigned.hap'))).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
