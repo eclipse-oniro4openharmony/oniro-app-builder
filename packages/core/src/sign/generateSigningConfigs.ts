@@ -5,9 +5,10 @@ import JSON5 from 'json5';
 import { encryptPwd, createMaterial } from './encryptKey.js';
 import { OPEN_HARMONY_APPLICATION_CERT } from './applicationCert.js';
 import { detectProjectSdkVersion } from '../sdk/detectProjectSdk.js';
+import { ALL_SDKS } from '../sdk/constants.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
-import { OniroError } from '../ports/errors.js';
+import { OniroError, SdkNotInstalledError } from '../ports/errors.js';
 
 /** Ability Privilege Level written into the profile's `bundle-info.apl`. */
 export type Apl = 'normal' | 'system_basic' | 'system_core';
@@ -90,6 +91,14 @@ export interface GenerateSigningConfigsOptions {
    */
   acls?: string[];
   /**
+   * Privileges to write into the profile's `app-privilege-capabilities`, e.g.
+   * `AllowAppUsePrivilegeExtension` for an app that declares a privileged extension
+   * ability (else install fails with 9568344 "not allow use privilege extension"),
+   * `AllowAppMultiProcess` or `AllowAppDesktopIconHide`. When omitted, the
+   * template's value is left alone.
+   */
+  appPrivilegeCapabilities?: string[];
+  /**
    * Keystore passwords written into the profile sign step and the build-profile
    * signingConfigs. Defaults to `'123456'` (the SDK's bundled OpenHarmony.p12
    * password). Only override when supplying a matching custom keystore.
@@ -160,7 +169,7 @@ export function modifyProfileTemplate(
   apl: Apl,
   appFeature: AppFeature,
   logger: Logger,
-  options: { kind?: SigningKind; acls?: string[] } = {},
+  options: { kind?: SigningKind; acls?: string[]; appPrivilegeCapabilities?: string[] } = {},
 ): void {
   const kind = options.kind ?? pickSigningKind(apl);
   logger.info(`[sign] Modifying profile template (apl=${apl}, app-feature=${appFeature}, kind=${kind})...`);
@@ -186,6 +195,7 @@ export function modifyProfileTemplate(
       'app-feature'?: string;
     };
     acls?: { 'allowed-acls'?: string[] };
+    'app-privilege-capabilities'?: string[];
   };
   try {
     profileTemplate = JSON.parse(fs.readFileSync(profileTemplatePath, 'utf-8'));
@@ -214,6 +224,9 @@ export function modifyProfileTemplate(
   if (options.acls !== undefined) {
     profileTemplate.acls = profileTemplate.acls ?? {};
     profileTemplate.acls['allowed-acls'] = options.acls;
+  }
+  if (options.appPrivilegeCapabilities !== undefined) {
+    profileTemplate['app-privilege-capabilities'] = options.appPrivilegeCapabilities;
   }
 
   fs.writeFileSync(profileTemplatePath, JSON.stringify(profileTemplate, null, 2));
@@ -287,7 +300,8 @@ export function detectSigningConfigNames(projectDir: string): string[] {
   return names.length > 0 ? names : ['default'];
 }
 
-function updateBuildProfile(projectDir: string, kind: SigningKind, logger: Logger, passwords: SigningPasswords): void {
+/** @internal exposed for tests. Needs `signatures/material` (see {@link createMaterial}). */
+export function updateBuildProfile(projectDir: string, kind: SigningKind, logger: Logger, passwords: SigningPasswords): void {
   logger.info('[sign] Writing signing configs into build-profile.json5...');
   const materialDir = path.join(projectDir, 'signatures', 'material');
   const buildProfilePath = path.join(projectDir, 'build-profile.json5');
@@ -295,7 +309,7 @@ function updateBuildProfile(projectDir: string, kind: SigningKind, logger: Logge
   const encryptedStorePassword = encryptPwd(passwords.store, materialDir);
   const encryptedKeyPassword = encryptPwd(passwords.key, materialDir);
 
-  let buildProfile: { app?: { signingConfigs?: unknown[] } } = { app: {} };
+  let buildProfile: { app?: { signingConfigs?: unknown[]; products?: Array<{ signingConfig?: unknown }> } } = { app: {} };
   if (fs.existsSync(buildProfilePath)) {
     try {
       buildProfile = JSON5.parse(fs.readFileSync(buildProfilePath, 'utf-8'));
@@ -321,6 +335,13 @@ function updateBuildProfile(projectDir: string, kind: SigningKind, logger: Logge
       storeFile: './signatures/OpenHarmony.p12',
     },
   }));
+  // A product that names no signingConfig builds unsigned HAPs even with one defined.
+  for (const product of buildProfile.app.products ?? []) {
+    if (typeof product.signingConfig !== 'string' || product.signingConfig === '') {
+      product.signingConfig = configNames[0];
+      logger.info(`[sign] Pointing a product with no signingConfig at "${configNames[0]}".`);
+    }
+  }
 
   // Intentionally strict JSON (not JSON5) — keeps the file readable by VS Code's JSON parser.
   fs.writeFileSync(buildProfilePath, JSON.stringify(buildProfile, null, 2));
@@ -365,7 +386,7 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
 
   const sdkPath = path.join(sdkHome, String(sdkVersion));
   if (!fs.existsSync(sdkPath)) {
-    throw new OniroError(`SDK path does not exist: ${sdkPath}`);
+    throw new SdkNotInstalledError(String(sdkVersion), sdkPath, ALL_SDKS.find((s) => s.api === String(sdkVersion))?.version);
   }
 
   const paths = {
@@ -380,7 +401,11 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
 
   logger.info('[sign] Starting signing configuration generation...');
   copyFilesToProject(projectDir, paths, kind, logger, options.applicationCertPath);
-  modifyProfileTemplate(projectDir, apl, appFeature, logger, { kind, acls: options.acls });
+  modifyProfileTemplate(projectDir, apl, appFeature, logger, {
+    kind,
+    acls: options.acls,
+    appPrivilegeCapabilities: options.appPrivilegeCapabilities,
+  });
   generateP7bFile(projectDir, paths, logger, passwords);
   prepareMaterialDirectory(projectDir, logger);
   updateBuildProfile(projectDir, kind, logger, passwords);

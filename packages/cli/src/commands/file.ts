@@ -7,12 +7,18 @@ export function registerFileCommand(program: Command): void {
 
   file
     .command('send <local> <remote>')
-    .description('Push a local file to the device.')
+    .description(
+      'Push a local file to the device. With --bundle, <remote> may be relative to that app\'s sandbox ' +
+        '(files/x is its filesDir, haps/entry/files/x the entry module\'s), and the file is chowned to the app ' +
+        'so it can read it. Prints the device path.',
+    )
+    .option('--bundle <bundle>', 'Push into this app\'s sandbox and give the file to the app\'s user.')
     .option('--device <serial>', 'Target device serial.')
-    .action(async (local: string, remote: string, opts: { device?: string }) => {
+    .action(async (local: string, remote: string, opts: { bundle?: string; device?: string }) => {
       const { config, logger } = getRuntime();
-      await sendFile({ config, local, remote, deviceSerial: opts.device, logger });
-      logger.info(`Sent ${local} -> ${remote}.`);
+      const written = await sendFile({ config, local, remote, bundle: opts.bundle, deviceSerial: opts.device, logger });
+      logger.info(`Sent ${local} -> ${written}${opts.bundle ? ` (owned by ${opts.bundle})` : ''}.`);
+      process.stdout.write(`${written}\n`);
     });
 
   file

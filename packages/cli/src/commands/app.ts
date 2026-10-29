@@ -18,16 +18,22 @@ export function registerAppCommand(program: Command): void {
   const app = program.command('app').description('Install, launch, and manage built apps on a connected device/emulator.');
 
   app
-    .command('install [project-dir]')
-    .description('Install the signed .hap on the connected device/emulator via hdc.')
+    .command('install [project-dir-or-hap]')
+    .description(
+      'Install a built .hap on the connected device/emulator via hdc. Takes a project dir (default: the ' +
+        'current one), whose newest signed HAP is installed, else its unsigned one (HarmonyOS emulator ' +
+        'only), or a .hap file. Fails when the bundle manager rejects the HAP.',
+    )
     .option('--hap <path>', 'Override the .hap path (relative to project-dir or absolute).')
     .option('--device <serial>', 'Target device serial.')
-    .action(async (projectDir: string | undefined, opts: { hap?: string; device?: string }) => {
+    .action(async (target: string | undefined, opts: { hap?: string; device?: string }) => {
       const { config, logger } = getRuntime();
-      const dir = path.resolve(projectDir ?? process.cwd());
-      logger.info(`Installing app from ${dir}...`);
-      await installApp({ config, projectDir: dir, hapPath: opts.hap, deviceSerial: opts.device, logger });
-      logger.info('App installed.');
+      const isHap = target !== undefined && /\.hap$/i.test(target);
+      const dir = isHap ? process.cwd() : path.resolve(target ?? process.cwd());
+      const hapPath = isHap ? path.resolve(target) : opts.hap;
+      logger.info(`Installing ${hapPath ?? `app from ${dir}`}...`);
+      const result = await installApp({ config, projectDir: dir, hapPath, deviceSerial: opts.device, logger });
+      logger.info(`Installed ${result.hapPath}.`);
     });
 
   app

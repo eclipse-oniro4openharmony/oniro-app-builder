@@ -145,11 +145,56 @@ export function runProcess(opts: RunProcessOptions): Promise<HdcExecResult> {
   });
 }
 
+/**
+ * The device to address: an explicit serial wins, then the `ONIRO_DEVICE_SERIAL` /
+ * `DEVICE_SERIAL` env vars. `auto`, or nothing at all, leaves the choice to hdc,
+ * which only works while a single target is connected.
+ */
+export function resolveDeviceSerial(explicit?: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (explicit && explicit !== 'auto') return explicit;
+  const fromEnv = env.ONIRO_DEVICE_SERIAL || env.DEVICE_SERIAL;
+  return fromEnv && fromEnv !== 'auto' ? fromEnv : undefined;
+}
+
+/** `['-t', <serial>]` for the device {@link resolveDeviceSerial} picks, or `[]` to let hdc choose. */
+export function hdcTargetArgs(explicit?: string): string[] {
+  const serial = resolveDeviceSerial(explicit);
+  return serial ? ['-t', serial] : [];
+}
+
+/**
+ * hdc subcommands served by the hdc server itself rather than a device. They only
+ * take `-t` when the caller names a device explicitly, never from the env var.
+ */
+const HOST_COMMANDS = new Set(['list', 'tconn', 'start', 'kill', 'version', 'checkserver']);
+
+/** The `-t <serial>` prefix for `hdc <args...>`, following {@link HdcExecOptions.deviceSerial}'s rules. */
+export function hdcTargetArgsFor(args: readonly string[], explicit?: string): string[] {
+  if (HOST_COMMANDS.has(args[0] ?? '')) return explicit ? ['-t', explicit] : [];
+  return hdcTargetArgs(explicit);
+}
+
+/**
+ * The `[Fail]…` line hdc printed instead of running the command, or null. hdc
+ * exits 0 even then: `[Fail]ExecuteCommand need connect-key?` (several targets
+ * and no `-t`), `[Fail]Not match target founded` (unknown serial), a failed file
+ * transfer. Only the first line of output counts, so device-side output further
+ * down that happens to contain the marker is left alone. Pure/testable.
+ */
+export function hdcClientFailure(output: string): string | null {
+  const first = output.split(/\r?\n/).find((l) => l.trim() !== '')?.trim() ?? '';
+  return first.startsWith('[Fail]') ? first : null;
+}
+
 export interface HdcExecOptions {
   config: ConfigProvider;
   /** Args passed to hdc verbatim, e.g. `['shell','aa','start','-a',ability,'-b',bundle]`. */
   args: readonly string[];
-  /** Device serial; when set, prepends `['-t', serial]`. */
+  /**
+   * Device serial; prepends `['-t', serial]`. When unset, `ONIRO_DEVICE_SERIAL`
+   * applies (see {@link resolveDeviceSerial}), except for hdc server commands
+   * such as `list targets` and `tconn`.
+   */
   deviceSerial?: string;
   /** Default 60_000. */
   timeoutMs?: number;
@@ -160,19 +205,21 @@ export interface HdcExecOptions {
 
 /**
  * Run `hdc [-t <serial>] <args...>`. Resolves with `{ code, stdout, stderr }`
- * for any exit code; use {@link ensureOk} to throw on non-zero.
+ * for any exit code; use {@link ensureOk} to throw on non-zero. A `[Fail]` line
+ * from hdc itself is reported as exit code 1 (see {@link hdcClientFailure}).
  */
-export function hdcExec(opts: HdcExecOptions): Promise<HdcExecResult> {
+export async function hdcExec(opts: HdcExecOptions): Promise<HdcExecResult> {
   const hdc = getHdcPath(opts.config);
-  const argv = opts.deviceSerial ? ['-t', opts.deviceSerial, ...opts.args] : [...opts.args];
-  return runProcess({
+  const res = await runProcess({
     command: hdc,
-    args: argv,
+    args: [...hdcTargetArgsFor(opts.args, opts.deviceSerial), ...opts.args],
     timeoutMs: opts.timeoutMs,
     abortSignal: opts.abortSignal,
     onOutput: opts.onOutput,
     logger: opts.logger,
   });
+  if (res.code === 0 && hdcClientFailure(`${res.stdout}\n${res.stderr}`)) return { ...res, code: 1 };
+  return res;
 }
 
 export interface HdcShellOptions extends Omit<HdcExecOptions, 'args'> {
@@ -192,9 +239,18 @@ export function shell(opts: HdcShellOptions): Promise<HdcExecResult> {
  */
 export function ensureOk(result: HdcExecResult, command: string): HdcExecResult {
   if (result.code !== 0) {
-    throw new CommandFailedError(command, result.code, result.stderr.trim());
+    throw new CommandFailedError(command, result.code, withTargetHint(result.stderr.trim() || result.stdout.trim()));
   }
   return result;
+}
+
+/** Append how to pick a device when hdc refused to choose between several. */
+function withTargetHint(detail: string): string {
+  if (!/need connect-key|Not match target/i.test(detail)) return detail;
+  return (
+    `${detail}\nMore than one target is connected, or the serial is unknown: pass --device <serial> ` +
+    'or set ONIRO_DEVICE_SERIAL to one listed by `oniro-app devices`.'
+  );
 }
 
 /** Matches the exit-code marker {@link shellChecked} appends. */
@@ -238,7 +294,7 @@ export async function shellChecked(opts: HdcShellOptions): Promise<HdcExecResult
  */
 export function ensureRemoteOk(result: HdcExecResult, command: string): HdcExecResult {
   if (result.code !== 0) {
-    throw new CommandFailedError(command, result.code, result.stderr.trim() || result.stdout.trim());
+    throw new CommandFailedError(command, result.code, withTargetHint(result.stderr.trim() || result.stdout.trim()));
   }
   return result;
 }

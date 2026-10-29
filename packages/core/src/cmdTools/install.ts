@@ -8,7 +8,7 @@ import type { ProgressReporter } from '../ports/progress.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError, UnsupportedPlatformError } from '../ports/errors.js';
-import { getCmdToolsPath } from '../sdk/paths.js';
+import { getCmdToolsPath, getHdcPath } from '../sdk/paths.js';
 import { downloadFile } from '../sdk/download.js';
 import { extractZipWithProgress } from '../sdk/extract.js';
 import { movePath } from '../sdk/move.js';
@@ -154,23 +154,44 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
 export interface CmdToolsStatus {
   installed: boolean;
   status: string;
+  /** Install directory (the configured `cmdToolsPath`). */
+  path: string;
+  /** Which SDK flavour the tools ship; see {@link detectCmdToolsFlavour}. Set when installed. */
+  flavour?: CmdToolsFlavour;
+  /** The hdc binary commands use, and whether it exists. */
+  hdc: { path: string; exists: boolean };
+}
+
+export type CmdToolsFlavour = 'HarmonyOS' | 'OpenHarmony';
+
+/**
+ * The flavour of a command-line tools install: `HarmonyOS` when it bundles the
+ * HarmonyOS SDK (`sdk/default/hms`, as the Huawei developer-portal download
+ * does), otherwise `OpenHarmony`. codelinter only fully checks projects of its
+ * own flavour (`runtimeOS` in build-profile.json5).
+ */
+export function detectCmdToolsFlavour(cmdToolsPath: string): CmdToolsFlavour {
+  return fs.existsSync(path.join(cmdToolsPath, 'sdk', 'default', 'hms')) ? 'HarmonyOS' : 'OpenHarmony';
 }
 
 /**
- * Reports whether ohpm is present at the configured path, and if so its version.
- * Prefers reading `version.txt` (`# Version: x.y.z`) before falling back to executing
- * the binary with `-v`.
+ * Reports whether ohpm is present at the configured path, and if so its version,
+ * flavour, and the hdc binary in use. Prefers reading `version.txt`
+ * (`# Version: x.y.z`) before falling back to executing the binary with `-v`.
  */
 export function getCmdToolsStatus(config: ConfigProvider): CmdToolsStatus {
   const cmdPath = getCmdToolsPath(config);
+  const hdcPath = getHdcPath(config);
+  const base = { path: cmdPath, hdc: { path: hdcPath, exists: fs.existsSync(hdcPath) } };
   const binDir = path.join(cmdPath, 'bin');
   const candidates = os.platform() === 'win32'
     ? ['ohpm.exe', 'ohpm.cmd', 'ohpm.bat', 'ohpm']
     : ['ohpm'];
   const bin = candidates.map((c) => path.join(binDir, c)).find((p) => fs.existsSync(p));
   if (!bin) {
-    return { installed: false, status: 'Not installed' };
+    return { installed: false, status: 'Not installed', ...base };
   }
+  const installed = { installed: true, ...base, flavour: detectCmdToolsFlavour(cmdPath) };
 
   // Prefer version.txt.
   try {
@@ -179,7 +200,7 @@ export function getCmdToolsStatus(config: ConfigProvider): CmdToolsStatus {
       const content = fs.readFileSync(versionFile, 'utf8');
       for (const line of content.split(/\r?\n/)) {
         const m = line.match(/^\s*#\s*Version:\s*(.+)$/);
-        if (m?.[1]) return { installed: true, status: `Installed (${m[1].trim()})` };
+        if (m?.[1]) return { ...installed, status: `Installed (${m[1].trim()})` };
       }
     }
   } catch {
@@ -197,9 +218,9 @@ export function getCmdToolsStatus(config: ConfigProvider): CmdToolsStatus {
     });
     if (res.error || res.status !== 0) throw res.error ?? new Error(`exit ${String(res.status)}`);
     const version = res.stdout.trim();
-    return { installed: true, status: `Installed (${version})` };
+    return { ...installed, status: `Installed (${version})` };
   } catch {
-    return { installed: true, status: 'Installed (version unknown)' };
+    return { ...installed, status: 'Installed (version unknown)' };
   }
 }
 

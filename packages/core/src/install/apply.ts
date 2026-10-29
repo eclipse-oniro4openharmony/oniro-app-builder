@@ -4,10 +4,10 @@ import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger, scopedLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
-import { hdcExec, ensureOk } from '../hdc/exec.js';
-import { findRunningProcess, uninstallApp } from '../hdc/app.js';
+import { hdcExec } from '../hdc/exec.js';
+import { ensureInstallOk, findRunningProcess, isBundleInstalled, uninstallApp } from '../hdc/app.js';
 import { reboot } from '../hdc/lifecycle.js';
-import { discoverHaps } from '../build/discoverHaps.js';
+import { discoverHaps, pickHap } from '../build/discoverHaps.js';
 import { diffHapAssets } from './diffHapAssets.js';
 
 export type InstallMethod = 'replace' | 'uninstall-install' | 'refuse';
@@ -84,27 +84,18 @@ async function pidOf(config: ConfigProvider, bundle: string, deviceSerial?: stri
   return proc ? Number(proc.pid) : null;
 }
 
-async function resolveHapPath(opts: ApplyChangesOptions): Promise<string> {
+async function resolveHapPath(opts: ApplyChangesOptions, logger: Logger): Promise<string> {
   let hapPath = opts.hapPath;
   if (hapPath) {
     if (!path.isAbsolute(hapPath) && opts.projectDir) hapPath = path.join(opts.projectDir, hapPath);
   } else {
     if (!opts.projectDir) throw new OniroError('applyChanges requires hapPath or projectDir.');
-    const haps = await discoverHaps({ projectDir: opts.projectDir });
-    if (opts.module) {
-      const signed = haps[opts.module]?.signed ?? [];
-      if (signed.length === 0) throw new OniroError(`No signed HAP for module ${opts.module}. Build first.`);
-      hapPath = signed[0]!;
-    } else {
-      const withSigned = Object.entries(haps).filter(([, m]) => m.signed.length > 0);
-      if (withSigned.length === 0) throw new OniroError('No signed HAP found. Build first.');
-      if (withSigned.length > 1) {
-        throw new OniroError(
-          `Multiple modules have signed HAPs (${withSigned.map(([k]) => k).join(', ')}). Pass module to choose.`,
-        );
-      }
-      hapPath = withSigned[0]![1].signed[0]!;
+    const picked = pickHap(await discoverHaps({ projectDir: opts.projectDir }), opts.module);
+    if (!picked) throw new OniroError(`No HAP found${opts.module ? ` for module ${opts.module}` : ''}. Build first.`);
+    if (!picked.signed) {
+      logger.warn(`No signed HAP; installing ${path.basename(picked.path)}, which only the HarmonyOS emulator accepts.`);
     }
+    hapPath = picked.path;
   }
   if (!fs.existsSync(hapPath)) throw new OniroError(`HAP not found at ${hapPath}.`);
   return hapPath;
@@ -123,7 +114,8 @@ export async function applyChanges(opts: ApplyChangesOptions): Promise<ApplyChan
   const isSystemBundle = opts.isSystemBundle ?? false;
   const allowUninstall = opts.allowUninstall ?? false;
 
-  const hapPath = await resolveHapPath(opts);
+  const hapPath = await resolveHapPath(opts, logger);
+  logger.info(`installing ${hapPath}`);
 
   // Asset-path diff (best-effort; only when the caller supplies the installed HAP).
   let assetsChanged = false;
@@ -154,11 +146,23 @@ export async function applyChanges(opts: ApplyChangesOptions): Promise<ApplyChan
   if (decision === 'uninstall-install') {
     logger.warn(`sign-info inconsistent for ${bundle}; uninstalling then installing fresh.`);
     await uninstallApp({ config, bundle, deviceSerial });
-    ensureOk(await hdcExec({ config, args: ['install', hapPath], deviceSerial, timeoutMs: 300_000 }), `hdc install ${hapPath}`);
+    ensureInstallOk(
+      await hdcExec({ config, args: ['install', hapPath], deviceSerial, timeoutMs: 300_000 }),
+      `hdc install ${hapPath}`,
+    );
     installMethod = 'uninstall-install';
   } else {
-    ensureOk(replaceRes, `hdc install -r ${hapPath}`);
+    ensureInstallOk(replaceRes, `hdc install -r ${hapPath}`);
     installMethod = 'replace';
+  }
+
+  // hdc's own exit code says nothing about the bundle manager's verdict, so
+  // confirm the bundle is there before reporting success.
+  if (!(await isBundleInstalled({ config, bundle, deviceSerial }))) {
+    throw new OniroError(
+      `hdc reported ${path.basename(hapPath)} as installed, but bm dump does not list ${bundle}. ` +
+        'Check that the HAP was built from this project (its bundleName must match).',
+    );
   }
 
   let postInstallPid = await pidOf(config, bundle, deviceSerial);

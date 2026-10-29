@@ -26,7 +26,9 @@ case "$1" in
     if [ "$2" = "-r" ]; then
       case "$3" in
         *signinfo*) printf '[Fail]install failed: error 9568332 sign info inconsistent\\n'; exit 1 ;;
-        *) printf 'install bundle successfully\\n'; exit 0 ;;
+        # Like real hdc: a bundle-manager rejection still exits 0.
+        *rejected*) printf '[Info]App install path:%s msg:error: failed to install bundle.\\ncode:9568344\\n' "$3"; exit 0 ;;
+        *) printf '[Info]App install path:%s msg:install bundle successfully.\\nAppMod finish\\n' "$3"; exit 0 ;;
       esac
     else
       printf 'install bundle successfully\\n'; exit 0
@@ -35,6 +37,8 @@ case "$1" in
   shell)
     case "$2" in
       pidof*) printf '111\\n'; exit 0 ;;
+      *ghost*) printf 'error: failed to get information and the parameters may be wrong.\\n'; exit 0 ;;
+      'bm dump -n '*) printf '%s:\\n{\\n}\\n' "\${2#bm dump -n }"; exit 0 ;;
       *) exit 0 ;;
     esac ;;
 esac
@@ -69,5 +73,29 @@ exit 0
     expect(result.preInstallPid).toBe(111);
     expect(result.postInstallPid).toBe(111);
     expect(result.cacheCleared).toBe(false);
+  });
+
+  it('fails when the bundle manager rejects the HAP, although hdc exits 0', async () => {
+    const hap = path.join(projectDir, 'app-rejected-signed.hap');
+    fs.writeFileSync(hap, 'fakehap');
+    await expect(
+      applyChanges({ config: config(), bundle: 'com.example.app', hapPath: hap, isSystemBundle: false }),
+    ).rejects.toThrow(/9568344/);
+  });
+
+  it('fails when the install claims success but the bundle is not on the device', async () => {
+    const hap = path.join(projectDir, 'app-signed.hap');
+    fs.writeFileSync(hap, 'fakehap');
+    await expect(
+      applyChanges({ config: config(), bundle: 'com.example.ghost', hapPath: hap, isSystemBundle: false }),
+    ).rejects.toThrow(/does not list com\.example\.ghost/);
+  });
+
+  it('falls back to the unsigned HAP when the build produced no signed one', async () => {
+    const out = path.join(projectDir, 'entry', 'build', 'default', 'outputs', 'default');
+    fs.mkdirSync(out, { recursive: true });
+    fs.writeFileSync(path.join(out, 'entry-default-unsigned.hap'), 'fakehap');
+    const result = await applyChanges({ config: config(), bundle: 'com.example.app', projectDir });
+    expect(result.method).toBe('replace');
   });
 });

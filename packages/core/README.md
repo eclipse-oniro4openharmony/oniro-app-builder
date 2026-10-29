@@ -172,11 +172,14 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `listDevices` | `(config, opts?) => Promise<DeviceInfo[]>` | Parse `hdc list targets -v`. |
 | `selectDevice` | `(config, serial?, opts?) => Promise<string>` | Resolve the target: explicit serial → `ONIRO_DEVICE_SERIAL`/`DEVICE_SERIAL` env → the single connected device (throws on ambiguity). |
 | `parseDeviceList` | `(stdout) => DeviceInfo[]` | Pure parser (unit-testable). |
-| `paramGet` / `paramSet` | `(config, key[, value], opts?) => Promise<…>` | Read/write system properties via `param get`/`set`. |
+| `resolveDeviceSerial` / `hdcTargetArgsFor` | `(explicit?) => string \| undefined` / `(args, explicit?) => string[]` | The serial (explicit → `ONIRO_DEVICE_SERIAL` → none) and the `-t` prefix `hdcExec` uses; hdc server commands only take an explicit one. |
+| `hdcClientFailure` | `(output) => string \| null` | The `[Fail]…` line hdc printed while exiting 0; `hdcExec` reports it as exit code 1. |
+| `paramGet` / `paramSet` | `(config, key[, value], opts?) => Promise<…>` | Read/write system properties via `param get`/`set`. `paramGet` throws for an unset property. |
+| `paramGetMany` | `(config, keys, opts?) => Promise<Record<string, string \| undefined>>` | Read several properties in one round trip. |
 
 ### hdc — files
 
-`sendFile(SendFileOptions)` / `recvFile(RecvFileOptions)` — push/pull a file via `hdc file send`/`recv`.
+`sendFile(SendFileOptions)` / `recvFile(RecvFileOptions)` — push/pull a file via `hdc file send`/`recv`. Local paths are normalised for hdc (`normaliseLocalPath`); a device path a Windows shell rewrote is rejected (`assertDevicePath`). `sendFile` with `bundle` writes into that app's sandbox (`appSandboxDir`) and chowns the file to the app.
 
 ### hdc — lifecycle & waiting
 
@@ -191,7 +194,9 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `installApp` | `(InstallAppOptions) => Promise<InstallAppResult>` | Install the signed `.hap` (resolves the path from `hapPath` / config / default). |
+| `installApp` | `(InstallAppOptions) => Promise<InstallAppResult>` | Install a `.hap` (`hapPath` / config / the signed entry HAP / the newest built one, unsigned as a last resort). Throws when the bundle manager rejects it. |
+| `detectInstallFailure` / `ensureInstallOk` | — | Spot a bundle-manager rejection in `hdc install` output, which exits 0 either way. |
+| `isBundleInstalled` | `(BundleOptions) => Promise<boolean>` | `bm dump -n` check. |
 | `launchApp` | `(LaunchAppOptions) => Promise<void>` | `aa start` the entry ability (or an explicit `abilityName`). |
 | `uninstallApp` / `forceStop` | `(BundleOptions) => Promise<void>` | Uninstall / force-stop by bundle name. |
 | `findRunningProcess` | `(BundleOptions) => Promise<RunningProcess \| null>` | Non-throwing `pidof` check. |
@@ -231,6 +236,7 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `waitForLog` | `(WaitForLogOptions) => Promise<HilogEntry>` | First entry matching a regex; auto-respawns the stream so it survives a reboot. |
 | `watchLog` | `(WatchLogOptions) => Promise<HilogEntry[]>` | Collect matches for a duration (deduped by default). |
 | `dumpLog` | `(DumpLogOptions) => Promise<HilogEntry[]>` | One-shot `hilog -x` filtered by domain/bundle/grep, capped to the last N lines. |
+| `captureLog` | `(CaptureLogOptions) => Promise<CaptureLogResult>` | Stream hilog into a file until a deadline or abort, writing each line as it arrives and reconnecting after a reboot, so the small ring buffer cannot drop lines. |
 | `streamHilog` | `(StreamHilogOptions) => ChildProcessWithoutNullStreams` | Raw long-lived hilog stream (caller owns the process). |
 | `setHilogLevel` | `(SetHilogLevelOptions) => Promise<void>` | Set the buffer level. |
 | `parseHilogLine` / `dedupEntries` | — | Pure helpers; `HilogEntry` / `HilogLevel` types. |
@@ -239,12 +245,13 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `buildHap` | `(BuildHapOptions) => Promise<BuildHapResult>` | High-level orchestration: ensure deps → `hvigorw` → discover built HAPs. The call most consumers want. |
+| `buildHap` | `(BuildHapOptions) => Promise<BuildHapResult>` | High-level orchestration: ensure deps → `hvigorw` → discover built HAPs. The call most consumers want. Throws `SdkNotInstalledError` (with the `version` to install) up front when an OpenHarmony project's SDK is missing; `diagnoseBuildFailure` adds a hint for system-API errors. |
 | `runHvigorw` | `(RunHvigorwOptions) => Promise<RunHvigorwResult>` | Raw single `hvigorw` spawn. Parallel by default; `parallel: false` adds `--no-parallel`. |
 | `buildHvigorwArgs` | `(opts) => string[]` | Pure argv builder (unit-testable). |
-| `discoverHaps` | `(DiscoverHapsOptions) => Promise<Record<string, ModuleHaps>>` | Group `*-signed`/`*-unsigned` HAPs by module. |
+| `discoverHaps` | `(DiscoverHapsOptions) => Promise<Record<string, ModuleHaps>>` | Group `*-signed`/`*-unsigned` HAPs by module, newest first. |
+| `pickHap` | `(haps, module?) => PickedHap \| null` | The HAP to install: a signed one, else unsigned (`signed: false`). |
 | `runOhpm` / `ensureOhModules` | — | Run `ohpm`; install `--all` only when `oh_modules/` is missing. |
-| `runCodelinter` / `parseCodelinterFindings` | — | Run the codelinter → `CodelinterResult { code, findings, raw }`. |
+| `runCodelinter` / `parseCodelinterReport` / `parseCodelinterFindings` | — | Run the codelinter → `CodelinterResult { code, findings, summary, notices, incomplete, raw }`; the parsers read its per-file table and `-Defects:` totals. |
 
 ### Project scaffolding & inspection
 
@@ -261,13 +268,13 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 
 ### Device info
 
-`getDeviceInfo(GetDeviceInfoOptions) => Promise<DeviceFullInfo>` collates device properties + display resolution. `dumpScreen` / `dumpWindow` / `dumpRenderService` wrap the corresponding `hidumper` services.
+`getDeviceInfo(GetDeviceInfoOptions) => Promise<DeviceFullInfo>` collates device properties (model, `osFamily` HarmonyOS / OpenHarmony, `osDistVersion`, API level, `abi`, `deviceType`, …) in one round trip, plus the display resolution. `dumpScreen` / `dumpWindow` / `dumpRenderService` wrap the corresponding `hidumper` services.
 
 ### Install orchestration
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `applyChanges` | `(ApplyChangesOptions) => Promise<ApplyChangesResult>` | Install a HAP **and verify the process took it** — handles sign-info mismatch, asset-cache invalidation (reboot), and persistent-bundle restart. |
+| `applyChanges` | `(ApplyChangesOptions) => Promise<ApplyChangesResult>` | Install a HAP **and verify it took**: throws on a bundle-manager rejection or when `bm dump` does not list the bundle afterwards; handles sign-info mismatch, asset-cache invalidation (reboot), and persistent-bundle restart. |
 | `decideInstallMethod` / `decideReboot` | — | The pure (tested) decision functions behind `applyChanges`. |
 | `diffHapAssets` / `diffEntryNames` | — | Diff two HAP archives' file manifests (drives the cache-invalidation reboot). |
 
@@ -308,7 +315,7 @@ DevEco Studio. Parts of this subtree are adapted from the MIT-licensed
 
 - **Configuration.** Pass a `ConfigProvider`. `staticConfig({...})` is the quick path; a frontend can read settings, env vars, etc. Unset keys fall back to `defaultPaths`.
 - **Logging & progress are opt-in.** Omit `logger`/`progress` for silence, or pass `consoleLogger` / your own. Nothing is written to `console` by default.
-- **Device targeting.** Pass `deviceSerial` to address a specific target; omit it to use the default connected device. `selectDevice` additionally honors `ONIRO_DEVICE_SERIAL` / `DEVICE_SERIAL`.
+- **Device targeting.** Pass `deviceSerial` to address a specific target. Without it, every device operation addresses `ONIRO_DEVICE_SERIAL` / `DEVICE_SERIAL` when set, else hdc's single connected device. hdc's `[Fail]` lines (exit code 0 from hdc) surface as failures.
 - **Timeouts & cancellation.** Device ops take `timeoutMs` (sane per-op defaults) and `abortSignal`; aborting rejects with `CancelledError`.
 - **Error model.** Exec primitives (`runProcess`/`hdcExec`/`shell`) resolve for any exit code — call `ensureOk` to throw `CommandFailedError`. Everything else throws a typed `OniroError` subclass.
 - **No surprises in returns.** Functions return plain JSON-safe data; screenshots/bursts return raw `Buffer`s. No image decoding, no `sharp`-style dependency.

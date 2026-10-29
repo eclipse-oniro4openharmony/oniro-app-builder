@@ -6,8 +6,16 @@ export class OniroError extends Error {
 }
 
 export class SdkNotInstalledError extends OniroError {
-  constructor(public readonly api: string, public readonly expectedPath: string) {
-    super(`SDK API ${api} is not installed at ${expectedPath}.`);
+  /** `version` is the release that ships `api` (e.g. `6.0` for API 20), when one is known. */
+  constructor(
+    public readonly api: string,
+    public readonly expectedPath: string,
+    public readonly version?: string,
+  ) {
+    super(
+      `SDK API ${api} is not installed at ${expectedPath}.` +
+        (version ? ` Install it with \`oniro-app sdk install ${version}\`.` : ''),
+    );
     this.name = 'SdkNotInstalledError';
   }
 }

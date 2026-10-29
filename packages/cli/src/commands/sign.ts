@@ -56,6 +56,12 @@ export function registerSignCommand(program: Command): void {
         'Comma-separated permission names to write into the profile\'s acls.allowed-acls. Required for apps that request permissions above their apl (e.g. a system_basic app requesting ohos.permission.CAPTURE_SCREEN). Example: --acls ohos.permission.REBOOT,ohos.permission.INJECT_INPUT_EVENT',
       ).argParser(parseAclsList),
     )
+    .addOption(
+      new Option(
+        '--app-privilege-capabilities <list>',
+        'Comma-separated privileges to write into the profile\'s app-privilege-capabilities. An app that declares a privileged extension ability (e.g. an AccessibilityExtensionAbility) needs AllowAppUsePrivilegeExtension, else install fails with 9568344 "not allow use privilege extension". Others include AllowAppMultiProcess and AllowAppDesktopIconHide.',
+      ).argParser(parseAclsList),
+    )
     .option(
       '--harmonyos',
       'Sign a HarmonyOS project through AppGallery Connect. Needs `oniro-app auth login`, and a connected device unless the team already has devices registered.',
@@ -73,6 +79,7 @@ export function registerSignCommand(program: Command): void {
           apl: Apl;
           appFeature?: AppFeature;
           acls?: string[];
+          appPrivilegeCapabilities?: string[];
           bootstrap?: boolean;
           storePassword?: string;
           keyPassword?: string;
@@ -116,6 +123,7 @@ export function registerSignCommand(program: Command): void {
             apl: opts.apl,
             appFeature: opts.appFeature,
             acls: opts.acls,
+            appPrivilegeCapabilities: opts.appPrivilegeCapabilities,
             passwords,
             logger,
           });
@@ -131,6 +139,7 @@ export function registerSignCommand(program: Command): void {
           apl: opts.apl,
           appFeature: opts.appFeature,
           acls: opts.acls,
+          appPrivilegeCapabilities: opts.appPrivilegeCapabilities,
           passwords,
           logger,
         });

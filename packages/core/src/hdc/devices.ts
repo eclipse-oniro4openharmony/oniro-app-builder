@@ -1,7 +1,7 @@
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
-import { hdcExec } from './exec.js';
+import { hdcExec, resolveDeviceSerial } from './exec.js';
 
 export interface DeviceInfo {
   /** Connect key — a USB serial or a `host:port` for a TCP target. */
@@ -73,9 +73,8 @@ export async function selectDevice(
   serial?: string,
   opts: { timeoutMs?: number; logger?: Logger } = {},
 ): Promise<string> {
-  if (serial && serial !== 'auto') return serial;
-  const envSerial = process.env.ONIRO_DEVICE_SERIAL || process.env.DEVICE_SERIAL;
-  if (envSerial && envSerial !== 'auto') return envSerial;
+  const resolved = resolveDeviceSerial(serial);
+  if (resolved) return resolved;
 
   const usable = (await listDevices(config, opts)).filter(
     (d) => d.status === 'Connected' || d.status === 'Unknown',

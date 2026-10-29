@@ -7,6 +7,7 @@ import { listDevices, selectDevice } from '../src/hdc/devices.js';
 import { paramGet, paramSet } from '../src/hdc/param.js';
 import { sendFile, recvFile } from '../src/hdc/files.js';
 import { findRunningProcess, uninstallApp, forceStop } from '../src/hdc/app.js';
+import { hdcExec } from '../src/hdc/exec.js';
 
 const isWin = process.platform === 'win32';
 
@@ -75,6 +76,20 @@ exit 0
     expect(await selectDevice(config())).toBe('env-serial');
   });
 
+  it('device commands address ONIRO_DEVICE_SERIAL; hdc server commands do not', async () => {
+    process.env.ONIRO_DEVICE_SERIAL = 'env-serial';
+    // The fake hdc echoes argv for anything it has no canned answer for.
+    const res = await hdcExec({ config: config(), args: ['fport', 'ls'] });
+    expect(res.stdout.split('\n').slice(0, 3)).toEqual(['-t', 'env-serial', 'fport']);
+    expect(await listDevices(config())).toHaveLength(2);
+  });
+
+  it('an explicit serial wins over ONIRO_DEVICE_SERIAL', async () => {
+    process.env.ONIRO_DEVICE_SERIAL = 'env-serial';
+    const res = await hdcExec({ config: config(), args: ['fport', 'ls'], deviceSerial: 'mine' });
+    expect(res.stdout.split('\n').slice(0, 2)).toEqual(['-t', 'mine']);
+  });
+
   it('selectDevice throws when no device is connected', async () => {
     fs.writeFileSync(targetsFile, '[Empty]\n');
     await expect(selectDevice(config())).rejects.toThrow(/No connected device/);
@@ -107,7 +122,7 @@ exit 0
   it('uninstallApp / forceStop / sendFile / recvFile resolve against a 0-exit device', async () => {
     await expect(uninstallApp({ config: config(), bundle: 'com.example.app' })).resolves.toBeUndefined();
     await expect(forceStop({ config: config(), bundle: 'com.example.app' })).resolves.toBeUndefined();
-    await expect(sendFile({ config: config(), local: '/tmp/a', remote: '/data/local/tmp/a' })).resolves.toBeUndefined();
+    await expect(sendFile({ config: config(), local: '/tmp/a', remote: '/data/local/tmp/a' })).resolves.toBe('/data/local/tmp/a');
     await expect(recvFile({ config: config(), remote: '/data/local/tmp/a', local: '/tmp/a' })).resolves.toBeUndefined();
   });
 });

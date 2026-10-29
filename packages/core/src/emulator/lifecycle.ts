@@ -8,6 +8,7 @@ import { noopLogger } from '../ports/logger.js';
 import { CancelledError, OniroError } from '../ports/errors.js';
 import { getEmulatorDir } from '../sdk/paths.js';
 import { hdcExec, runProcess } from '../hdc/exec.js';
+import { isEmulatorInstalled } from './install.js';
 
 const PID_FILE = path.join(os.tmpdir(), 'oniro_emulator.pid');
 
@@ -270,4 +271,71 @@ export async function stopEmulator(logger: Logger = noopLogger): Promise<void> {
   fs.rm(PID_FILE, { force: true }, (err) => {
     if (err) logger.warn(`Could not remove PID file: ${err.message}`);
   });
+}
+
+export interface EmulatorStatus {
+  installed: boolean;
+  /** The configured emulator directory. */
+  dir: string;
+  /** Whether an emulator QEMU process is alive. */
+  running: boolean;
+  /** The hdc address checked for `connected`. */
+  address: string;
+  /** hdc lists `address` as a Connected target. */
+  connected: boolean;
+}
+
+/**
+ * Whether a `qemu-system-x86_64` process is alive: the PID file from `startEmulator`
+ * (POSIX only, as there), else a process-table scan.
+ */
+async function isQemuRunning(logger: Logger): Promise<boolean> {
+  if (os.platform() !== 'win32') {
+    try {
+      const pid = Number(fs.readFileSync(PID_FILE, 'utf8').trim());
+      if (Number.isFinite(pid) && pid > 0) {
+        process.kill(pid, 0);
+        return true;
+      }
+    } catch {
+      // No PID file, or the process is gone: scan the process table.
+    }
+  }
+  const [cmd, ...args] = os.platform() === 'win32'
+    ? ['tasklist', '/FI', 'IMAGENAME eq qemu-system-x86_64.exe', '/NH']
+    : ['pgrep', '-f', 'qemu-system-x86_64'];
+  try {
+    const res = await runProcess({ command: cmd!, args, timeoutMs: 10_000, logger });
+    return os.platform() === 'win32' ? /qemu-system-x86_64/i.test(res.stdout) : res.code === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Report on the Oniro emulator without starting it: installed, running, and whether
+ * hdc sees it at `address` (default `127.0.0.1:55555`). Other emulators, such as
+ * DevEco Studio's HarmonyOS emulator, are not covered: they appear in `listDevices`.
+ */
+export async function getEmulatorStatus(
+  config: ConfigProvider,
+  opts: { address?: string; logger?: Logger } = {},
+): Promise<EmulatorStatus> {
+  const logger = opts.logger ?? noopLogger;
+  const address = opts.address ?? '127.0.0.1:55555';
+  const dir = getEmulatorDir(config);
+  let connected = false;
+  try {
+    const targets = await hdcExec({ config, args: ['list', 'targets', '-v'], timeoutMs: 10_000, logger });
+    connected = targets.stdout.split('\n').some((l) => l.trim().startsWith(address) && /\bConnected\b/.test(l));
+  } catch {
+    // No hdc: not connected.
+  }
+  return {
+    installed: isEmulatorInstalled(config),
+    dir,
+    running: await isQemuRunning(logger),
+    address,
+    connected,
+  };
 }

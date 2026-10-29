@@ -7,8 +7,9 @@ import {
   resolveAppFeature,
   pickSigningKind,
   detectSigningConfigNames,
+  updateBuildProfile,
 } from '../src/sign/generateSigningConfigs.js';
-import { generateSigningConfigs } from '../src/sign/index.js';
+import { createMaterial, generateSigningConfigs } from '../src/sign/index.js';
 import { OniroError } from '../src/ports/errors.js';
 import { noopLogger } from '../src/ports/logger.js';
 
@@ -79,6 +80,7 @@ function readBundleInfo(projectDir: string): BundleInfo {
 function readProfile(projectDir: string): {
   'bundle-info': BundleInfo;
   acls?: { 'allowed-acls'?: string[] };
+  'app-privilege-capabilities'?: string[];
 } {
   return JSON.parse(
     fs.readFileSync(
@@ -208,6 +210,39 @@ describe('modifyProfileTemplate', () => {
     });
     const profile = readProfile(projectDir);
     expect(profile.acls?.['allowed-acls']).toEqual([]);
+  });
+
+  it('writes app-privilege-capabilities when given, and leaves them alone otherwise', () => {
+    modifyProfileTemplate(projectDir, 'system_core', 'hos_system_app', noopLogger);
+    expect(readProfile(projectDir)['app-privilege-capabilities']).toBeUndefined();
+    modifyProfileTemplate(projectDir, 'system_core', 'hos_system_app', noopLogger, {
+      appPrivilegeCapabilities: ['AllowAppUsePrivilegeExtension'],
+    });
+    expect(readProfile(projectDir)['app-privilege-capabilities']).toEqual(['AllowAppUsePrivilegeExtension']);
+  });
+});
+
+describe('updateBuildProfile', () => {
+  let projectDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-sign-profile-'));
+    createMaterial(path.join(projectDir, 'signatures', 'material'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it('points a product that names no signingConfig at the generated one', () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'build-profile.json5'),
+      JSON.stringify({ app: { signingConfigs: [], products: [{ name: 'default', compileSdkVersion: 20 }] } }),
+    );
+    updateBuildProfile(projectDir, 'application-release', noopLogger, { store: '123456', key: '123456' });
+    const written = JSON.parse(fs.readFileSync(path.join(projectDir, 'build-profile.json5'), 'utf-8'));
+    expect(written.app.signingConfigs.map((c: { name: string }) => c.name)).toEqual(['default']);
+    expect(written.app.products[0].signingConfig).toBe('default');
   });
 });
 

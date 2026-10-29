@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import type { ChildProcess, ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
@@ -5,7 +6,7 @@ import { noopLogger } from '../ports/logger.js';
 import { CancelledError, OniroError } from '../ports/errors.js';
 import { getHdcPath } from '../sdk/paths.js';
 import { killProcessTree, spawnCompat } from './spawnCompat.js';
-import { shell } from './exec.js';
+import { ensureOk, hdcTargetArgs, shell } from './exec.js';
 import { findRunningProcess } from './app.js';
 
 export type HilogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
@@ -25,6 +26,7 @@ export interface HilogEntry {
 export interface SetHilogLevelOptions {
   config: ConfigProvider;
   level: HilogLevel;
+  deviceSerial?: string;
   logger?: Logger;
 }
 
@@ -43,7 +45,7 @@ export function setHilogLevel(opts: SetHilogLevelOptions): Promise<void> {
     // failure is funnelled into the same rejection as the 'error' event below.
     let child: ChildProcess;
     try {
-      child = spawnCompat(hdc, ['shell', 'hilog', '-b', opts.level]);
+      child = spawnCompat(hdc, [...hdcTargetArgs(opts.deviceSerial), 'shell', 'hilog', '-b', opts.level]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`[hilog] failed to spawn hdc: ${msg}`);
@@ -76,7 +78,7 @@ export interface StreamHilogOptions {
   processId?: string;
   /** Filter by hilog domain, e.g. '0xD003900' (passed as `-D <domain>`). */
   domain?: string | number;
-  /** Address a specific device (`-t <serial>`). */
+  /** Address a specific device (`-t <serial>`); defaults to `ONIRO_DEVICE_SERIAL`. */
   deviceSerial?: string;
 }
 
@@ -88,8 +90,7 @@ export interface StreamHilogOptions {
  */
 export function streamHilog(opts: StreamHilogOptions): ChildProcessWithoutNullStreams {
   const hdc = getHdcPath(opts.config);
-  const args: string[] = [];
-  if (opts.deviceSerial) args.push('-t', opts.deviceSerial);
+  const args: string[] = [...hdcTargetArgs(opts.deviceSerial)];
   args.push('shell', 'hilog');
   if (opts.processId && opts.processId.trim() !== '') {
     args.push('-P', opts.processId.trim());
@@ -319,6 +320,132 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
       reject(err instanceof Error ? err : new Error(String(err)));
     });
   });
+}
+
+export interface CaptureLogOptions {
+  config: ConfigProvider;
+  /** File the hilog lines are appended to. */
+  file: string;
+  /** Stop after this long. Default: run until `abortSignal` fires. */
+  durationMs?: number;
+  /** Keep only the lines this matches. Default: every line. */
+  pattern?: RegExp;
+  /** Clear the device's log buffer first (`hilog -r`), so the file covers only this session. */
+  clear?: boolean;
+  domain?: string | number;
+  deviceSerial?: string;
+  abortSignal?: AbortSignal;
+  logger?: Logger;
+}
+
+export interface CaptureLogResult {
+  file: string;
+  /** Lines written to `file`. */
+  lines: number;
+  /** How many times the stream dropped and was respawned. */
+  reconnects: number;
+}
+
+/**
+ * Stream hilog into `file` until `durationMs` passes or `abortSignal` fires. The
+ * device's log buffer is small (256 KB per type by default) and chatty components
+ * such as ArkWeb wrap it within seconds, so a dump taken at the end of a session
+ * loses its start; a capture running throughout does not. Each chunk is written
+ * synchronously, so killing the process keeps what was captured. The stream is
+ * respawned when it drops (a reboot, a lost connection). Resolves at the deadline
+ * or on abort.
+ */
+export async function captureLog(opts: CaptureLogOptions): Promise<CaptureLogResult> {
+  const logger = opts.logger ?? noopLogger;
+  if (opts.clear) {
+    const res = await shell({ config: opts.config, command: 'hilog -r', deviceSerial: opts.deviceSerial, timeoutMs: 10_000, logger });
+    ensureOk(res, 'hdc shell hilog -r');
+  }
+  const fd = fs.openSync(opts.file, 'a');
+  let lines = 0;
+  let reconnects = 0;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const deadline = opts.durationMs !== undefined ? Date.now() + opts.durationMs : Infinity;
+      let settled = false;
+      let child: ChildProcessWithoutNullStreams | null = null;
+      let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+      let buf = '';
+      // Cleared once the capture ends: the killed stream can still emit a chunk,
+      // which must not reach the file descriptor closed below.
+      let open = true;
+
+      const write = (line: string): void => {
+        if (!open || (opts.pattern && !opts.pattern.test(line))) return;
+        fs.writeSync(fd, `${line}\n`);
+        lines++;
+      };
+      const cleanup = (): void => {
+        if (timer) clearTimeout(timer);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        opts.abortSignal?.removeEventListener('abort', finish);
+        if (buf.trim()) write(buf.trimEnd());
+        buf = '';
+        open = false;
+        if (child) {
+          child.stdout.removeAllListeners('data');
+          killProcessTree(child);
+          child = null;
+        }
+      };
+      function finish(): void {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      }
+      const fail = (err: unknown): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+      const timer = opts.durationMs !== undefined ? setTimeout(finish, opts.durationMs) : undefined;
+      if (opts.abortSignal?.aborted) {
+        finish();
+        return;
+      }
+      opts.abortSignal?.addEventListener('abort', finish, { once: true });
+
+      const spawnStream = (): void => {
+        if (settled) return;
+        const stream = streamHilog({ config: opts.config, domain: opts.domain, deviceSerial: opts.deviceSerial });
+        child = stream;
+        stream.stdout.on('data', (d: Buffer) => {
+          buf += d.toString();
+          const parts = buf.split(/\r?\n/);
+          buf = parts.pop() ?? '';
+          for (const line of parts) write(line);
+        });
+        const onEnd = (): void => {
+          if (settled || child !== stream) return;
+          child = null;
+          if (Date.now() >= deadline) return;
+          reconnects++;
+          logger.warn(`[hilog] stream ended; reconnecting (${reconnects}).`);
+          reconnectTimer = setTimeout(() => {
+            try {
+              spawnStream();
+            } catch (err) {
+              fail(err);
+            }
+          }, 2_000);
+        };
+        stream.once('close', onEnd);
+        stream.once('error', onEnd);
+      };
+      spawnStream();
+    });
+  } finally {
+    fs.closeSync(fd);
+  }
+  return { file: opts.file, lines, reconnects };
 }
 
 export interface DumpLogOptions {

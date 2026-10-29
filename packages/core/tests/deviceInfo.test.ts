@@ -20,12 +20,20 @@ describe.skipIf(isWin)('device info + hidumper (fake hdc)', () => {
     fs.writeFileSync(
       hdc,
       `#!/bin/sh
+# A device-side \`param\`: an OpenHarmony device has no dist name, so that one fails like the real tool.
+param() {
+  case "$2" in
+    const.product.model) printf 'PixelTest\\n' ;;
+    const.product.manufacturer) printf 'Acme\\n' ;;
+    const.product.os.dist.name) printf 'Get parameter "%s" fail! errNum is:106!\\n' "$2" ;;
+    const.ohos.fullname) printf 'OpenHarmony-7.0.0.39\\n' ;;
+    *) printf 'val\\n' ;;
+  esac
+}
 case "$1" in
   shell)
     case "$2" in
-      "param get const.product.model") printf 'PixelTest\\n'; exit 0 ;;
-      "param get const.product.manufacturer") printf 'Acme\\n'; exit 0 ;;
-      "param get"*) printf 'val\\n'; exit 0 ;;
+      "param get"*) eval "$2"; exit 0 ;;
       hidumper*screen) printf 'render resolution=1080x2340\\n'; exit 0 ;;
       *WindowManager*) printf 'window dump text\\n'; exit 0 ;;
       *RenderService*) printf 'render dump text\\n'; exit 0 ;;
@@ -49,6 +57,8 @@ exit 0
     expect(info.model).toBe('PixelTest');
     expect(info.manufacturer).toBe('Acme');
     expect(info.brand).toBe('val'); // generic param fallthrough
+    expect(info.osDistName).toBeUndefined();
+    expect(info.osFamily).toBe('OpenHarmony');
     expect(info.display).toEqual({ width: 1080, height: 2340 });
   });
 

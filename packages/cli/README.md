@@ -69,7 +69,7 @@ Install commands are idempotent (they skip when already present); pass `--force`
 | Command | Description |
 | --- | --- |
 | `cmdtools install [--from-zip <path>] [--force] [--tmp-dir <path>]` | Install the tools. `--from-zip` installs from a local archive instead of downloading (required on Windows/macOS — see [Configuration](#configuration)); `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). |
-| `cmdtools status [--json]` | Report whether the tools are installed and their version. Exits non-zero when not installed. |
+| `cmdtools status [--json]` | Report whether the tools are installed, their version, their flavour (`HarmonyOS` when they bundle `sdk/default/hms`, as the Huawei developer-portal download does, else `OpenHarmony`), and the `hdc` binary every device command uses. Exits non-zero when not installed. |
 | `cmdtools remove` | Delete the configured command-line-tools directory. |
 
 #### `emulator` — manage the Oniro emulator (QEMU-based)
@@ -78,6 +78,7 @@ Install commands are idempotent (they skip when already present); pass `--force`
 | --- | --- |
 | `emulator install [--force] [--tmp-dir <path>]` | Download and install the emulator. `--tmp-dir` overrides where the downloaded ZIP goes (see [Temporary space](#temporary-space)). |
 | `emulator start [options]` | Start the emulator via the bundled launcher and detach, so the CLI can exit while it keeps running. |
+| `emulator status [--address <host:port>] [--json]` | Report whether the emulator is installed, running, and connected to `hdc`, without starting it. Exits non-zero when not installed. DevEco Studio's HarmonyOS emulator is not covered; it shows up in `devices`. |
 | `emulator stop` | Kill running emulator processes. |
 | `emulator connect [--address <host:port>]` | Attempt an `hdc` connection (default `127.0.0.1:55555`). |
 | `emulator remove` | Delete the configured emulator directory. |
@@ -126,13 +127,14 @@ Only needed for HarmonyOS signing; see [HarmonyOS apps](#harmonyos-apps).
 
 #### `sign` — generate signing keys, certs, and `signingConfigs`
 
-`sign [project-dir]` (defaults to the current directory). Requires `java` on `PATH`. Rewrites only the `signingConfigs` block of `build-profile.json5` (other keys are preserved). The generated profile uses the SDK's built-in development cert (`issuer=pki_internal`) and its validity window — **dev/local builds only, not distribution.** See [Signing apps that need system permissions](#signing-apps-that-need-system-permissions) for `--apl` / `--acls`.
+`sign [project-dir]` (defaults to the current directory). Requires `java` on `PATH`. Rewrites the `signingConfigs` block of `build-profile.json5`, and points any product that names no `signingConfig` at the generated one (other keys are preserved). The generated profile uses the SDK's built-in development cert (`issuer=pki_internal`) and its validity window — **dev/local builds only, not distribution.** See [Signing apps that need system permissions](#signing-apps-that-need-system-permissions) for `--apl` / `--acls`.
 
 | Flag | Description |
 | --- | --- |
 | `--apl <level>` | Ability Privilege Level: `normal` (default), `system_basic`, or `system_core`. |
 | `--app-feature <feature>` | `hos_normal_app` or `hos_system_app`. Defaults follow `--apl`. |
 | `--acls <list>` | Comma-separated permissions to write into the profile's `acls.allowed-acls`. |
+| `--app-privilege-capabilities <list>` | Comma-separated privileges to write into the profile's `app-privilege-capabilities`, e.g. `AllowAppUsePrivilegeExtension` for an app with a privileged extension ability (without it, install fails with `9568344 not allow use privilege extension`). |
 | `--bootstrap` | No-op if signing material is already present; otherwise generate it. |
 | `--harmonyos` | Sign a HarmonyOS project via AppGallery Connect instead of the offline flow. See [HarmonyOS apps](#harmonyos-apps). |
 | `--team-id <id>` | With `--harmonyos`: AGC team to sign under. |
@@ -142,7 +144,7 @@ Only needed for HarmonyOS signing; see [HarmonyOS apps](#harmonyos-apps).
 
 #### `build` — build the app via `hvigorw`
 
-`build [project-dir]` (defaults to the current directory). Modules build in parallel by default.
+`build [project-dir]` (defaults to the current directory). Modules build in parallel by default. An OpenHarmony project whose `compileSdkVersion` SDK is not installed fails before anything runs, naming the release to install. When the compiler output shows system-API errors (`'…' is not exported from Kit '…'`), the error adds a hint about the full SDK.
 
 | Flag | Description |
 | --- | --- |
@@ -152,34 +154,35 @@ Only needed for HarmonyOS signing; see [HarmonyOS apps](#harmonyos-apps).
 | `--task <task>` | hvigor task to run (default `assembleHap`). |
 | `--no-deps` | Skip the automatic `ohpm install --all` when `oh_modules/` is missing. |
 | `--no-parallel` | Build modules serially. |
+| `--install-sdk` | Install the missing OpenHarmony SDK the project compiles against, then build. |
 | `--json` | Emit the result (discovered HAPs grouped by module, warnings) as JSON. |
 
 #### `lint` — run the OpenHarmony codelinter
 
-`lint [project-dir]` (defaults to the current directory). Exits with the codelinter's exit code.
+`lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0, although codelinter itself exits 1 for them. When codelinter says its report is incomplete, for example because the command-line tools' flavour (see `cmdtools status`) does not match the project's `runtimeOS`, a warning on stderr explains it: treat the counts as a lower bound.
 
 | Flag | Description |
 | --- | --- |
 | `--files <globs...>` | Specific files/globs to lint (default: the whole project). |
-| `--json` | Emit findings as JSON. |
+| `--json` | Emit the report as JSON: `findings`, `summary` (codelinter's totals), `notices`, `incomplete`, `code`, and the cleaned `raw` output. |
 
 ### Device & app
 
-These commands target a connected device or emulator over `hdc`. Most accept `--device <serial>` to address a specific target; omit it to use the single connected device.
+These commands target a connected device or emulator over `hdc`. Most accept `--device <serial>` to address a specific target. Without it they use `ONIRO_DEVICE_SERIAL`, then the single connected device. A TCP serial such as `127.0.0.1:5555` works like a USB one. hdc exits 0 even when it fails (`[Fail]ExecuteCommand need connect-key?` when several targets are connected and none was named); every command here reports that as an error.
 
 #### `devices` — list connected hdc devices
 
 | Command | Description |
 | --- | --- |
-| `devices [--json]` | List connected targets (`serial`, connection, status). |
+| `devices [--long] [--json]` | List connected targets (`serial`, connection, status). `--long` also asks each connected one for its OS family and version (`os=HarmonyOS 6.1.0` / `os=OpenHarmony`), API level, CPU ABI, device type, model, and `const.ohos.fullname`. |
 
 #### `app` — install, launch, and manage built apps
 
 | Command | Description |
 | --- | --- |
-| `app install [project-dir] [--hap <path>] [--device <serial>]` | Install the signed `.hap` via `hdc`. `--hap` overrides the resolved path. |
+| `app install [project-dir \| file.hap] [--hap <path>] [--device <serial>]` | Install a `.hap` via `hdc`: a given file, else the project's newest signed HAP, else its unsigned one (only the HarmonyOS emulator accepts those). Fails when the bundle manager rejects the HAP. |
 | `app launch [project-dir] [--module <m>] [--ability <name>] [--device <serial>]` | Launch the app. `--ability` defaults to the module's `mainElement` / first visible ability. |
-| `app apply [project-dir] --bundle <b> [options]` | Install a HAP **and verify the running process took the change** — handles sign-info mismatch, asset-cache invalidation, and persistent-bundle restart. |
+| `app apply [project-dir] --bundle <b> [options]` | Install a HAP **and verify it took**: fails when the bundle manager rejects it or `bm dump` does not then list the bundle, and handles sign-info mismatch, asset-cache invalidation, and persistent-bundle restart. Uses the newest signed HAP, else the unsigned one. |
 | `app uninstall <bundle> [--device <serial>]` | Uninstall an app by bundle name. |
 | `app stop <bundle> [--device <serial>]` | Force-stop an app by bundle name. |
 
@@ -200,8 +203,32 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 
 | Command | Description |
 | --- | --- |
-| `file send <local> <remote> [--device <serial>]` | Push a local file to the device. |
+| `file send <local> <remote> [--bundle <b>] [--device <serial>]` | Push a local file to the device and print the device path. With `--bundle`, `<remote>` may be relative to that app's sandbox (`files/x` is its application-level `filesDir`, `haps/entry/files/x` the entry module's), and the file is chowned to the app, which cannot read root-owned files. |
 | `file recv <remote> <local> [--device <serial>]` | Pull a file from the device. |
+
+Local paths may be relative, or absolute with either slash. A device path that a Windows shell already rewrote (Git Bash turns `/data/local/tmp/x` into `C:/Program Files/Git/data/local/tmp/x`) is rejected: run the command with `MSYS_NO_PATHCONV=1`.
+
+#### `logs` — capture hilog to a file for a whole session
+
+`logs -o <file>` streams hilog into `<file>` until `--for` elapses or the process is interrupted, so start it in the background. The device's log buffer is small (256 KB per type by default) and chatty components such as ArkWeb wrap it within seconds, so a dump at the end of a session loses its start. Every line is written as it arrives, and the stream reconnects after a reboot.
+
+| Flag | Description |
+| --- | --- |
+| `-o, --output <file>` | **Required.** File to append to. |
+| `--for <ms>` | Stop after this long (default: until interrupted). |
+| `--grep <regex>` | Keep only matching lines (default: all). |
+| `--clear` | Clear the device log buffer first (`hilog -r`), so the file covers only this session. |
+| `--domain <domain>` | hilog domain filter (e.g. `0xD003900`). |
+| `--device <serial>` | Target device serial. |
+
+#### `hdc` — run the bundled hdc
+
+`hdc [args...]` runs the `hdc` binary oniro-app itself uses (the one `cmdtools status` shows), with stdio passed through, so it needs nothing on `PATH`. Device commands are addressed at `--device` or `ONIRO_DEVICE_SERIAL` unless the arguments start with `-t`. `hdc --path` prints the binary's location. The exit code is hdc's own, which is 0 even for a `[Fail]` line.
+
+```bash
+oniro-app hdc shell param get const.ohos.apiversion
+oniro-app hdc --device 127.0.0.1:5555 shell aa dump -l
+```
 
 #### `reboot` — reboot the device
 
@@ -333,6 +360,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 - **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `app apply`, `build`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). Set `ONIRO_DEBUG=1` to also print full stack traces.
+- **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.
 
 ## Configuration
 
@@ -344,6 +372,8 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 | `ONIRO_CMD_TOOLS_PATH` | `~/command-line-tools` | Command-line tools install root |
 | `ONIRO_EMULATOR_DIR` | `~/oniro-emulator` | Emulator install root |
 | `ONIRO_HAP_PATH` | `entry/build/.../entry-default-signed.hap` | Default `.hap` used by `app install` (relative to the project) |
+| `ONIRO_DEVICE_SERIAL` | (unset) | Device every device command addresses when `--device` is not given (also read as `DEVICE_SERIAL`) |
+| `ONIRO_HDC` | the cmd-tools `hdc` | `hdc` binary to use instead, e.g. a wrapper for a remote device |
 | `ONIRO_SDK_URL_BASE` | `https://repo.huaweicloud.com/openharmony/os` | Base URL for SDK downloads (point at a private/CI mirror) |
 | `ONIRO_CMD_TOOLS_URL_LINUX` | Huawei mirror, x64 5.1.0.840 | Override the Linux cmd-tools URL |
 | `ONIRO_CMD_TOOLS_URL_WINDOWS` | (unset) | Self-hosted Windows cmd-tools URL |
@@ -502,7 +532,16 @@ oniro-app sign --apl system_core \
     --acls ohos.permission.REBOOT,ohos.permission.INJECT_INPUT_EVENT
 ```
 
-The `signingConfigs` block written to `build-profile.json5` mirrors the names used by the project's `products[*].signingConfig` (e.g. `applications/standard/systemui` uses `release`, `launcher` uses `default`). If the project has no products section, `default` is used.
+An app that declares a privileged extension ability, such as an `AccessibilityExtensionAbility`, also needs `AllowAppUsePrivilegeExtension` in the profile's `app-privilege-capabilities`; without it the install fails with `9568344 not allow use privilege extension`. Pass it, and any other privilege (`AllowAppMultiProcess`, `AllowAppDesktopIconHide`, …), via `--app-privilege-capabilities`:
+
+```bash
+oniro-app sign --apl system_core --acls ohos.permission.ACCESSIBILITY_EXTENSION_ABILITY \
+    --app-privilege-capabilities AllowAppUsePrivilegeExtension
+```
+
+Apps like these usually also call system APIs (`@systemapi`), which the public SDK that `sdk install` downloads leaves out: the build fails with errors such as `'config' is not exported from Kit '@kit.AccessibilityKit'`. Build them against the full OpenHarmony SDK by unpacking its components into `<root>/<os>/<api>` of a separate SDK root and pointing `ONIRO_SDK_ROOT_DIR` at that root.
+
+The `signingConfigs` block written to `build-profile.json5` mirrors the names used by the project's `products[*].signingConfig` (e.g. `applications/standard/systemui` uses `release`, `launcher` uses `default`). If the project has no products section, `default` is used, and a product that names no `signingConfig` is pointed at it.
 
 ## Programmatic use
 
