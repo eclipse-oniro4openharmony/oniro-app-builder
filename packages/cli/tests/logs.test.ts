@@ -9,6 +9,7 @@ import { collectLogBundle, filterHilog, filterHilogWindow, redactLogText } from 
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
 
@@ -393,6 +394,17 @@ describe('collectLogBundle', () => {
 
     expect(bundle.complete).toBe(true);
     expect(execute).toHaveBeenCalledWith(['shell', 'hilog', '-x'], '3DK0224924000072');
+  });
+
+  it('treats ONIRO_DEVICE_SERIAL=auto as no selection, like the other device commands', async () => {
+    vi.stubEnv('ONIRO_DEVICE_SERIAL', 'auto');
+    const execute = fakeHdc();
+    const bundle = await collectLogBundle({
+      config: staticConfig(), outputDirectory: await tempDirectory(), redact: true, execute,
+    });
+
+    expect(bundle.complete).toBe(true);
+    expect(execute).toHaveBeenCalledWith(['shell', 'hilog', '-x'], 'ABC123');
   });
 
   it('rejects unsafe package values before invoking hdc', async () => {

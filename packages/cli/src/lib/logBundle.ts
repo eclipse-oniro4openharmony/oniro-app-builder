@@ -1,7 +1,9 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { deflateRawSync } from 'node:zlib';
-import { VERSION, hdcExec, parseDeviceList, shellChecked, type ConfigProvider, type HdcExecResult } from '@oniroproject/core';
+import {
+  VERSION, hdcExec, parseDeviceList, resolveDeviceSerial, shellChecked, type ConfigProvider, type HdcExecResult,
+} from '@oniroproject/core';
 
 export interface CollectLogBundleOptions {
   config: ConfigProvider;
@@ -355,7 +357,7 @@ export async function collectLogBundle(options: CollectLogBundleOptions): Promis
   const targetOutput = await fs.readFile(path.join(bundleDirectory, 'device/targets.txt'), 'utf8').catch(() => '');
   const targets = parseDeviceList(targetOutput).filter((target) => target.status === 'Connected' || target.status === 'Unknown');
   serials.push(...parseDeviceList(targetOutput).map((target) => target.serial));
-  const requestedDevice = options.deviceSerial || process.env.ONIRO_DEVICE_SERIAL || process.env.DEVICE_SERIAL;
+  const requestedDevice = resolveDeviceSerial(options.deviceSerial);
   let selectedDevice: string | null = null;
   let targetError: string | null = null;
   if (targetRecord.status !== 'success') targetError = targetRecord.error ?? 'hdc target discovery failed';
