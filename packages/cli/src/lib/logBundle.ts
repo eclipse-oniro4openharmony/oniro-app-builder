@@ -37,7 +37,7 @@ const LEVELS: Record<string, string> = {
   V: 'V', VERBOSE: 'V', D: 'D', DEBUG: 'D', I: 'I', INFO: 'I',
   W: 'W', WARN: 'W', WARNING: 'W', E: 'E', ERROR: 'E', F: 'F', FATAL: 'F',
 };
-const HILOG_RECORD = /^(?<date>\d{2}-\d{2})[ \t]+(?<time>\d{2}:\d{2}:\d{2}\.\d{3})[ \t]+(?<pid>\d+)[ \t]+\d+[ \t]+(?<level>[VDIWEF])[ \t]+(?<tag>\S+):(?:[ \t]+.*|)$/;
+const HILOG_RECORD = /^(?<date>\d{2}-\d{2})[ \t]+(?<time>\d{2}:\d{2}:\d{2}\.\d{3})[ \t]+(?<pid>\d+)[ \t]+\d+[ \t]+(?<level>[VDIWEF])[ \t]+(?<tag>\S+?)(?:[ \t]+[NH](?::(?:[ \t]+.*)?|[ \t]+.*)?|:(?:[ \t]+.*)?)$/;
 const FAILURE_TEXT = /^(?:\s*(?:\[(?:fail|error)\]|(?:error|failed|failure):|permission denied\b|no devices? connected\b|too many arguments\b|unknown option\b|invalid option\b|command not found\b)|\s*(?:hdc|device)\b.*\b(?:error|failed|no device|not connected|offline)\b)/im;
 
 function validateDate(date: string, time: string): boolean {

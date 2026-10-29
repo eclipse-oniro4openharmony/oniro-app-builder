@@ -83,6 +83,18 @@ describe('filterHilog', () => {
     expect(filtered?.text).toBe(input);
     expect(filtered?.applied).toEqual(['tag', 'level']);
   });
+
+  it('accepts device HiLog records with N and H markers', () => {
+    const input = [
+      '01-02 03:09:59.000 70 70 E C003900/display_engine_service/DE N engine event',
+      '01-02 03:09:59.100 71 71 I C003900/composer_host/DE H: composer event',
+      '01-02 03:09:59.200 42 42 I D003900/MyTag: app event',
+    ].join('\n') + '\n';
+    const filtered = filterHilog(input, { pid: '42', tag: 'MyTag', level: 'I' });
+
+    expect(filtered?.text).toBe('01-02 03:09:59.200 42 42 I D003900/MyTag: app event\n');
+    expect(filtered?.applied).toEqual(['pid', 'tag', 'level']);
+  });
 });
 
 describe('filterHilogWindow', () => {
@@ -112,6 +124,19 @@ describe('filterHilogWindow', () => {
     const input = '12-31 23:59:30.000 42 42 I D003900/MyTag: previous year\n';
     const filtered = filterHilogWindow(input, '2026-01-01T00:00:00', '2026-01-01T00:00:02', 60, 2_500);
     expect(filtered.text).toContain('previous year');
+  });
+
+  it('applies the time window to device HiLog records with N and H markers', () => {
+    const input = [
+      '01-02 03:09:30.000 70 70 E C003900/display_engine_service/DE N engine event',
+      '01-02 03:09:31.000 71 71 I C003900/composer_host/DE H: composer event',
+      '01-02 03:08:00.000 42 42 I D003900/MyTag: old event',
+    ].join('\n') + '\n';
+    const filtered = filterHilogWindow(input, '2026-01-02T03:10:00', '2026-01-02T03:10:00', 60, 2_500);
+
+    expect(filtered.text).toContain('display_engine_service/DE N engine event');
+    expect(filtered.text).toContain('composer_host/DE H: composer event');
+    expect(filtered.text).not.toContain('old event');
   });
 
   it('declines filtering when the clock moves backwards or log format is unknown', () => {
