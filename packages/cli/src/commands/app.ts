@@ -21,8 +21,8 @@ export function registerAppCommand(program: Command): void {
     .command('install [project-dir-or-hap]')
     .description(
       'Install a built .hap on the connected device/emulator via hdc. Takes a project dir (default: the ' +
-        'current one), whose newest signed HAP is installed, else its unsigned one (HarmonyOS emulator ' +
-        'only), or a .hap file. Fails when the bundle manager rejects the HAP.',
+        'current one), whose newest signed HAP is installed, else its unsigned one, or a .hap file. Fails ' +
+        'when the bundle manager rejects the HAP, and says how to sign when a target refuses an unsigned one.',
     )
     .option('--hap <path>', 'Override the .hap path (relative to project-dir or absolute).')
     .option('--device <serial>', 'Target device serial.')

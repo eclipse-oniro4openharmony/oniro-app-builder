@@ -194,7 +194,7 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `installApp` | `(InstallAppOptions) => Promise<InstallAppResult>` | Install a `.hap` (`hapPath` / config / the signed entry HAP / the newest built one, unsigned as a last resort). Throws when the bundle manager rejects it. |
+| `installApp` | `(InstallAppOptions) => Promise<InstallAppResult>` | Install a `.hap` (`hapPath` / config / the signed entry HAP / the newest built one, unsigned as a last resort). Throws when the bundle manager rejects it, with the reason and the signing to do when it refuses an unsigned HAP (`unsignedHapRejection`). |
 | `detectInstallFailure` / `ensureInstallOk` | — | Spot a bundle-manager rejection in `hdc install` output, which exits 0 either way. |
 | `isBundleInstalled` | `(BundleOptions) => Promise<boolean>` | `bm dump -n` check. |
 | `launchApp` | `(LaunchAppOptions) => Promise<void>` | `aa start` the entry ability (or an explicit `abilityName`). |

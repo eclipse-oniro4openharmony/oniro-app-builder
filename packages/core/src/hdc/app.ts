@@ -18,7 +18,8 @@ export interface InstallAppOptions {
   /**
    * Explicit path (absolute, or relative to projectDir) to the `.hap`. Falls back
    * to the `hapPath` config key, then to the well-known signed entry HAP, then to
-   * the HAPs the build produced (signed first, else unsigned).
+   * the HAPs the build produced (signed first, else unsigned). A `*-signed.hap`
+   * that does not exist falls back to its `*-unsigned.hap` sibling.
    */
   hapPath?: string;
   deviceSerial?: string;
@@ -45,34 +46,102 @@ export function detectInstallFailure(output: string): string | null {
   return /\[Fail\]|msg:\s*error|error:\s*failed to install|code:\s*95\d{5}/i.test(output) ? output.trim() : null;
 }
 
-/** Throw a typed {@link CommandFailedError} when hdc or the bundle manager rejected an install. */
-export function ensureInstallOk(result: HdcExecResult, command: string): HdcExecResult {
+/** The HAP an install is about to push, and how it was chosen. */
+export interface InstallCandidate {
+  path: string;
+  /** True when no signed HAP was found and this unsigned one was taken instead. */
+  fallback?: boolean;
+}
+
+/** Whether a HAP is an `*-unsigned.hap`, by its file name as hvigor writes it. */
+export function isUnsignedHap(hapPath: string): boolean {
+  return path.basename(hapPath).includes('unsigned');
+}
+
+/**
+ * The bundle manager's reason from rejected `hdc install` output, e.g. `code
+ * 9568320: no signature file`, else the output's first line. Pure/testable.
+ */
+export function installFailureReason(output: string): string {
+  const code = /code:\s*(\d+)/i.exec(output);
+  if (!code) return output.trim().split(/\r?\n/)[0] ?? '';
+  const message = /error:\s*([^\r\n]+)/i.exec(output.slice(code.index + code[0].length))?.[1]?.trim().replace(/\.$/, '');
+  return message ? `code ${code[1]}: ${message}` : `code ${code[1]}`;
+}
+
+/**
+ * The message for a target that rejected an unsigned HAP: what was tried, the
+ * bundle manager's reason, and, when the reason is the missing signature, how to
+ * sign for the target. Pure/testable.
+ */
+export function unsignedHapRejection(output: string, hap: InstallCandidate): string {
+  const name = path.basename(hap.path);
+  const reason = installFailureReason(output);
+  const what = hap.fallback
+    ? `No signed HAP was found, so the unsigned ${name} was tried, and the target rejected it (${reason}).`
+    : `The target rejected the unsigned ${name} (${reason}).`;
+  if (!/9568320|signature|pkcs7/i.test(reason)) return what;
+  return (
+    `${what} This target installs only signed HAPs. Sign the project for it, build again, and install the signed HAP: ` +
+    '`oniro-app sign` for an OpenHarmony device or the Oniro emulator, `oniro-app sign --harmonyos` for a HarmonyOS device.'
+  );
+}
+
+/**
+ * Throw when hdc or the bundle manager rejected an install: a typed
+ * {@link CommandFailedError}, or, when the bundle manager turned down an unsigned
+ * `hap`, an {@link OniroError} explaining {@link unsignedHapRejection why}.
+ */
+export function ensureInstallOk(result: HdcExecResult, command: string, hap?: InstallCandidate): HdcExecResult {
+  const output = `${result.stdout}\n${result.stderr}`;
+  if (hap && isUnsignedHap(hap.path) && /code:\s*95\d{5}/i.test(output)) {
+    throw new OniroError(unsignedHapRejection(output, hap), new CommandFailedError(command, result.code || 1, output.trim()));
+  }
   ensureOk(result, command);
-  const failure = detectInstallFailure(`${result.stdout}\n${result.stderr}`);
+  const failure = detectInstallFailure(output);
   if (failure) throw new CommandFailedError(command, 1, failure);
   return result;
 }
 
-async function resolveInstallHap(opts: InstallAppOptions, logger: Logger): Promise<string> {
+/**
+ * An existing HAP at `hapPath`, or, when that is a `*-signed.hap` that does not
+ * exist, its `*-unsigned.hap` sibling. Undefined when neither exists.
+ */
+export function existingHapOrUnsigned(hapPath: string): InstallCandidate | undefined {
+  if (fs.existsSync(hapPath)) return { path: hapPath };
+  const sibling = hapPath.replace(/-signed\.hap$/i, '-unsigned.hap');
+  return sibling !== hapPath && fs.existsSync(sibling) ? { path: sibling, fallback: true } : undefined;
+}
+
+async function resolveInstallHap(opts: InstallAppOptions, logger: Logger): Promise<InstallCandidate> {
+  const warnIfFallback = (hap: InstallCandidate): InstallCandidate => {
+    if (hap.fallback) logger.warn(`No signed HAP found; installing the unsigned ${path.basename(hap.path)}.`);
+    return hap;
+  };
   const configured = opts.hapPath ?? opts.config.get('hapPath', '');
   const relative = configured || defaultPaths.hapPath;
   const hapPath = path.isAbsolute(relative) ? relative : path.join(opts.projectDir, relative);
-  if (fs.existsSync(hapPath) || configured) {
-    if (!fs.existsSync(hapPath)) throw new OniroError(`HAP file not found at: ${hapPath}. Build the app first.`);
-    return hapPath;
+  if (configured) {
+    const hap = existingHapOrUnsigned(hapPath);
+    if (!hap) throw new OniroError(`HAP file not found at: ${hapPath}. Build the app first.`);
+    return warnIfFallback(hap);
   }
-  // No explicit HAP and no signed entry HAP: take what the build produced.
-  const picked = pickHap(await discoverHaps({ projectDir: opts.projectDir }));
+  if (fs.existsSync(hapPath)) return { path: hapPath };
+  // No explicit HAP and no signed entry HAP: take what the build produced, a
+  // signed HAP first, then the entry's unsigned one, then any unsigned one.
+  const haps = await discoverHaps({ projectDir: opts.projectDir });
+  const anySigned = Object.values(haps).some((m) => m.signed.length > 0);
+  const entryUnsigned = anySigned ? undefined : existingHapOrUnsigned(hapPath);
+  if (entryUnsigned) return warnIfFallback(entryUnsigned);
+  const picked = pickHap(haps);
   if (!picked) throw new OniroError(`No HAP found under ${opts.projectDir}. Build the app first (\`oniro-app build\`).`);
-  if (!picked.signed) {
-    logger.warn(`Installing the unsigned ${path.basename(picked.path)}: only the HarmonyOS emulator accepts unsigned HAPs.`);
-  }
-  return picked.path;
+  return warnIfFallback({ path: picked.path, fallback: !picked.signed });
 }
 
 export async function installApp(opts: InstallAppOptions): Promise<InstallAppResult> {
   const logger = scopedLogger(opts.logger ?? noopLogger, 'hdc');
-  const hapPath = await resolveInstallHap(opts, logger);
+  const hap = await resolveInstallHap(opts, logger);
+  const hapPath = hap.path;
 
   const result = await hdcExec({
     config: opts.config,
@@ -82,7 +151,7 @@ export async function installApp(opts: InstallAppOptions): Promise<InstallAppRes
   });
   if (result.stdout.trim()) logger.info(result.stdout.trim());
   if (result.stderr.trim()) logger.warn(result.stderr.trim());
-  ensureInstallOk(result, `hdc install ${hapPath}`);
+  ensureInstallOk(result, `hdc install ${hapPath}`, hap);
 
   let bundleName = '';
   try {

@@ -45,8 +45,11 @@ New:
 - `cmdtools status` shows the tools' flavour (HarmonyOS or OpenHarmony) and the hdc path. Core:
   `detectCmdToolsFlavour`.
 - `app install` takes a `.hap` path as well as a project dir. With no signed HAP, `app install` and `app apply`
-  fall back to the unsigned one, for the HarmonyOS emulator. HAPs are now newest first, so a fresh build wins
-  over HAPs committed to the repository.
+  fall back to the unsigned one on any target (`app install` takes the entry module's when several modules have
+  one), and a `*-signed.hap` path that does not exist falls back to its `*-unsigned.hap`. When the target refuses
+  the unsigned HAP, the error names the bundle manager's reason (e.g. `code 9568320: no signature file`) and the
+  `sign` command to run, instead of hdc's raw output. HAPs are now newest first, so a fresh build wins over HAPs
+  committed to the repository.
 - `file send --bundle <b>` writes into an app's sandbox (relative paths resolve inside it) and chowns the file to
   the app, which cannot read the root-owned files hdc creates.
 - `sign --app-privilege-capabilities <list>` writes `app-privilege-capabilities` into the profile, e.g.
@@ -54,6 +57,7 @@ New:
 - `build --install-sdk` installs the missing OpenHarmony SDK and builds. A build that fails on system-API errors
   (`'…' is not exported from Kit '…'`) gets a hint about the full SDK.
 - Core also exports `resolveDeviceSerial`, `hdcTargetArgs`, `hdcTargetArgsFor`, `hdcClientFailure`,
-  `detectInstallFailure`, `ensureInstallOk`, `isBundleInstalled`, `pickHap`, `parseCodelinterReport`,
+  `detectInstallFailure`, `ensureInstallOk`, `installFailureReason`, `unsignedHapRejection`, `isUnsignedHap`,
+  `existingHapOrUnsigned`, `isBundleInstalled`, `pickHap`, `parseCodelinterReport`,
   `cleanCodelinterOutput`, `findMissingProjectSdk`, `diagnoseBuildFailure`, `normaliseLocalPath`,
   `assertDevicePath`, and `appSandboxDir`.

@@ -5,7 +5,14 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger, scopedLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 import { hdcExec } from '../hdc/exec.js';
-import { ensureInstallOk, findRunningProcess, isBundleInstalled, uninstallApp } from '../hdc/app.js';
+import {
+  ensureInstallOk,
+  existingHapOrUnsigned,
+  findRunningProcess,
+  isBundleInstalled,
+  uninstallApp,
+  type InstallCandidate,
+} from '../hdc/app.js';
 import { reboot } from '../hdc/lifecycle.js';
 import { discoverHaps, pickHap } from '../build/discoverHaps.js';
 import { diffHapAssets } from './diffHapAssets.js';
@@ -84,21 +91,21 @@ async function pidOf(config: ConfigProvider, bundle: string, deviceSerial?: stri
   return proc ? Number(proc.pid) : null;
 }
 
-async function resolveHapPath(opts: ApplyChangesOptions, logger: Logger): Promise<string> {
-  let hapPath = opts.hapPath;
-  if (hapPath) {
-    if (!path.isAbsolute(hapPath) && opts.projectDir) hapPath = path.join(opts.projectDir, hapPath);
+async function resolveHap(opts: ApplyChangesOptions, logger: Logger): Promise<InstallCandidate> {
+  let hap: InstallCandidate | undefined;
+  if (opts.hapPath) {
+    const hapPath =
+      !path.isAbsolute(opts.hapPath) && opts.projectDir ? path.join(opts.projectDir, opts.hapPath) : opts.hapPath;
+    hap = existingHapOrUnsigned(hapPath);
+    if (!hap) throw new OniroError(`HAP not found at ${hapPath}.`);
   } else {
     if (!opts.projectDir) throw new OniroError('applyChanges requires hapPath or projectDir.');
     const picked = pickHap(await discoverHaps({ projectDir: opts.projectDir }), opts.module);
     if (!picked) throw new OniroError(`No HAP found${opts.module ? ` for module ${opts.module}` : ''}. Build first.`);
-    if (!picked.signed) {
-      logger.warn(`No signed HAP; installing ${path.basename(picked.path)}, which only the HarmonyOS emulator accepts.`);
-    }
-    hapPath = picked.path;
+    hap = { path: picked.path, fallback: !picked.signed };
   }
-  if (!fs.existsSync(hapPath)) throw new OniroError(`HAP not found at ${hapPath}.`);
-  return hapPath;
+  if (hap.fallback) logger.warn(`No signed HAP found; installing the unsigned ${path.basename(hap.path)}.`);
+  return hap;
 }
 
 /**
@@ -114,7 +121,8 @@ export async function applyChanges(opts: ApplyChangesOptions): Promise<ApplyChan
   const isSystemBundle = opts.isSystemBundle ?? false;
   const allowUninstall = opts.allowUninstall ?? false;
 
-  const hapPath = await resolveHapPath(opts, logger);
+  const hap = await resolveHap(opts, logger);
+  const hapPath = hap.path;
   logger.info(`installing ${hapPath}`);
 
   // Asset-path diff (best-effort; only when the caller supplies the installed HAP).
@@ -149,10 +157,11 @@ export async function applyChanges(opts: ApplyChangesOptions): Promise<ApplyChan
     ensureInstallOk(
       await hdcExec({ config, args: ['install', hapPath], deviceSerial, timeoutMs: 300_000 }),
       `hdc install ${hapPath}`,
+      hap,
     );
     installMethod = 'uninstall-install';
   } else {
-    ensureInstallOk(replaceRes, `hdc install -r ${hapPath}`);
+    ensureInstallOk(replaceRes, `hdc install -r ${hapPath}`, hap);
     installMethod = 'replace';
   }
 

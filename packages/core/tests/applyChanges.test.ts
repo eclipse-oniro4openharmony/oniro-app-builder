@@ -28,6 +28,7 @@ case "$1" in
         *signinfo*) printf '[Fail]install failed: error 9568332 sign info inconsistent\\n'; exit 1 ;;
         # Like real hdc: a bundle-manager rejection still exits 0.
         *rejected*) printf '[Info]App install path:%s msg:error: failed to install bundle.\\ncode:9568344\\n' "$3"; exit 0 ;;
+        *nosig*) printf '[Info]App install path:%s msg:error: failed to install bundle. code:9568320 error: no signature file. \\n' "$3"; exit 0 ;;
         *) printf '[Info]App install path:%s msg:install bundle successfully.\\nAppMod finish\\n' "$3"; exit 0 ;;
       esac
     else
@@ -96,6 +97,21 @@ exit 0
     fs.mkdirSync(out, { recursive: true });
     fs.writeFileSync(path.join(out, 'entry-default-unsigned.hap'), 'fakehap');
     const result = await applyChanges({ config: config(), bundle: 'com.example.app', projectDir });
+    expect(result.method).toBe('replace');
+  });
+
+  it('explains a target that refuses the unsigned fallback, and how to sign for it', async () => {
+    const out = path.join(projectDir, 'entry', 'build', 'default', 'outputs', 'default');
+    fs.mkdirSync(out, { recursive: true });
+    fs.writeFileSync(path.join(out, 'entry-nosig-unsigned.hap'), 'fakehap');
+    await expect(applyChanges({ config: config(), bundle: 'com.example.app', projectDir })).rejects.toThrow(
+      /No signed HAP was found, so the unsigned entry-nosig-unsigned\.hap was tried.*code 9568320: no signature file.*oniro-app sign/,
+    );
+  });
+
+  it('falls back from a missing signed HAP path to its unsigned sibling', async () => {
+    fs.writeFileSync(path.join(projectDir, 'app-unsigned.hap'), 'fakehap');
+    const result = await applyChanges({ config: config(), bundle: 'com.example.app', projectDir, hapPath: 'app-signed.hap' });
     expect(result.method).toBe('replace');
   });
 });

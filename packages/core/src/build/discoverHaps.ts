@@ -69,7 +69,7 @@ export async function discoverHaps(opts: DiscoverHapsOptions): Promise<Record<st
 export interface PickedHap {
   module: string;
   path: string;
-  /** False for an `*-unsigned.hap`, which only the HarmonyOS emulator installs. */
+  /** False for an `*-unsigned.hap`, which targets that verify signatures reject. */
   signed: boolean;
 }
 

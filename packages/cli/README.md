@@ -180,9 +180,9 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 
 | Command | Description |
 | --- | --- |
-| `app install [project-dir \| file.hap] [--hap <path>] [--device <serial>]` | Install a `.hap` via `hdc`: a given file, else the project's newest signed HAP, else its unsigned one (only the HarmonyOS emulator accepts those). Fails when the bundle manager rejects the HAP. |
+| `app install [project-dir \| file.hap] [--hap <path>] [--device <serial>]` | Install a `.hap` via `hdc`: a given file, else the project's newest signed HAP, else its unsigned one (a `*-signed.hap` path that does not exist falls back to its `*-unsigned.hap`). Fails when the bundle manager rejects the HAP; when a target refuses an unsigned HAP, the error gives the bundle manager's reason and the `sign` command to run. |
 | `app launch [project-dir] [--module <m>] [--ability <name>] [--device <serial>]` | Launch the app. `--ability` defaults to the module's `mainElement` / first visible ability. |
-| `app apply [project-dir] --bundle <b> [options]` | Install a HAP **and verify it took**: fails when the bundle manager rejects it or `bm dump` does not then list the bundle, and handles sign-info mismatch, asset-cache invalidation, and persistent-bundle restart. Uses the newest signed HAP, else the unsigned one. |
+| `app apply [project-dir] --bundle <b> [options]` | Install a HAP **and verify it took**: fails when the bundle manager rejects it or `bm dump` does not then list the bundle, and handles sign-info mismatch, asset-cache invalidation, and persistent-bundle restart. Uses the newest signed HAP, else the unsigned one, and explains a target's refusal of an unsigned HAP like `app install`. |
 | `app uninstall <bundle> [--device <serial>]` | Uninstall an app by bundle name. |
 | `app stop <bundle> [--device <serial>]` | Force-stop an app by bundle name. |
 
