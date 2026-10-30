@@ -36,3 +36,10 @@ export const ALL_SDKS: readonly SdkRelease[] = [
 ];
 
 export const OHOS_URL_BASE = 'https://repo.huaweicloud.com/openharmony/os';
+
+/**
+ * OpenHarmony daily builds. The full SDK (with `@systemapi` declarations) is not on the
+ * release mirror; its `ohos-sdk-full` archives are published here, to be installed with
+ * `installSdkFromArchive`.
+ */
+export const OHOS_DAILY_BUILDS_URL = 'https://dcp.openharmony.cn/workbench/cicd/dailybuild/dailylist';
