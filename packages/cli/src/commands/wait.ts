@@ -2,9 +2,11 @@ import { Command } from 'commander';
 import { waitForLog, waitForBoot, waitForBundle, waitForTarget, describeLayoutNode } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 import { addTargetOptions, selectorFrom, type TargetOpts } from '../lib/target.js';
+import { parseSince } from '../lib/logSince.js';
 
 interface WaitOpts extends TargetOpts {
   log?: string;
+  since?: string;
   boot?: boolean;
   bundle?: string;
   pidOf?: string;
@@ -23,7 +25,12 @@ export function registerWaitCommand(program: Command): void {
       'Wait for a device condition: a log line (--log), boot (--boot), a bundle to start (--bundle), ' +
         'or an on-screen element (--target / --target-id / --target-type).',
     )
-    .option('--log <pattern>', 'Resolve when a hilog line (tag: message) matches this regex.')
+    .option('--log <pattern>', 'Resolve when a hilog line (tag: message) logged after the command starts matches this regex.')
+    .option(
+      '--since <seconds>',
+      'With --log: also match lines logged up to N seconds before the command started, ' +
+        'measured on the device clock; "all" matches everything still in the device log buffer.',
+    )
     .option('--boot', 'Resolve when the device is reachable (optionally also --pid-of).')
     .option('--bundle <bundle>', 'With --log: filter to this bundle. Alone: wait until this bundle is running.')
     .option('--pid-of <name>', 'With --boot: also require this process to have a pid.')
@@ -48,10 +55,11 @@ export function registerWaitCommand(program: Command): void {
           bundle: opts.bundle,
           domain: opts.domain,
           deviceSerial: opts.device,
+          lookbackMs: parseSince(opts.since),
           logger,
         });
         if (opts.json) process.stdout.write(`${JSON.stringify(entry, null, 2)}\n`);
-        else logger.info(`matched: ${entry.tag}: ${entry.message}`);
+        else logger.info(`matched: ${entry.time}  ${entry.tag}: ${entry.message}`);
         return;
       }
       if (opts.boot) {
