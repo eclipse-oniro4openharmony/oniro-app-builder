@@ -54,4 +54,24 @@ describe('discoverHaps', () => {
   it('returns {} for a project with no built HAPs', async () => {
     expect(await discoverHaps({ projectDir })).toEqual({});
   });
+
+  it("skips another app project nested in the project, whose HAPs are another app's", async () => {
+    writeHap('AppScope/app.json5');
+    writeHap('entry/build/default/outputs/default/entry-default-signed.hap');
+    writeHap('healthsim/AppScope/app.json5');
+    writeHap('healthsim/entry/build/default/outputs/default/entry-default-signed.hap');
+
+    const haps = await discoverHaps({ projectDir });
+
+    expect(haps.entry!.signed).toEqual([path.join(projectDir, 'entry/build/default/outputs/default/entry-default-signed.hap')]);
+  });
+
+  it('still finds the HAPs of a project below a directory that is not a project root', async () => {
+    writeHap('app/AppScope/app.json5');
+    writeHap('app/entry/build/default/outputs/default/entry-default-signed.hap');
+
+    const haps = await discoverHaps({ projectDir });
+
+    expect(haps.entry!.signed).toHaveLength(1);
+  });
 });

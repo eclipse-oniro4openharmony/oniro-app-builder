@@ -16,6 +16,7 @@ import {
 import { reboot } from '../hdc/lifecycle.js';
 import { discoverHaps, pickHap } from '../build/discoverHaps.js';
 import { diffHapAssets } from './diffHapAssets.js';
+import { readHapBundleName } from './hapBundleName.js';
 
 export type InstallMethod = 'replace' | 'uninstall-install' | 'refuse';
 
@@ -123,6 +124,19 @@ export async function applyChanges(opts: ApplyChangesOptions): Promise<ApplyChan
 
   const hap = await resolveHap(opts, logger);
   const hapPath = hap.path;
+
+  // Installing another app's HAP would leave the bundle unchanged and add (or
+  // replace) a different app, so refuse before touching the device.
+  const hapBundle = await readHapBundleName(hapPath).catch((err: Error) => {
+    logger.debug(`bundle name check skipped: ${err.message}`);
+    return null;
+  });
+  if (hapBundle && hapBundle !== bundle) {
+    throw new OniroError(
+      `${path.basename(hapPath)} (${hapPath}) is bundle ${hapBundle}, not ${bundle}, so installing it would not ` +
+        `update ${bundle}. Choose the HAP explicitly, or name ${hapBundle} as the bundle if it is the app to update.`,
+    );
+  }
   logger.info(`installing ${hapPath}`);
 
   // Asset-path diff (best-effort; only when the caller supplies the installed HAP).
