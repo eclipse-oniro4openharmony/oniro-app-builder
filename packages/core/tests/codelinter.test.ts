@@ -87,7 +87,8 @@ describe('missingProjectRootFiles', () => {
     try {
       fs.writeFileSync(path.join(dir, 'build-profile.json5'), '{}');
       expect(missingProjectRootFiles(dir)).toEqual(['hvigorfile.ts', path.join('hvigor', 'hvigor-config.json5')]);
-      fs.writeFileSync(path.join(dir, 'hvigorfile.ts'), '');
+      fs.writeFileSync(path.join(dir, 'hvigorfile.js'), '');
+      expect(missingProjectRootFiles(dir)).toEqual([path.join('hvigor', 'hvigor-config.json5')]);
       fs.mkdirSync(path.join(dir, 'hvigor'));
       fs.writeFileSync(path.join(dir, 'hvigor', 'hvigor-config.json5'), '{}');
       expect(missingProjectRootFiles(dir)).toEqual([]);

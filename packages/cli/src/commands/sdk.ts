@@ -53,7 +53,8 @@ export function registerSdkCommand(program: Command): void {
           logger,
           tmpDir: opts.tmpDir,
         });
-        logger.info(`SDK ${installed.version} (api ${installed.api}) installed at ${installed.dir}.`);
+        const label = installed.version ? `SDK ${installed.version} (api ${installed.api})` : `SDK api ${installed.api}`;
+        logger.info(`${label} installed at ${installed.dir}.`);
         return;
       }
       if (!version) {

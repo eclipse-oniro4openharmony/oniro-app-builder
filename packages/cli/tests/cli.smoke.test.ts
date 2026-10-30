@@ -164,6 +164,18 @@ describe('oniro-app device-loop command validation (no device)', () => {
     expect(r.stderr).toMatch(/Specify one of --log|--boot|--bundle/);
   });
 
+  it('wait rejects --since without --log', () => {
+    const r = runCli(['wait', '--bundle', 'com.example.a', '--since', '30']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--since applies only to --log');
+  });
+
+  it('app apply rejects a .hap given both as the argument and with --hap', () => {
+    const r = runCli(['app', 'apply', 'a.hap', '--hap', 'b.hap']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('not both');
+  });
+
   it('dump rejects an unknown target', () => {
     const r = runCli(['dump', 'bogus']);
     expect(r.status).not.toBe(0);
