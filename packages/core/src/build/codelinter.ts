@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { runProcess } from '../hdc/exec.js';
@@ -153,6 +155,18 @@ export function parseCodelinterReport(output: string): CodelinterReport {
 /** The findings of a codelinter report; see {@link parseCodelinterReport}. */
 export function parseCodelinterFindings(output: string): CodelinterFinding[] {
   return parseCodelinterReport(output).findings;
+}
+
+/** The files of a DevEco project root, relative to it, that codelinter needs to run. */
+const PROJECT_ROOT_FILES = ['build-profile.json5', 'hvigorfile.ts', path.join('hvigor', 'hvigor-config.json5')];
+
+/**
+ * Which of the project-root files codelinter needs are missing from `projectDir`.
+ * Without them codelinter exits non-zero without a report, and says neither why
+ * nor which file.
+ */
+export function missingProjectRootFiles(projectDir: string): string[] {
+  return PROJECT_ROOT_FILES.filter((f) => !fs.existsSync(path.join(projectDir, f)));
 }
 
 export interface RunCodelinterOptions {

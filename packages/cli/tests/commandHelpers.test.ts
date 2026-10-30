@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { lintExitCode, lintTotals } from '../src/commands/lint.js';
+import { lintExitCode, lintFailed, lintTotals } from '../src/commands/lint.js';
 import { formatLongDevice } from '../src/commands/devices.js';
 import { hdcPassthroughArgv } from '../src/commands/hdc.js';
 
@@ -18,6 +18,12 @@ describe('lintExitCode', () => {
   it('passes the code through when codelinter printed no report at all', () => {
     expect(lintExitCode({ code: 2, findings: [], summary: null })).toBe(2);
     expect(lintExitCode({ code: 1, findings: [], summary: { defects: 0, errors: 0, warnings: 0, suggestions: 0 } })).toBe(0);
+  });
+
+  it('treats a non-zero exit without a report as a failed run, not a clean one', () => {
+    expect(lintFailed({ code: 1, findings: [], summary: null })).toBe(true);
+    expect(lintFailed({ code: 0, findings: [], summary: null })).toBe(false);
+    expect(lintFailed({ code: 1, findings: [warning], summary: null })).toBe(false);
   });
 
   it('counts the findings when there is no summary line', () => {

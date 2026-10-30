@@ -4,6 +4,7 @@ import {
   detectCmdToolsFlavour,
   detectRuntimeOs,
   getCmdToolsPath,
+  missingProjectRootFiles,
   runCodelinter,
   type CodelinterResult,
   type CodelinterSummary,
@@ -34,8 +35,12 @@ export function lintTotals(result: Pick<CodelinterResult, 'findings' | 'summary'
  */
 export function lintExitCode(result: Pick<CodelinterResult, 'code' | 'findings' | 'summary'>): number {
   if (lintTotals(result).errors > 0) return 1;
-  const noReport = result.summary === null && result.findings.length === 0;
-  return noReport && result.code !== 0 ? result.code : 0;
+  return lintFailed(result) ? result.code : 0;
+}
+
+/** True when codelinter exited non-zero without printing a report, so it did not really run. */
+export function lintFailed(result: Pick<CodelinterResult, 'code' | 'findings' | 'summary'>): boolean {
+  return result.summary === null && result.findings.length === 0 && result.code !== 0;
 }
 
 export function registerLintCommand(program: Command): void {
@@ -52,9 +57,10 @@ export function registerLintCommand(program: Command): void {
       const dir = path.resolve(projectDir ?? process.cwd());
       const result = await runCodelinter({ config, projectDir: dir, files: opts.files, logger });
       const totals = lintTotals(result);
+      const failed = lintFailed(result);
       if (opts.json) {
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      } else {
+      } else if (!failed) {
         for (const f of result.findings) {
           const at = `${f.file}:${f.line}${f.column ? `:${f.column}` : ''}`;
           process.stdout.write(`${at} ${f.severity} ${f.message}${f.code ? ` [${f.code}]` : ''}\n`);
@@ -67,8 +73,13 @@ export function registerLintCommand(program: Command): void {
         );
       }
 
-      if (result.summary === null && result.findings.length === 0 && result.code !== 0) {
-        logger.error(`codelinter exited ${result.code} without a report:\n${result.raw.trim().split('\n').slice(-15).join('\n')}`);
+      if (failed) {
+        const missing = missingProjectRootFiles(dir);
+        const why = missing.length ? ` It needs a DevEco project root, and ${dir} has no ${missing.join(', ')}.` : '';
+        logger.error(
+          `codelinter exited ${result.code} without a report, so nothing was linted.${why}\n` +
+            result.raw.trim().split('\n').slice(-15).join('\n'),
+        );
       }
       if (result.incomplete) {
         for (const n of result.notices) logger.warn(`codelinter: ${n}`);
