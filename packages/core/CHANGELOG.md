@@ -1,5 +1,57 @@
 # @oniroproject/core
 
+## 0.15.0
+
+### Minor Changes
+
+- 2712058: `app apply` no longer installs another app's HAP.
+
+  Changed:
+
+  - `app apply` refuses a HAP whose bundleName differs from the bundle being applied, before it touches the device. It
+    also accepts a `.hap` file as the positional argument, as `app install` does, and then takes the bundle name from
+    the HAP (falling back from a missing `*-signed.hap` to its unsigned sibling, as installs do). Giving a HAP both
+    that way and with `--hap` is an error. Core exports `readHapBundleName`.
+
+  Fixes:
+
+  - `discoverHaps` (used by `app install` and `app apply`) skips another app project nested inside the project (a
+    subdirectory with its own `AppScope/app.json5`), whose newer HAP used to win and replace the wrong app.
+
+- 20049a3: Install an OpenHarmony SDK from a local archive, which is how the full SDK gets installed.
+
+  - `sdk install --from-archive <path>` installs a local SDK `.tar.gz`, such as an `ohos-sdk-full` archive from the
+    OpenHarmony daily builds (https://dcp.openharmony.cn/workbench/cicd/dailybuild/dailylist), which the release mirror
+    does not carry. Only the current OS's components are unpacked, wherever they sit in the archive, and the API level
+    is read from their `oh-uni-package.json`. An SDK already installed at that level is replaced only with `--force`.
+    `sdk install --help`, and `sdk install` with neither a version nor an archive, point at the daily builds.
+  - The system-API build hint (`'…' is not exported from Kit '…'`) now names the daily builds and
+    `sdk install --from-archive` instead of describing a manual unpack.
+  - Core exports `installSdkFromArchive`, `findSdkOsDir`, `readZipEntry` and `OHOS_DAILY_BUILDS_URL`;
+    `extractTarball` takes an optional entry filter.
+
+- a7cfe1f: `wait --log` and `watch --log` only match lines logged after the command starts.
+
+  Changed:
+
+  - `hdc shell hilog` replays the buffer before it streams, so `wait --log` and `watch --log` used to return lines from
+    minutes or hours ago (a previous run's `complete: done`, a 95 s old `status=503`), which answered "did X fire?"
+    wrongly. They now skip lines logged before the command started, measured on the device clock. `--since <seconds>`
+    also accepts lines up to N seconds before the command (useful right after a tap), and `--since all` restores the
+    old behaviour, and is an error without `--log`. When the device clock can't be read, every line can match and a
+    warning says so. A `wait --log` that spans a reboot which resets the device clock (a board without an RTC) still
+    matches the lines logged after it. `wait --log` prints the matched line's device time.
+  - In core, `waitForLog` and `watchLog` take a `lookbackMs` option (default 0, `Infinity` for the whole buffer), and
+    `hilogTimeMs` is exported.
+
+### Patch Changes
+
+- 3770e90: Fixes:
+
+  - `lint` no longer prints `No defects found.` when codelinter exited non-zero without a report. It says nothing was
+    linted, and names the project-root files the directory lacks (`build-profile.json5`, `hvigorfile.ts` or `.js`,
+    `hvigor/hvigor-config.json5`). Core exports `missingProjectRootFiles`.
+
 ## 0.14.1
 
 ### Patch Changes
