@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { cleanCodelinterOutput, parseCodelinterReport } from '../src/build/codelinter.js';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { cleanCodelinterOutput, missingProjectRootFiles, parseCodelinterReport } from '../src/build/codelinter.js';
 
 // Shaped like real codelinter 6.0 output (ANSI colours, a `\r`-redrawn progress bar).
 const ESC = '\u001b';
@@ -75,5 +78,21 @@ describe('cleanCodelinterOutput', () => {
     expect(cleanCodelinterOutput(`${ESC}[32mWorking...[=>]2%${ESC}[0m\r${ESC}[32mFinished...[==]100%${ESC}[0m\n`)).toBe(
       'Finished...[==]100%\n',
     );
+  });
+});
+
+describe('missingProjectRootFiles', () => {
+  it('names the project-root files codelinter needs that a directory lacks', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-lint-root-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'build-profile.json5'), '{}');
+      expect(missingProjectRootFiles(dir)).toEqual(['hvigorfile.ts', path.join('hvigor', 'hvigor-config.json5')]);
+      fs.writeFileSync(path.join(dir, 'hvigorfile.ts'), '');
+      fs.mkdirSync(path.join(dir, 'hvigor'));
+      fs.writeFileSync(path.join(dir, 'hvigor', 'hvigor-config.json5'), '{}');
+      expect(missingProjectRootFiles(dir)).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
