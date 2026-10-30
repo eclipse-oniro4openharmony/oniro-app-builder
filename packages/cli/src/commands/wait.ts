@@ -46,6 +46,7 @@ export function registerWaitCommand(program: Command): void {
       const { config, logger } = getRuntime();
       const timeoutMs = Number(opts.timeout);
       const selector = selectorFrom(opts);
+      if (opts.since !== undefined && !opts.log) throw new Error('--since applies only to --log.');
 
       if (opts.log) {
         const entry = await waitForLog({

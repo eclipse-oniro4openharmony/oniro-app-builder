@@ -157,16 +157,25 @@ export function parseCodelinterFindings(output: string): CodelinterFinding[] {
   return parseCodelinterReport(output).findings;
 }
 
-/** The files of a DevEco project root, relative to it, that codelinter needs to run. */
-const PROJECT_ROOT_FILES = ['build-profile.json5', 'hvigorfile.ts', path.join('hvigor', 'hvigor-config.json5')];
+/**
+ * The files of a DevEco project root, relative to it, that codelinter needs to run.
+ * Each entry lists the names that satisfy it; older templates use `hvigorfile.js`.
+ */
+const PROJECT_ROOT_FILES = [
+  ['build-profile.json5'],
+  ['hvigorfile.ts', 'hvigorfile.js'],
+  [path.join('hvigor', 'hvigor-config.json5')],
+];
 
 /**
- * Which of the project-root files codelinter needs are missing from `projectDir`.
- * Without them codelinter exits non-zero without a report, and says neither why
- * nor which file.
+ * Which of the project-root files codelinter needs are missing from `projectDir`,
+ * each named by its first form. Without them codelinter exits non-zero without a
+ * report, and says neither why nor which file.
  */
 export function missingProjectRootFiles(projectDir: string): string[] {
-  return PROJECT_ROOT_FILES.filter((f) => !fs.existsSync(path.join(projectDir, f)));
+  return PROJECT_ROOT_FILES.filter((names) => !names.some((f) => fs.existsSync(path.join(projectDir, f)))).map(
+    (names) => names[0]!,
+  );
 }
 
 export interface RunCodelinterOptions {

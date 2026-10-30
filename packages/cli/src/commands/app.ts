@@ -1,5 +1,4 @@
 import { Command } from 'commander';
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   installApp,
@@ -7,6 +6,7 @@ import {
   uninstallApp,
   forceStop,
   applyChanges,
+  existingHapOrUnsigned,
   getBundleName,
   readHapBundleName,
   OniroError,
@@ -91,13 +91,16 @@ export function registerAppCommand(program: Command): void {
     .action(async (target: string | undefined, opts: ApplyOpts) => {
       const { config, logger } = getRuntime();
       const isHap = target !== undefined && /\.hap$/i.test(target);
+      if (isHap && opts.hap) throw new OniroError('Pass the HAP either as the argument or with --hap, not both.');
       const dir = isHap ? process.cwd() : path.resolve(target ?? process.cwd());
       const hapPath = isHap ? path.resolve(target) : opts.hap;
       let bundle = opts.bundle;
       if (!bundle && isHap) {
-        if (!fs.existsSync(hapPath!)) throw new OniroError(`HAP not found at ${hapPath}.`);
-        bundle = (await readHapBundleName(hapPath!).catch(() => null)) ?? undefined;
-        if (!bundle) throw new OniroError(`Could not read the bundle name from ${hapPath}. Pass --bundle.`);
+        // The same signed-to-unsigned fallback applyChanges applies when it installs.
+        const hap = existingHapOrUnsigned(hapPath!);
+        if (!hap) throw new OniroError(`HAP not found at ${hapPath}.`);
+        bundle = (await readHapBundleName(hap.path).catch(() => null)) ?? undefined;
+        if (!bundle) throw new OniroError(`Could not read the bundle name from ${hap.path}. Pass --bundle.`);
       }
       bundle ??= getBundleName(dir);
       const result = await applyChanges({

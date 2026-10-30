@@ -9,7 +9,8 @@ Changed:
 
 - `app apply` refuses a HAP whose bundleName differs from the bundle being applied, before it touches the device. It
   also accepts a `.hap` file as the positional argument, as `app install` does, and then takes the bundle name from
-  the HAP. Core exports `readHapBundleName`.
+  the HAP (falling back from a missing `*-signed.hap` to its unsigned sibling, as installs do). Giving a HAP both
+  that way and with `--hap` is an error. Core exports `readHapBundleName`.
 
 Fixes:
 

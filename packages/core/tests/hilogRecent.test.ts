@@ -25,24 +25,35 @@ describe('hilogTimeMs', () => {
   });
 });
 
-// Fake `hdc` whose clock reads 22:35:38: the buffer holds one line from the
-// second before (render fail) and two from that second (hello world).
+// Fake `hdc` whose clock reads 22:35:38: the buffer holds a line from 1.5 s
+// before (render fail), one from 1 s before (while reading the clock) and two
+// from that second (hello world). `dateDelay` (s) slows the clock read down.
+// `rebootTo` makes the first hilog stream end and the device come back with its
+// clock reset to that time, logging one line after the reboot.
 describe.skipIf(isWin)('waitForLog / watchLog skip lines logged before the call (fake hdc)', () => {
   let root: string;
 
-  const writeHdc = (dateOutput: string): void => {
+  const writeHdc = (dateOutput: string, opts: { dateDelay?: number; rebootTo?: string } = {}): void => {
     const toolchains = path.join(root, 'sdk', 'default', 'openharmony', 'toolchains');
     fs.mkdirSync(toolchains, { recursive: true });
     const hdc = path.join(toolchains, 'hdc');
+    const rebooted = path.join(root, 'rebooted');
+    const afterReboot = opts.rebootTo
+      ? `if [ -f '${rebooted}' ]; then printf '01-01 08:00:05.000     1     1 I MyTag: after reboot\\n'; sleep 5; exit 0; fi
+        touch '${rebooted}'`
+      : '';
+    const rebootClock = opts.rebootTo ? `if [ -f '${rebooted}' ]; then printf '${opts.rebootTo}\\n'; exit 0; fi` : '';
     fs.writeFileSync(
       hdc,
       `#!/bin/sh
 case "$1" in
   shell)
     case "$2" in
-      date*) printf '${dateOutput}\\n'; exit 0 ;;
-      hilog*)
-        printf '05-19 22:35:37.818  3687  3712 E C01406/OHOS::RS: render fail\\n'
+      date*) ${rebootClock}
+        sleep ${opts.dateDelay ?? 0}; printf '${dateOutput}\\n'; exit 0 ;;
+      hilog*) ${afterReboot}
+        printf '05-19 22:35:36.500  3687  3712 E C01406/OHOS::RS: render fail\\n'
+        printf '05-19 22:35:37.000  3687  3712 I MyTag: while reading the clock\\n'
         printf '05-19 22:35:38.000  3687  3712 I MyTag: hello world\\n'
         printf '05-19 22:35:38.001  3687  3712 I MyTag: hello world\\n'
         exit 0 ;;
@@ -73,7 +84,7 @@ exit 0
   });
 
   it('waitForLog matches it within lookbackMs, or with Infinity', async () => {
-    const recent = await waitForLog({ config: config(), pattern: /render fail/, timeoutMs: 5000, lookbackMs: 1000 });
+    const recent = await waitForLog({ config: config(), pattern: /render fail/, timeoutMs: 5000, lookbackMs: 2000 });
     expect(recent.tag).toBe('C01406/OHOS::RS');
     const all = await waitForLog({ config: config(), pattern: /render fail/, timeoutMs: 5000, lookbackMs: Infinity });
     expect(all.message).toBe('render fail');
@@ -82,6 +93,18 @@ exit 0
   it('watchLog collects only the lines from the call onwards', async () => {
     const entries = await watchLog({ config: config(), pattern: /./, durationMs: 500, dedup: false });
     expect(entries.map((e) => e.message)).toEqual(['hello world', 'hello world']);
+  });
+
+  it('counts a line logged while the device clock was being read', async () => {
+    writeHdc('2026-05-19T22:35:38', { dateDelay: 2 });
+    const entry = await waitForLog({ config: config(), pattern: /while reading the clock/, timeoutMs: 5000 });
+    expect(entry.time).toBe('05-19 22:35:37.000');
+  });
+
+  it('waitForLog matches after a reboot that reset the device clock', async () => {
+    writeHdc('2026-05-19T22:35:38', { rebootTo: '2026-01-01T08:00:10' });
+    const entry = await waitForLog({ config: config(), pattern: /after reboot/, timeoutMs: 8000 });
+    expect(entry.time).toBe('01-01 08:00:05.000');
   });
 
   it('passes every line and warns when the device clock cannot be read', async () => {

@@ -190,9 +190,21 @@ export function hilogTimeMs(time: string, referenceMs: number): number | null {
   return best;
 }
 
+interface RecentEntryFilter {
+  /** Whether `entry` was logged since the call, or up to `lookbackMs` before it. */
+  test(entry: HilogEntry): boolean;
+  /**
+   * Re-read the device clock once the stream reconnects. A clock now behind the
+   * cutoff means the device rebooted with its clock reset (no RTC, or before time
+   * sync); its log buffer then holds only lines from after the reboot, so every
+   * line passes from then on.
+   */
+  afterReconnect(): Promise<void>;
+}
+
 /**
  * Build the test that keeps an entry logged no earlier than `lookbackMs` before
- * now, on the device clock. `hdc shell hilog` replays the buffer before it
+ * the call, on the device clock. `hdc shell hilog` replays the buffer before it
  * streams, so without it a wait matches lines from minutes ago. When the clock
  * can't be read, every entry passes and a warning says so.
  */
@@ -201,18 +213,30 @@ async function recentEntryFilter(opts: {
   deviceSerial?: string;
   lookbackMs?: number;
   logger: Logger;
-}): Promise<(entry: HilogEntry) => boolean> {
+}): Promise<RecentEntryFilter> {
+  const passAll: RecentEntryFilter = { test: () => true, afterReconnect: async () => {} };
   const lookbackMs = opts.lookbackMs ?? 0;
-  if (lookbackMs === Infinity) return () => true;
+  if (lookbackMs === Infinity) return passAll;
+  const startedAt = Date.now();
   const now = await readDeviceClock(opts.config, opts.deviceSerial);
   if (now === null) {
     opts.logger.warn('Could not read the device clock, so lines already in the log buffer can match too.');
-    return () => true;
+    return passAll;
   }
-  const since = now - lookbackMs;
-  return (entry) => {
-    const t = hilogTimeMs(entry.time, now);
-    return t === null || t >= since;
+  // `now` is a round trip after the call and truncated to the second; step back
+  // by the round trip so a line logged while the clock was read still counts.
+  let since: number | null = now - (Date.now() - startedAt) - lookbackMs;
+  return {
+    test: (entry) => {
+      if (since === null) return true;
+      const t = hilogTimeMs(entry.time, now);
+      return t === null || t >= since;
+    },
+    afterReconnect: async () => {
+      if (since === null) return;
+      const later = await readDeviceClock(opts.config, opts.deviceSerial);
+      if (later !== null && later < since) since = null;
+    },
   };
 }
 
@@ -248,7 +272,7 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
     let child: ChildProcessWithoutNullStreams | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let buf = '';
-    let isRecent: (entry: HilogEntry) => boolean = () => true;
+    let recent: RecentEntryFilter = { test: () => true, afterReconnect: async () => {} };
 
     const cleanup = (): void => {
       clearTimeout(timer);
@@ -293,7 +317,7 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
         buf = lines.pop() ?? '';
         for (const line of lines) {
           const entry = parseHilogLine(line);
-          if (entry && isRecent(entry) && opts.pattern.test(entryText(entry))) {
+          if (entry && recent.test(entry) && opts.pattern.test(entryText(entry))) {
             finish(entry);
             return;
           }
@@ -304,7 +328,7 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
         child = null;
         if (Date.now() < deadline) {
           // Auto-reconnect (survives a reboot) until the deadline.
-          reconnectTimer = setTimeout(() => void spawnStream().catch(failWith), 1_000);
+          reconnectTimer = setTimeout(() => void recent.afterReconnect().then(spawnStream).catch(failWith), 1_000);
         }
       };
       stream.once('close', onEnd);
@@ -314,7 +338,7 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
     // spawnStream can reject (device lookup, or a synchronous spawn failure);
     // surface it as this promise's rejection instead of an unhandled one.
     void (async () => {
-      isRecent = await recentEntryFilter({
+      recent = await recentEntryFilter({
         config: opts.config,
         deviceSerial: opts.deviceSerial,
         lookbackMs: opts.lookbackMs,
@@ -351,7 +375,7 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
     let settled = false;
     let child: ChildProcessWithoutNullStreams | null = null;
     let buf = '';
-    let isRecent: (entry: HilogEntry) => boolean = () => true;
+    let recent: RecentEntryFilter = { test: () => true, afterReconnect: async () => {} };
 
     const cleanup = (): void => {
       clearTimeout(timer);
@@ -379,7 +403,7 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
     opts.abortSignal?.addEventListener('abort', onAbort, { once: true });
 
     void (async () => {
-      isRecent = await recentEntryFilter({
+      recent = await recentEntryFilter({
         config: opts.config,
         deviceSerial: opts.deviceSerial,
         lookbackMs: opts.lookbackMs,
@@ -396,7 +420,7 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
         buf = lines.pop() ?? '';
         for (const line of lines) {
           const entry = parseHilogLine(line);
-          if (entry && isRecent(entry) && opts.pattern.test(entryText(entry))) matches.push(entry);
+          if (entry && recent.test(entry) && opts.pattern.test(entryText(entry))) matches.push(entry);
         }
       });
       // A device lookup or synchronous spawn failure used to surface as an
