@@ -156,6 +156,66 @@ async function resolveProcessId(
   return proc?.pid;
 }
 
+/**
+ * The device's wall clock (`date`) as `Date.UTC` ms of its local time, the frame
+ * hilog prints its timestamps in, to the second. Null when it can't be read.
+ */
+async function readDeviceClock(config: ConfigProvider, deviceSerial?: string): Promise<number | null> {
+  try {
+    const res = await shell({ config, command: 'date +%Y-%m-%dT%H:%M:%S', deviceSerial, timeoutMs: 10_000 });
+    const m = res.code === 0 ? /(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(res.stdout) : null;
+    if (!m) return null;
+    const [year, month, day, hour, minute, second] = m.slice(1).map(Number);
+    return Date.UTC(year!, month! - 1, day!, hour!, minute!, second!);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A hilog `time` ("MM-DD HH:MM:SS.mmm", no year) as `Date.UTC` ms, in the year
+ * that puts it closest to `referenceMs`, so a December 31st line read on
+ * January 1st lands in the previous year. Null when `time` has another form.
+ */
+export function hilogTimeMs(time: string, referenceMs: number): number | null {
+  const m = /^(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(time);
+  if (!m) return null;
+  const [month, day, hour, minute, second, ms] = m.slice(1).map(Number);
+  const year = new Date(referenceMs).getUTCFullYear();
+  let best: number | null = null;
+  for (const y of [year - 1, year, year + 1]) {
+    const t = Date.UTC(y, month! - 1, day!, hour!, minute!, second!, ms!);
+    if (best === null || Math.abs(t - referenceMs) < Math.abs(best - referenceMs)) best = t;
+  }
+  return best;
+}
+
+/**
+ * Build the test that keeps an entry logged no earlier than `lookbackMs` before
+ * now, on the device clock. `hdc shell hilog` replays the buffer before it
+ * streams, so without it a wait matches lines from minutes ago. When the clock
+ * can't be read, every entry passes and a warning says so.
+ */
+async function recentEntryFilter(opts: {
+  config: ConfigProvider;
+  deviceSerial?: string;
+  lookbackMs?: number;
+  logger: Logger;
+}): Promise<(entry: HilogEntry) => boolean> {
+  const lookbackMs = opts.lookbackMs ?? 0;
+  if (lookbackMs === Infinity) return () => true;
+  const now = await readDeviceClock(opts.config, opts.deviceSerial);
+  if (now === null) {
+    opts.logger.warn('Could not read the device clock, so lines already in the log buffer can match too.');
+    return () => true;
+  }
+  const since = now - lookbackMs;
+  return (entry) => {
+    const t = hilogTimeMs(entry.time, now);
+    return t === null || t >= since;
+  };
+}
+
 export interface WaitForLogOptions {
   config: ConfigProvider;
   /** Tested against `"<tag>: <message>"` of each parsed line. */
@@ -165,15 +225,21 @@ export interface WaitForLogOptions {
   bundle?: string;
   domain?: string | number;
   deviceSerial?: string;
+  /**
+   * Also match lines logged up to this long before the call. By default (0) only
+   * lines from the call onwards count, measured on the device clock to the second.
+   * `Infinity` matches everything still in the device buffer.
+   */
+  lookbackMs?: number;
   abortSignal?: AbortSignal;
   logger?: Logger;
 }
 
 /**
- * Resolve with the first hilog entry whose `"<tag>: <message>"` matches `pattern`.
- * The underlying stream is auto-respawned if it dies before the deadline, so the
- * wait survives a reboot mid-observation. Rejects on timeout (OniroError) or
- * abort (CancelledError).
+ * Resolve with the first hilog entry whose `"<tag>: <message>"` matches `pattern`
+ * and that was logged since the call (see `lookbackMs`). The underlying stream is
+ * auto-respawned if it dies before the deadline, so the wait survives a reboot
+ * mid-observation. Rejects on timeout (OniroError) or abort (CancelledError).
  */
 export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
   return new Promise<HilogEntry>((resolve, reject) => {
@@ -182,6 +248,7 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
     let child: ChildProcessWithoutNullStreams | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let buf = '';
+    let isRecent: (entry: HilogEntry) => boolean = () => true;
 
     const cleanup = (): void => {
       clearTimeout(timer);
@@ -226,7 +293,7 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
         buf = lines.pop() ?? '';
         for (const line of lines) {
           const entry = parseHilogLine(line);
-          if (entry && opts.pattern.test(entryText(entry))) {
+          if (entry && isRecent(entry) && opts.pattern.test(entryText(entry))) {
             finish(entry);
             return;
           }
@@ -246,7 +313,15 @@ export function waitForLog(opts: WaitForLogOptions): Promise<HilogEntry> {
 
     // spawnStream can reject (device lookup, or a synchronous spawn failure);
     // surface it as this promise's rejection instead of an unhandled one.
-    void spawnStream().catch(failWith);
+    void (async () => {
+      isRecent = await recentEntryFilter({
+        config: opts.config,
+        deviceSerial: opts.deviceSerial,
+        lookbackMs: opts.lookbackMs,
+        logger: opts.logger ?? noopLogger,
+      });
+      await spawnStream();
+    })().catch(failWith);
   });
 }
 
@@ -260,17 +335,23 @@ export interface WatchLogOptions {
   deviceSerial?: string;
   /** Collapse consecutive duplicate lines. Default true. */
   dedup?: boolean;
+  /** Also collect lines logged up to this long before the call; see {@link WaitForLogOptions.lookbackMs}. */
+  lookbackMs?: number;
   abortSignal?: AbortSignal;
   logger?: Logger;
 }
 
-/** Collect all hilog entries matching `pattern` for `durationMs`. Deduped by default. */
+/**
+ * Collect the hilog entries matching `pattern` that are logged during `durationMs`
+ * (see `lookbackMs`). Deduped by default.
+ */
 export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
   return new Promise<HilogEntry[]>((resolve, reject) => {
     const matches: HilogEntry[] = [];
     let settled = false;
     let child: ChildProcessWithoutNullStreams | null = null;
     let buf = '';
+    let isRecent: (entry: HilogEntry) => boolean = () => true;
 
     const cleanup = (): void => {
       clearTimeout(timer);
@@ -298,6 +379,13 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
     opts.abortSignal?.addEventListener('abort', onAbort, { once: true });
 
     void (async () => {
+      isRecent = await recentEntryFilter({
+        config: opts.config,
+        deviceSerial: opts.deviceSerial,
+        lookbackMs: opts.lookbackMs,
+        logger: opts.logger ?? noopLogger,
+      });
+      if (settled) return;
       const processId = await resolveProcessId(opts.config, opts.bundle, opts.deviceSerial);
       if (settled) return;
       const stream = streamHilog({ config: opts.config, processId, domain: opts.domain, deviceSerial: opts.deviceSerial });
@@ -308,7 +396,7 @@ export function watchLog(opts: WatchLogOptions): Promise<HilogEntry[]> {
         buf = lines.pop() ?? '';
         for (const line of lines) {
           const entry = parseHilogLine(line);
-          if (entry && opts.pattern.test(entryText(entry))) matches.push(entry);
+          if (entry && isRecent(entry) && opts.pattern.test(entryText(entry))) matches.push(entry);
         }
       });
       // A device lookup or synchronous spawn failure used to surface as an

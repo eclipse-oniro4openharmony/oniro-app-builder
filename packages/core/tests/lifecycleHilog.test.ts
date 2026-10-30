@@ -78,9 +78,9 @@ exit 0
   });
 
   it('watchLog collects matching entries and dedups consecutive duplicates by default', async () => {
-    const deduped = await watchLog({ config: config(), pattern: /hello world/, durationMs: 120 });
+    const deduped = await watchLog({ config: config(), pattern: /hello world/, durationMs: 500 });
     expect(deduped).toHaveLength(1);
-    const all = await watchLog({ config: config(), pattern: /hello world/, durationMs: 120, dedup: false });
+    const all = await watchLog({ config: config(), pattern: /hello world/, durationMs: 500, dedup: false });
     expect(all).toHaveLength(2);
   });
 });
