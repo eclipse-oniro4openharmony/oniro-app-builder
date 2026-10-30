@@ -114,10 +114,30 @@ export async function extractZipWithProgress(opts: ExtractZipOptions): Promise<v
 }
 
 /**
- * Extract a tar/tar.gz/tar.bz2 archive. Wraps `tar.x`.
+ * Extract a tar/tar.gz/tar.bz2 archive. Wraps `tar.x`; `filter` receives each entry's
+ * archive path and skips the entry when it returns false.
  */
-export async function extractTarball(tarPath: string, dest: string, strip = 0): Promise<void> {
-  await tar.x({ file: tarPath, cwd: dest, strip });
+export async function extractTarball(
+  tarPath: string,
+  dest: string,
+  strip = 0,
+  filter?: (entryPath: string) => boolean,
+): Promise<void> {
+  await tar.x({ file: tarPath, cwd: dest, strip, ...(filter ? { filter: (p: string) => filter(p) } : {}) });
+}
+
+/**
+ * Contents of the first entry of a ZIP whose name `match` accepts, or undefined. Reads
+ * only the central directory and that entry, so it is cheap on multi-hundred-MB ZIPs.
+ */
+export async function readZipEntry(zipPath: string, match: (entryName: string) => boolean): Promise<Buffer | undefined> {
+  const zip = new (StreamZip as unknown as { async: new (cfg: { file: string }) => StreamZipAsync }).async({ file: zipPath });
+  try {
+    const entry = Object.values(await zip.entries()).find((e) => !e.isDirectory && match(e.name));
+    return entry ? await zip.entryData(entry) : undefined;
+  } finally {
+    await zip.close();
+  }
 }
 
 // node-stream-zip's TypeScript types aren't great; this is the minimal shape we use.

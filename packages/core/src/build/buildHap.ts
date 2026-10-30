@@ -7,6 +7,7 @@ import { ensureOhModules } from './ohpm.js';
 import { discoverHaps, type ModuleHaps } from './discoverHaps.js';
 import { toLongPath } from '../sdk/paths.js';
 import { findMissingProjectSdk } from '../sdk/detectProjectSdk.js';
+import { OHOS_DAILY_BUILDS_URL } from '../sdk/constants.js';
 import { detectRuntimeOs } from '../harmonyos/target.js';
 import { findHarmonyOsSdk, findHarmonyOsTool } from '../harmonyos/sdk.js';
 
@@ -21,9 +22,10 @@ export function diagnoseBuildFailure(output: string): string | undefined {
   if (/is not exported from Kit|has no exported member .*@systemapi/i.test(output)) {
     return (
       'The project calls system APIs (`@systemapi`), which the public SDK leaves out. Build against the ' +
-      'full OpenHarmony SDK: unpack its components into <root>/<os>/<api> of a separate SDK root and set ' +
-      'ONIRO_SDK_ROOT_DIR to that root. Installing such an app also needs privileged signing ' +
-      '(`oniro-app sign --apl system_core --acls … --app-privilege-capabilities …`).'
+      `full OpenHarmony SDK: download an \`ohos-sdk-full\` archive from ${OHOS_DAILY_BUILDS_URL} and ` +
+      'install it with `oniro-app sdk install --from-archive <archive> --force` (this replaces the public ' +
+      'SDK of that API level; set ONIRO_SDK_ROOT_DIR to keep the two apart). Installing such an app also ' +
+      'needs privileged signing (`oniro-app sign --apl system_core --acls … --app-privilege-capabilities …`).'
     );
   }
   if (/00308018|SDK path does not exist|SDK license agreement is not accepted/i.test(output)) {

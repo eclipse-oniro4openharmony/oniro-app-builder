@@ -95,6 +95,7 @@ The injection points every frontend implements, plus their defaults.
 | Export | Signature | Description |
 | --- | --- | --- |
 | `downloadAndInstallSdk` | `(InstallSdkOptions) => Promise<void>` | Download + install an SDK release into `<sdkRootDir>/<os>/<api>`, reporting progress; `tmpDir` overrides the scratch directory (default: next to the install target). |
+| `installSdkFromArchive` | `(InstallSdkFromArchiveOptions) => Promise<InstalledSdk>` | Install an SDK from a local `.tar.gz` (e.g. the full SDK from `OHOS_DAILY_BUILDS_URL`) into `<sdkRootDir>/<os>/<api>`, unpacking only the current OS's components and reading `api`/`version` from their `oh-uni-package.json`. Throws when that API is already installed unless `force`. |
 | `getSupportedSdksForUi` | `(config) => SdkInfo[]` | Known SDKs annotated with `installed`, newest first. |
 | `getInstalledSdks` | `(config) => string[]` | Versions with at least one OS-folder install. |
 | `removeSdk` | `(config, api) => boolean` | Remove an installed SDK by API level across OS folders. |

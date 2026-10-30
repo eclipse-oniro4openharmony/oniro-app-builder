@@ -66,6 +66,34 @@ describe('oniro-app sdk list', () => {
   });
 });
 
+describe('oniro-app sdk install', () => {
+  it('--help documents --from-archive and where to get the full SDK', () => {
+    const r = runCli(['sdk', 'install', '--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('--from-archive <path>');
+    expect(r.stdout).toContain('https://dcp.openharmony.cn/workbench/cicd/dailybuild/dailylist');
+  });
+
+  it('without a version or --from-archive fails, naming both and the full-SDK tip', () => {
+    const r = runCli(['sdk', 'install']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/Name an SDK version .* or pass --from-archive/);
+    expect(r.stderr).toContain('dailybuild');
+  });
+
+  it('rejects a version together with --from-archive', () => {
+    const r = runCli(['sdk', 'install', '7.0', '--from-archive', 'x.tar.gz']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('not both');
+  });
+
+  it('reports a missing archive', () => {
+    const r = runCli(['sdk', 'install', '--from-archive', path.join(os.tmpdir(), 'oniro-no-such-sdk.tar.gz')]);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('SDK archive not found');
+  });
+});
+
 describe('oniro-app templates list', () => {
   it('--json includes EmptyAbility with required fields', () => {
     const r = runCli(['templates', 'list', '--json']);

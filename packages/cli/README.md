@@ -61,8 +61,19 @@ Install commands are idempotent (they skip when already present); pass `--force`
 | Command | Description |
 | --- | --- |
 | `sdk install <version> [--force] [--tmp-dir <path>]` | Download and install an OpenHarmony SDK (e.g. `6.1`). `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). |
+| `sdk install --from-archive <path> [--force] [--tmp-dir <path>]` | Install an SDK from a local `.tar.gz` instead, such as the [full SDK](#full-sdk). Only the current OS's components are unpacked, and the API level is read from them; an SDK already installed at that level is replaced only with `--force`. |
 | `sdk list [--json]` | List known SDK versions; an `*` marks installed ones. |
 | `sdk remove <api>` | Remove an installed SDK by API level (e.g. `18`, `20`). |
+
+##### Full SDK
+
+`sdk install <version>` downloads the public SDK, which leaves out system APIs (`@systemapi`). The full SDK is not on the release mirror: download an `ohos-sdk-full` archive from the [OpenHarmony daily builds](https://dcp.openharmony.cn/workbench/cicd/dailybuild/dailylist) and install it from the file:
+
+```bash
+oniro-app sdk install --from-archive ~/Downloads/version-Master_Version-OpenHarmony_7.0.0.39-…-ohos-sdk-full_7.0-Release.tar.gz
+```
+
+It lands in `<ONIRO_SDK_ROOT_DIR>/<os>/<api>` like a downloaded release, so projects with that `compileSdkVersion` build against it. Pass `--force` to replace a public SDK of the same API level, or set `ONIRO_SDK_ROOT_DIR` to a separate root to keep both.
 
 #### `cmdtools` — manage the OpenHarmony command-line tools (provides `hvigorw`, `ohpm`, `hdc`, `codelinter`)
 
@@ -578,7 +589,7 @@ oniro-app sign --apl system_core --acls ohos.permission.ACCESSIBILITY_EXTENSION_
     --app-privilege-capabilities AllowAppUsePrivilegeExtension
 ```
 
-Apps like these usually also call system APIs (`@systemapi`), which the public SDK that `sdk install` downloads leaves out: the build fails with errors such as `'config' is not exported from Kit '@kit.AccessibilityKit'`. Build them against the full OpenHarmony SDK by unpacking its components into `<root>/<os>/<api>` of a separate SDK root and pointing `ONIRO_SDK_ROOT_DIR` at that root.
+Apps like these usually also call system APIs (`@systemapi`), which the public SDK that `sdk install` downloads leaves out: the build fails with errors such as `'config' is not exported from Kit '@kit.AccessibilityKit'`. Build them against the full OpenHarmony SDK, installed with `sdk install --from-archive` (see [Full SDK](#full-sdk)).
 
 The `signingConfigs` block written to `build-profile.json5` mirrors the names used by the project's `products[*].signingConfig` (e.g. `applications/standard/systemui` uses `release`, `launcher` uses `default`). If the project has no products section, `default` is used, and a product that names no `signingConfig` is pointed at it.
 
