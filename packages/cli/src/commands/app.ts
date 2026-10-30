@@ -1,6 +1,16 @@
 import { Command } from 'commander';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { installApp, launchApp, uninstallApp, forceStop, applyChanges, getBundleName } from '@oniroproject/core';
+import {
+  installApp,
+  launchApp,
+  uninstallApp,
+  forceStop,
+  applyChanges,
+  getBundleName,
+  readHapBundleName,
+  OniroError,
+} from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 
 interface ApplyOpts {
@@ -61,12 +71,16 @@ export function registerAppCommand(program: Command): void {
     });
 
   app
-    .command('apply [project-dir]')
+    .command('apply [project-dir-or-hap]')
     .description(
-      'Install a HAP and verify the running process took the change. Handles sign-info mismatch, ' +
-        'asset-cache invalidation, and persistent-bundle restart.',
+      'Install a HAP (a project dir, default the current one, or a .hap file) and verify the running process ' +
+        'took the change. Refuses a HAP of another bundle. Handles sign-info mismatch, asset-cache invalidation, ' +
+        'and persistent-bundle restart.',
     )
-    .option('--bundle <bundle>', 'Bundle name to apply changes to. Defaults to the bundleName in the project AppScope/app.json5.')
+    .option(
+      '--bundle <bundle>',
+      'Bundle name to apply changes to. Defaults to the bundleName in the .hap file, else in the project AppScope/app.json5.',
+    )
     .option('--module <module>', 'Module to resolve the HAP from (multi-module projects).')
     .option('--hap <path>', 'Explicit .hap path (relative to project-dir or absolute).')
     .option('--installed-hap <path>', 'Local path to the currently-installed HAP, to enable the asset-cache reboot.')
@@ -74,14 +88,22 @@ export function registerAppCommand(program: Command): void {
     .option('--allow-uninstall', 'Permit uninstalling a system bundle on sign-info mismatch (dangerous).')
     .option('--device <serial>', 'Target device serial.')
     .option('--json', 'Emit the result as JSON.')
-    .action(async (projectDir: string | undefined, opts: ApplyOpts) => {
+    .action(async (target: string | undefined, opts: ApplyOpts) => {
       const { config, logger } = getRuntime();
-      const dir = path.resolve(projectDir ?? process.cwd());
-      const bundle = opts.bundle ?? getBundleName(dir);
+      const isHap = target !== undefined && /\.hap$/i.test(target);
+      const dir = isHap ? process.cwd() : path.resolve(target ?? process.cwd());
+      const hapPath = isHap ? path.resolve(target) : opts.hap;
+      let bundle = opts.bundle;
+      if (!bundle && isHap) {
+        if (!fs.existsSync(hapPath!)) throw new OniroError(`HAP not found at ${hapPath}.`);
+        bundle = (await readHapBundleName(hapPath!).catch(() => null)) ?? undefined;
+        if (!bundle) throw new OniroError(`Could not read the bundle name from ${hapPath}. Pass --bundle.`);
+      }
+      bundle ??= getBundleName(dir);
       const result = await applyChanges({
         config,
         bundle,
-        hapPath: opts.hap,
+        hapPath,
         projectDir: dir,
         module: opts.module,
         installedHapPath: opts.installedHap,

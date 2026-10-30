@@ -27,17 +27,25 @@ function moduleOfHap(hapFileName: string): string {
   return dash > 0 ? hapFileName.slice(0, dash) : hapFileName.replace(/\.hap$/i, '');
 }
 
+/** A DevEco app project root: it holds `AppScope/app.json5` (a module folder does not). */
+function isAppProjectRoot(dir: string): boolean {
+  return fs.existsSync(path.join(dir, 'AppScope', 'app.json5'));
+}
+
 /**
  * Walk a project's build outputs and group `*-signed.hap` / `*-unsigned.hap`
  * by build module name (parsed from the HAP filename). Skips `node_modules` /
- * `oh_modules` / `.git`. Ported from the proven MCP `findHaps`, extended with
- * per-module grouping so multi-module projects can install the right HAP.
- * Each list is newest first, so a fresh build wins over HAPs committed to the
- * repository. Empty object when nothing is built.
+ * `oh_modules` / `.git`, and, when `projectDir` is an app project root, any
+ * other app project nested inside it, whose HAPs belong to another app.
+ * Ported from the proven MCP `findHaps`, extended with per-module grouping so
+ * multi-module projects can install the right HAP. Each list is newest first,
+ * so a fresh build wins over HAPs committed to the repository. Empty object
+ * when nothing is built.
  */
 export async function discoverHaps(opts: DiscoverHapsOptions): Promise<Record<string, ModuleHaps>> {
   const { projectDir } = opts;
   const maxDepth = opts.maxDepth ?? 8;
+  const skipNestedProjects = isAppProjectRoot(projectDir);
   const result: Record<string, ModuleHaps> = {};
 
   const walk = async (dir: string, depth: number): Promise<void> => {
@@ -47,6 +55,7 @@ export async function discoverHaps(opts: DiscoverHapsOptions): Promise<Record<st
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
         if (e.name === 'node_modules' || e.name === 'oh_modules' || e.name === '.git') continue;
+        if (skipNestedProjects && isAppProjectRoot(full)) continue;
         await walk(full, depth + 1);
       } else if (e.isFile() && e.name.endsWith('.hap')) {
         const moduleName = moduleOfHap(e.name);
