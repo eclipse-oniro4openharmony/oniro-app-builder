@@ -169,7 +169,8 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
   const paths = resolveSigningMaterialPaths(opts.config, productName, projectDir);
   logger.info(`[harmonyos] Signing ${bundleName} (product '${productName}', team ${auth.teamId}).`);
 
-  const connected = await collectLocalDevices(opts.config, logger);
+  const scan = await collectLocalDevices(opts.config, logger);
+  const connected = scan.devices;
   const result = (regenerated: boolean): HarmonyOsSigningResult => ({
     bundleName,
     teamId: auth.teamId,
@@ -196,7 +197,7 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
 
   // Before anything is deleted: a profile must name at least one device.
   const agc = createAgcClient(opts.http ?? createHttpClient({ logger }), auth);
-  const deviceIds = await registerDevices(agc, connected, logger);
+  const deviceIds = await registerDevices(agc, scan, logger);
   for (const file of Object.values(paths)) fs.rmSync(file, { force: true });
 
   // AGC will not issue a second certificate under one name, so ours is replaced.

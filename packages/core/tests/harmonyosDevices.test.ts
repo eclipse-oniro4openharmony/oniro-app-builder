@@ -51,12 +51,18 @@ describe('collectLocalDevices', () => {
 
   it('reads the UDID and kind of each connected device', async () => {
     attach({ 'serial-1': `udid of current device is\n${UDID.toLowerCase()}\n` }, 'wearable');
-    await expect(collect()).resolves.toEqual([{ serial: 'serial-1', udid: UDID, kind: 'wearable' }]);
+    await expect(collect()).resolves.toEqual({
+      devices: [{ serial: 'serial-1', udid: UDID, kind: 'wearable' }],
+      skipped: [],
+    });
   });
 
   it('skips offline devices, devices without a UDID, and devices that fail to answer', async () => {
     attach({ good: UDID, silent: 'no udid here', broken: new Error('hdc timed out') }, 'phone', ['offline']);
-    await expect(collect()).resolves.toEqual([{ serial: 'good', udid: UDID, kind: 'phone' }]);
+    await expect(collect()).resolves.toEqual({
+      devices: [{ serial: 'good', udid: UDID, kind: 'phone' }],
+      skipped: ['silent'],
+    });
     expect(hdcExec.mock.calls.some(([o]) => (o as { deviceSerial: string }).deviceSerial === 'offline')).toBe(false);
   });
 });
@@ -64,13 +70,13 @@ describe('collectLocalDevices', () => {
 describe('registerDevices', () => {
   it('registers a new connected device and names every team device', async () => {
     const agc = fakeAgc([{ id: 'd1', udid: 'CD'.repeat(32) }]);
-    await expect(registerDevices(agc, [phone()], noopLogger)).resolves.toEqual(['d1', 'id-ABAB']);
+    await expect(registerDevices(agc, { devices: [phone()], skipped: [] }, noopLogger)).resolves.toEqual(['d1', 'id-ABAB']);
     expect(agc.addDevice).toHaveBeenCalledWith(UDID, 'phone');
   });
 
   it('does not re-register a known device, whatever the case of its UDID', async () => {
     const agc = fakeAgc([{ id: 'd1', udid: UDID.toLowerCase() }]);
-    await expect(registerDevices(agc, [phone()], noopLogger)).resolves.toEqual(['d1']);
+    await expect(registerDevices(agc, { devices: [phone()], skipped: [] }, noopLogger)).resolves.toEqual(['d1']);
     expect(agc.addDevice).not.toHaveBeenCalled();
     expect(agc.listDevices).toHaveBeenCalledTimes(1);
   });
@@ -80,11 +86,22 @@ describe('registerDevices', () => {
       { id: 'd1', udid: 'AA' },
       { id: 'd2', udid: 'BB' },
     ]);
-    await expect(registerDevices(agc, [], noopLogger)).resolves.toEqual(['d1', 'd2']);
+    await expect(registerDevices(agc, { devices: [], skipped: [] }, noopLogger)).resolves.toEqual(['d1', 'd2']);
+  });
+
+  it('reports a connected device without a UDID instead of claiming no device is connected', async () => {
+    const warn = vi.fn();
+    const agc = fakeAgc([{ id: 'd1', udid: 'AA' }]);
+    await expect(
+      registerDevices(agc, { devices: [], skipped: ['serial-1'] }, { ...noopLogger, warn }),
+    ).resolves.toEqual(['d1']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('serial-1 reported no UDID'));
   });
 
   it('fails when there is no device anywhere', async () => {
-    await expect(registerDevices(fakeAgc([]), [], noopLogger)).rejects.toThrow(SIGNING_ERRORS.DEVICE_NONE);
+    await expect(registerDevices(fakeAgc([]), { devices: [], skipped: [] }, noopLogger)).rejects.toThrow(
+      SIGNING_ERRORS.DEVICE_NONE,
+    );
   });
 });
 
