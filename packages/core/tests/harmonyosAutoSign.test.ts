@@ -35,7 +35,7 @@ vi.mock('../src/harmonyos/signing/keystore.js', async (importOriginal) => ({
 const connected = vi.hoisted(() => ({ devices: [] as LocalDevice[] }));
 vi.mock('../src/harmonyos/signing/devices.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  collectLocalDevices: vi.fn(async () => connected.devices),
+  collectLocalDevices: vi.fn(async () => ({ devices: connected.devices, skipped: [] })),
 }));
 
 const UDID = 'AB'.repeat(32);

@@ -37,9 +37,17 @@ export interface LocalDevice {
   kind: string;
 }
 
+export interface LocalDeviceScan {
+  /** Connected devices that answered with a UDID. */
+  devices: LocalDevice[];
+  /** Serial numbers of connected devices that did not report a UDID. */
+  skipped: string[];
+}
+
 /** UDID and kind of every connected device; one that will not answer is skipped. */
-export async function collectLocalDevices(config: ConfigProvider, logger: Logger): Promise<LocalDevice[]> {
+export async function collectLocalDevices(config: ConfigProvider, logger: Logger): Promise<LocalDeviceScan> {
   const devices: LocalDevice[] = [];
+  const skipped: string[] = [];
   for (const target of await listDevices(config, { logger, timeoutMs: 15_000 })) {
     if (target.status !== 'Connected') continue;
     const shell = async (...args: string[]) =>
@@ -49,6 +57,7 @@ export async function collectLocalDevices(config: ConfigProvider, logger: Logger
       const udid = parseUdid(await shell('bm', 'get', '-u'));
       if (!udid) {
         logger.warn(`[harmonyos] ${target.serial} did not report a UDID; skipping it.`);
+        skipped.push(target.serial);
         continue;
       }
       devices.push({ serial: target.serial, udid, kind: parseDeviceKind(await shell('getprop', 'hw_sc.build.os.deviceType')) });
@@ -56,7 +65,7 @@ export async function collectLocalDevices(config: ConfigProvider, logger: Logger
       logger.warn(`[harmonyos] Could not read ${target.serial}: ${(err as Error).message}`);
     }
   }
-  return devices;
+  return { devices, skipped };
 }
 
 /**
@@ -67,10 +76,11 @@ export async function collectLocalDevices(config: ConfigProvider, logger: Logger
  * stays valid across devices — and no device needs to be connected at all once the
  * team has some registered (from another machine, or by DevEco Studio).
  */
-export async function registerDevices(agc: AgcClient, connected: LocalDevice[], logger: Logger): Promise<string[]> {
+export async function registerDevices(agc: AgcClient, scan: LocalDeviceScan, logger: Logger): Promise<string[]> {
   let devices = await agc.listDevices();
   const registered = new Set(devices.map((d) => d.udid.toUpperCase()));
 
+  const connected = scan.devices;
   const unregistered = connected.filter((d) => !registered.has(d.udid));
   for (const device of unregistered) {
     logger.info(`[harmonyos] Registering ${device.serial} with AppGallery Connect...`);
@@ -81,9 +91,11 @@ export async function registerDevices(agc: AgcClient, connected: LocalDevice[], 
   const deviceIds = devices.map((d) => d.id);
   if (deviceIds.length === 0) throw new AgcError(SIGNING_ERRORS.DEVICE_NONE);
   if (connected.length === 0) {
-    logger.warn(
-      `[harmonyos] No device is connected; the profile will name the ${deviceIds.length} device(s) already registered to this team.`,
-    );
+    const message =
+      scan.skipped.length > 0
+        ? `[harmonyos] The connected device(s) ${scan.skipped.join(', ')} reported no UDID; the profile will name the ${deviceIds.length} device(s) already registered to this team.`
+        : `[harmonyos] No device is connected; the profile will name the ${deviceIds.length} device(s) already registered to this team.`;
+    logger.warn(message);
   }
   return deviceIds;
 }
