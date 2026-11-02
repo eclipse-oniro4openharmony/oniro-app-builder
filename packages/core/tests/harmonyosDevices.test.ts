@@ -13,7 +13,10 @@ import { noopLogger } from '../src/ports/logger.js';
 
 // No hdc in tests: whatever `targets` holds is attached.
 const targets = vi.fn();
-vi.mock('../src/hdc/devices.js', () => ({ listDevices: (...args: unknown[]) => targets(...args) }));
+vi.mock('../src/hdc/devices.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  listDevices: (...args: unknown[]) => targets(...args),
+}));
 const hdcExec = vi.fn();
 vi.mock('../src/hdc/exec.js', () => ({ hdcExec: (...args: unknown[]) => hdcExec(...args) }));
 
@@ -34,11 +37,14 @@ function fakeAgc(registered: AgcDevice[]) {
 const phone = (udid = UDID): LocalDevice => ({ serial: 'serial-1', udid, kind: 'phone' });
 
 describe('collectLocalDevices', () => {
-  /** hdc answers `bm get -u` per serial from `udids`, and `getprop` with `kind`. */
-  const attach = (udids: Record<string, string | Error>, kind = 'phone', offline: string[] = []) => {
+  /**
+   * hdc answers `bm get -u` per serial from `udids`, and `getprop` with `kind`.
+   * `unusable` lists more targets by status.
+   */
+  const attach = (udids: Record<string, string | Error>, kind = 'phone', unusable: Record<string, string> = {}) => {
     targets.mockResolvedValue([
       ...Object.keys(udids).map((serial) => ({ serial, status: 'Connected' })),
-      ...offline.map((serial) => ({ serial, status: 'Offline' })),
+      ...Object.entries(unusable).map(([serial, status]) => ({ serial, status })),
     ]);
     hdcExec.mockImplementation(async ({ deviceSerial, args }: { deviceSerial: string; args: string[] }) => {
       if (!args.includes('bm')) return { stdout: kind };
@@ -47,17 +53,39 @@ describe('collectLocalDevices', () => {
       return { stdout: answer };
     });
   };
-  const collect = () => collectLocalDevices(staticConfig({}), noopLogger);
+  const collect = (logger = noopLogger) => collectLocalDevices(staticConfig({}), logger);
 
   it('reads the UDID and kind of each connected device', async () => {
     attach({ 'serial-1': `udid of current device is\n${UDID.toLowerCase()}\n` }, 'wearable');
-    await expect(collect()).resolves.toEqual([{ serial: 'serial-1', udid: UDID, kind: 'wearable' }]);
+    await expect(collect()).resolves.toEqual({ devices: [{ serial: 'serial-1', udid: UDID, kind: 'wearable' }], skipped: [] });
   });
 
-  it('skips offline devices, devices without a UDID, and devices that fail to answer', async () => {
-    attach({ good: UDID, silent: 'no udid here', broken: new Error('hdc timed out') }, 'phone', ['offline']);
-    await expect(collect()).resolves.toEqual([{ serial: 'good', udid: UDID, kind: 'phone' }]);
-    expect(hdcExec.mock.calls.some(([o]) => (o as { deviceSerial: string }).deviceSerial === 'offline')).toBe(false);
+  it('reads a device whose status hdc did not report, as other device commands do', async () => {
+    attach({ 'serial-1': UDID });
+    targets.mockResolvedValue([{ serial: 'serial-1', status: 'Unknown' }]);
+    await expect(collect()).resolves.toEqual({ devices: [{ serial: 'serial-1', udid: UDID, kind: 'phone' }], skipped: [] });
+  });
+
+  it('skips each attached device it cannot use, and says why', async () => {
+    const warn = vi.fn();
+    attach(
+      { good: UDID, silent: 'error: failed to get udid', broken: new Error('hdc timed out') },
+      'phone',
+      { idle: 'Offline', locked: 'Unauthorized' },
+    );
+    await expect(collect({ ...noopLogger, warn })).resolves.toEqual({
+      devices: [{ serial: 'good', udid: UDID, kind: 'phone' }],
+      skipped: ['silent', 'broken', 'idle', 'locked'],
+    });
+    expect(warn.mock.calls.map(([message]) => message)).toEqual([
+      '[harmonyos] silent did not report a UDID (`bm get -u`), so it cannot be registered.',
+      '[harmonyos] broken could not be read: hdc timed out',
+      '[harmonyos] idle is offline; skipping it.',
+      '[harmonyos] locked is unauthorized; accept the debugging prompt on the device to register it.',
+    ]);
+    const asked = hdcExec.mock.calls.map(([o]) => (o as { deviceSerial: string }).deviceSerial);
+    expect(asked).not.toContain('idle');
+    expect(asked).not.toContain('locked');
   });
 });
 

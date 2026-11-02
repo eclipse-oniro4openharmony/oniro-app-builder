@@ -11,6 +11,7 @@ import type { HarmonyOsSession } from '../src/harmonyos/auth/session.js';
 import type { HarmonyOsHttpClient, HttpRequestOptions, HttpResponse } from '../src/harmonyos/http.js';
 import { decryptPwd } from '../src/sign/encryptKey.js';
 import { staticConfig } from '../src/ports/config.js';
+import { noopLogger } from '../src/ports/logger.js';
 
 // Real hap-sign-tool output (see harmonyosSigning.test.ts): the keystore holds the
 // key `debug.cer` certifies, and `other.cer` certifies an unrelated one.
@@ -32,10 +33,10 @@ vi.mock('../src/harmonyos/signing/keystore.js', async (importOriginal) => ({
 }));
 
 // No hdc: the test decides what is attached.
-const connected = vi.hoisted(() => ({ devices: [] as LocalDevice[] }));
+const connected = vi.hoisted(() => ({ devices: [] as LocalDevice[], skipped: [] as string[] }));
 vi.mock('../src/harmonyos/signing/devices.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  collectLocalDevices: vi.fn(async () => connected.devices),
+  collectLocalDevices: vi.fn(async () => ({ devices: connected.devices, skipped: connected.skipped })),
 }));
 
 const UDID = 'AB'.repeat(32);
@@ -176,6 +177,7 @@ describe('harmonyOsAutoSign', () => {
     writeProject('com.example.signme');
 
     connected.devices = [{ serial: 'serial-1', udid: UDID, kind: 'wearable' }];
+    connected.skipped = [];
     agc = fakeAgc();
     session = {
       resolveAgcAuth: vi.fn(async ({ teamId }: { teamId?: string } = {}) => ({
@@ -300,8 +302,23 @@ describe('harmonyOsAutoSign', () => {
   it('with no device attached, names the devices already registered to the team', async () => {
     connected.devices = [];
     agc.state.devices.push({ id: 'registered', udid: 'CD'.repeat(32) });
-    await expect(sign()).resolves.toMatchObject({ deviceIds: ['CD'.repeat(32)] });
+    const warn = vi.fn();
+    await expect(sign({ logger: { ...noopLogger, warn } })).resolves.toMatchObject({ deviceIds: ['CD'.repeat(32)] });
     expect(agcCalls('/device/add')).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      '[harmonyos] No device is connected; the profile will name the 1 device(s) already registered to this team.',
+    );
+  });
+
+  it('with only an unusable device attached, does not claim that none is connected', async () => {
+    connected.devices = [];
+    connected.skipped = ['GS6CTU300263'];
+    agc.state.devices.push({ id: 'registered', udid: 'CD'.repeat(32) });
+    const warn = vi.fn();
+    await expect(sign({ logger: { ...noopLogger, warn } })).resolves.toMatchObject({ deviceIds: ['CD'.repeat(32)] });
+    expect(warn.mock.calls).toEqual([
+      ['[harmonyos] No connected device could be registered; the profile will name the 1 device(s) already registered to this team.'],
+    ]);
   });
 
   it('keeps the existing material when there is no device to issue a profile for', async () => {

@@ -35,7 +35,7 @@ export const SIGNING_ERRORS = {
   DEVICE_LIMIT: 'This team has reached its device limit. Remove an unused device in AppGallery Connect and retry.',
   DEVICE_NAME_REPEAT: 'A device with that name is already registered. Retry.',
   DEVICE_NONE:
-    'No device is connected and none is registered to this team, but a debug profile must name at least one. Connect a device and retry.',
+    'This team has no registered device and none could be registered from here, but a debug profile must name at least one. Connect a device that reports a UDID (`hdc shell bm get -u`), or register one in AppGallery Connect, and retry.',
   PROFILE_ADD: 'AppGallery Connect did not issue the provisioning profile.',
   PROFILE_NAME_REPEAT: 'A provisioning profile with that name already exists in AppGallery Connect. Retry.',
   PROVISION_LIMIT:

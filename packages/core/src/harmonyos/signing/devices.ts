@@ -6,7 +6,7 @@
 import type { ConfigProvider } from '../../ports/config.js';
 import type { Logger } from '../../ports/logger.js';
 import { hdcExec } from '../../hdc/exec.js';
-import { listDevices } from '../../hdc/devices.js';
+import { isUsableDevice, listDevices } from '../../hdc/devices.js';
 import type { AgcClient } from './agc.js';
 import { AgcError, SIGNING_ERRORS } from './errors.js';
 
@@ -37,26 +37,48 @@ export interface LocalDevice {
   kind: string;
 }
 
-/** UDID and kind of every connected device; one that will not answer is skipped. */
-export async function collectLocalDevices(config: ConfigProvider, logger: Logger): Promise<LocalDevice[]> {
+export interface LocalDevices {
+  /** The attached devices that reported a UDID. */
+  devices: LocalDevice[];
+  /** Serials of the attached devices that could not be used; each was warned about. */
+  skipped: string[];
+}
+
+/**
+ * UDID and kind of every attached device. One that is not usable, reports no UDID,
+ * or will not answer is skipped with a warning that says why.
+ */
+export async function collectLocalDevices(config: ConfigProvider, logger: Logger): Promise<LocalDevices> {
   const devices: LocalDevice[] = [];
+  const skipped: string[] = [];
   for (const target of await listDevices(config, { logger, timeoutMs: 15_000 })) {
-    if (target.status !== 'Connected') continue;
+    const skip = (why: string) => {
+      logger.warn(`[harmonyos] ${target.serial} ${why}`);
+      skipped.push(target.serial);
+    };
+    if (!isUsableDevice(target)) {
+      skip(
+        target.status === 'Unauthorized'
+          ? 'is unauthorized; accept the debugging prompt on the device to register it.'
+          : `is ${target.status.toLowerCase()}; skipping it.`,
+      );
+      continue;
+    }
     const shell = async (...args: string[]) =>
       (await hdcExec({ config, deviceSerial: target.serial, args: ['shell', ...args], timeoutMs: 15_000, logger }))
         .stdout;
     try {
       const udid = parseUdid(await shell('bm', 'get', '-u'));
       if (!udid) {
-        logger.warn(`[harmonyos] ${target.serial} did not report a UDID; skipping it.`);
+        skip('did not report a UDID (`bm get -u`), so it cannot be registered.');
         continue;
       }
       devices.push({ serial: target.serial, udid, kind: parseDeviceKind(await shell('getprop', 'hw_sc.build.os.deviceType')) });
     } catch (err) {
-      logger.warn(`[harmonyos] Could not read ${target.serial}: ${(err as Error).message}`);
+      skip(`could not be read: ${(err as Error).message}`);
     }
   }
-  return devices;
+  return { devices, skipped };
 }
 
 /**
@@ -80,10 +102,5 @@ export async function registerDevices(agc: AgcClient, connected: LocalDevice[], 
 
   const deviceIds = devices.map((d) => d.id);
   if (deviceIds.length === 0) throw new AgcError(SIGNING_ERRORS.DEVICE_NONE);
-  if (connected.length === 0) {
-    logger.warn(
-      `[harmonyos] No device is connected; the profile will name the ${deviceIds.length} device(s) already registered to this team.`,
-    );
-  }
   return deviceIds;
 }
