@@ -64,6 +64,11 @@ export async function listDevices(
   return parseDeviceList(res.stdout);
 }
 
+/** Whether a listed target can be addressed: connected, or of a status hdc did not report. */
+export function isUsableDevice(device: DeviceInfo): boolean {
+  return device.status === 'Connected' || device.status === 'Unknown';
+}
+
 /**
  * Resolve which device serial to address: an explicit `serial` wins, then the
  * `ONIRO_DEVICE_SERIAL` / `DEVICE_SERIAL` env vars, then the single connected
@@ -77,9 +82,7 @@ export async function selectDevice(
   const resolved = resolveDeviceSerial(serial);
   if (resolved) return resolved;
 
-  const usable = (await listDevices(config, opts)).filter(
-    (d) => d.status === 'Connected' || d.status === 'Unknown',
-  );
+  const usable = (await listDevices(config, opts)).filter(isUsableDevice);
   if (usable.length === 1) return usable[0]!.serial;
   if (usable.length === 0) {
     throw new OniroError('No connected device found. Connect a device/emulator or set ONIRO_DEVICE_SERIAL.');

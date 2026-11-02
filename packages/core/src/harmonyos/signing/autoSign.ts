@@ -169,7 +169,7 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
   const paths = resolveSigningMaterialPaths(opts.config, productName, projectDir);
   logger.info(`[harmonyos] Signing ${bundleName} (product '${productName}', team ${auth.teamId}).`);
 
-  const connected = await collectLocalDevices(opts.config, logger);
+  const local = await collectLocalDevices(opts.config, logger);
   const result = (regenerated: boolean): HarmonyOsSigningResult => ({
     bundleName,
     teamId: auth.teamId,
@@ -184,7 +184,7 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
     productName,
     bundleName,
     teamId: auth.teamId,
-    connectedUdids: connected.map((d) => d.udid),
+    connectedUdids: local.devices.map((d) => d.udid),
     aclPermissions,
     force: opts.force,
   });
@@ -196,7 +196,12 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
 
   // Before anything is deleted: a profile must name at least one device.
   const agc = createAgcClient(opts.http ?? createHttpClient({ logger }), auth);
-  const deviceIds = await registerDevices(agc, connected, logger);
+  const deviceIds = await registerDevices(agc, local.devices, logger);
+  if (local.devices.length === 0) {
+    // A device that is attached but unusable is not the same as none: each was named above.
+    const cause = local.skipped.length > 0 ? 'No connected device could be registered' : 'No device is connected';
+    logger.warn(`[harmonyos] ${cause}; the profile will name the ${deviceIds.length} device(s) already registered to this team.`);
+  }
   for (const file of Object.values(paths)) fs.rmSync(file, { force: true });
 
   // AGC will not issue a second certificate under one name, so ours is replaced.

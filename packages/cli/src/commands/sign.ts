@@ -64,7 +64,7 @@ export function registerSignCommand(program: Command): void {
     )
     .option(
       '--harmonyos',
-      'Sign a HarmonyOS project through AppGallery Connect. Needs `oniro-app auth login`, and a connected device unless the team already has devices registered.',
+      'Sign a HarmonyOS project through AppGallery Connect. Needs `oniro-app auth login`, and a device registered to the team: a connected device is registered if it reports a UDID (`hdc shell bm get -u`).',
     )
     .option('--team-id <id>', 'With --harmonyos: the AGC team to sign under. Default: the account\'s own (`oniro-app auth team list`).')
     .option('--product <name>', 'With --harmonyos: the product to sign. Default `default`.')

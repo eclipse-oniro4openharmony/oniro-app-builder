@@ -489,7 +489,7 @@ oniro-app auth login                       # once per machine
 oniro-app create --name MyApp --bundle com.example.myapp \
                  --location ~/projects --sdk 24 --template HarmonyOSApp
 cd ~/projects/MyApp
-oniro-app sign --harmonyos                 # registers any connected device
+oniro-app sign --harmonyos                 # registers each connected device that reports a UDID
 oniro-app build
 oniro-app app install && oniro-app app launch
 ```
@@ -517,7 +517,7 @@ Mirrors DevEco Studio's automatic signing:
 
 1. generates a local p12 keystore and a CSR (via the SDK's `hap-sign-tool.jar`, so a JDK is needed — DevEco Studio's bundled JBR is used when present);
 2. has AppGallery Connect issue a debug certificate for that CSR;
-3. registers every connected device's UDID with the team — no device is needed when the team already has some registered (from another machine, or by DevEco Studio);
+3. registers every connected device's UDID with the team — no device is needed when the team already has some registered (from another machine, or by DevEco Studio). A device that does not report a UDID (`hdc shell bm get -u`; some OpenHarmony builds do not) cannot be registered, so the profile does not cover it;
 4. issues a debug provisioning profile naming that certificate, all of the team's registered devices, and any ACL-gated permissions the project requests;
 5. writes an encrypted `signingConfigs` entry into `build-profile.json5`, leaving other entries untouched.
 
