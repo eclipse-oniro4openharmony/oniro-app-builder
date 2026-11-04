@@ -1,4 +1,5 @@
 import StreamZip from 'node-stream-zip';
+import { SIGNED_HAP_CHUNK_SIZE } from '../sdk/extract.js';
 
 // node-stream-zip's types are thin; this is the minimal shape we use (mirrors sdk/extract.ts).
 interface ZipEntry {
@@ -28,7 +29,10 @@ export function diffEntryNames(installed: Iterable<string>, next: Iterable<strin
 }
 
 async function listFileEntries(hapPath: string): Promise<string[]> {
-  const zip = new (StreamZip as unknown as { async: new (cfg: { file: string }) => StreamZipAsync }).async({ file: hapPath });
+  const zip = new (StreamZip as unknown as { async: new (cfg: { file: string; chunkSize?: number }) => StreamZipAsync }).async({
+    file: hapPath,
+    chunkSize: SIGNED_HAP_CHUNK_SIZE,
+  });
   try {
     const entries = await zip.entries();
     return Object.values(entries)

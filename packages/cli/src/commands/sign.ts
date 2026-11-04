@@ -8,6 +8,8 @@ import {
   detectRuntimeOs,
   generateSigningConfigs,
   harmonyOsAutoSign,
+  harmonyOsSignHap,
+  signOpenHarmonyHap,
   prepareSigning,
   getOhosBaseSdkHome,
   type Apl,
@@ -34,6 +36,7 @@ export function registerSignCommand(program: Command): void {
         'Overwrites the `signingConfigs` block in build-profile.json5 (other keys preserved).',
         'HarmonyOS projects need --harmonyos instead, which has AppGallery Connect issue the',
         'certificate and profile for a signed-in Huawei account (`oniro-app auth login`).',
+        'With --hap <file>, signs a prebuilt HAP instead of a project (with --harmonyos, for HarmonyOS).',
       ].join(' '),
     )
     .addOption(
@@ -66,6 +69,14 @@ export function registerSignCommand(program: Command): void {
       '--harmonyos',
       'Sign a HarmonyOS project through AppGallery Connect. Needs `oniro-app auth login`, and a device registered to the team: a connected device is registered if it reports a UDID (`hdc shell bm get -u`).',
     )
+    .option(
+      '--hap <file>',
+      'Sign this prebuilt .hap (unsigned, or signed with other material) instead of a project, and write a signed copy (see --out). The bundle name is read from the HAP. For OpenHarmony, --apl, --app-feature, --acls and --app-privilege-capabilities apply as for a project; with --harmonyos, the ACL permissions are read from the HAP too.',
+    )
+    .option(
+      '--out <file>',
+      'With --hap: where to write the signed HAP. Default: next to the input, `<name>-unsigned.hap` → `<name>-signed.hap`, `<name>.hap` → `<name>-signed.hap`, `<name>-signed.hap` → `<name>-resigned.hap`. Name the input itself to re-sign it in place.',
+    )
     .option('--team-id <id>', 'With --harmonyos: the AGC team to sign under. Default: the account\'s own (`oniro-app auth team list`).')
     .option('--product <name>', 'With --harmonyos: the product to sign. Default `default`.')
     .option('--force', 'With --harmonyos: regenerate the certificate and profile even when they are still valid.')
@@ -87,10 +98,67 @@ export function registerSignCommand(program: Command): void {
           teamId?: string;
           product?: string;
           force?: boolean;
+          hap?: string;
+          out?: string;
         },
       ) => {
         const { config, logger } = getRuntime();
         const dir = path.resolve(projectDir ?? process.cwd());
+        const passwords: SigningPasswords | undefined =
+          opts.storePassword || opts.keyPassword
+            ? { store: opts.storePassword ?? '123456', key: opts.keyPassword ?? '123456' }
+            : undefined;
+
+        if (opts.out && !opts.hap) throw new OniroError('--out names where `--hap` writes the signed HAP; pass --hap too.');
+        if (opts.hap) {
+          if (projectDir) throw new OniroError('Pass either a project directory or --hap, not both.');
+          if (opts.product || opts.bootstrap) {
+            throw new OniroError(`--${opts.product ? 'product' : 'bootstrap'} applies to a project, not to --hap.`);
+          }
+          // Each signing path honours only its own flags; say so rather than drop one.
+          const ignored = opts.harmonyos
+            ? [
+                opts.apl !== 'normal' && '--apl',
+                opts.appFeature && '--app-feature',
+                opts.acls && '--acls (the ACLs are read from the HAP)',
+                opts.appPrivilegeCapabilities && '--app-privilege-capabilities',
+                (opts.storePassword || opts.keyPassword) && '--store-password/--key-password',
+              ]
+            : [opts.teamId && '--team-id', opts.force && '--force'];
+          const unsupported = ignored.filter((flag): flag is string => typeof flag === 'string');
+          if (unsupported.length > 0) {
+            throw new OniroError(
+              `${unsupported.join(', ')} ${unsupported.length > 1 ? 'do' : 'does'} not apply to ${opts.harmonyos ? '--harmonyos --hap' : '--hap without --harmonyos'}.`,
+            );
+          }
+          if (!opts.harmonyos) {
+            const result = await signOpenHarmonyHap({
+              hapPath: opts.hap,
+              outPath: opts.out,
+              sdkHome: getOhosBaseSdkHome(config),
+              apl: opts.apl,
+              appFeature: opts.appFeature,
+              acls: opts.acls,
+              appPrivilegeCapabilities: opts.appPrivilegeCapabilities,
+              passwords,
+              applicationCertPath: config.get('applicationCertPath', '') || undefined,
+              logger,
+            });
+            logger.info(`Signed ${result.bundleName} into ${result.outPath}.`);
+            return;
+          }
+          const result = await harmonyOsSignHap({
+            config,
+            session: createHarmonyOsSession({ config, logger }),
+            hapPath: opts.hap,
+            outPath: opts.out,
+            teamId: opts.teamId,
+            force: opts.force,
+            logger,
+          });
+          logger.info(`Signed ${result.bundleName} into ${result.outPath} (profile names ${result.deviceIds.length} device(s)).`);
+          return;
+        }
 
         if (opts.harmonyos) {
           const result = await harmonyOsAutoSign({
@@ -111,10 +179,6 @@ export function registerSignCommand(program: Command): void {
             `${dir} targets HarmonyOS, which needs a certificate from AppGallery Connect: run \`oniro-app auth login\` once, then \`oniro-app sign --harmonyos\`.`,
           );
         }
-        const passwords: SigningPasswords | undefined =
-          opts.storePassword || opts.keyPassword
-            ? { store: opts.storePassword ?? '123456', key: opts.keyPassword ?? '123456' }
-            : undefined;
 
         if (opts.bootstrap) {
           const result = prepareSigning({

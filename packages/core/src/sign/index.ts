@@ -13,3 +13,5 @@ export type {
   AppFeature,
   SigningKind,
 } from './generateSigningConfigs.js';
+export { readHapSigningInfo, defaultSignedHapPath, type HapSigningInfo } from './hapInfo.js';
+export { signOpenHarmonyHap, type SignOpenHarmonyHapOptions, type SignOpenHarmonyHapResult } from './signHap.js';

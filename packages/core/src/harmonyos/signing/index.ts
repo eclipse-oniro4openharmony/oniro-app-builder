@@ -6,3 +6,4 @@ export {
   type HarmonyOsAutoSignOptions,
   type HarmonyOsSigningResult,
 } from './autoSign.js';
+export { harmonyOsSignHap, type HarmonyOsSignHapOptions, type HarmonyOsSignHapResult } from './signHap.js';

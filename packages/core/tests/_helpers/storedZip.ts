@@ -7,8 +7,12 @@ function crc32(buf: Buffer): number {
   return (~crc) >>> 0;
 }
 
-/** Build a minimal STORED (uncompressed) zip — enough for node-stream-zip `.entries()`. */
-export function makeStoredZip(files: Array<{ name: string; data: Buffer }>): Buffer {
+/**
+ * Build a minimal STORED (uncompressed) zip — enough for node-stream-zip `.entries()`.
+ * `centralExtra` pads an entry's central-directory record with an extra field of that
+ * many bytes, as hap-sign-tool's alignment does in a signed HAP.
+ */
+export function makeStoredZip(files: Array<{ name: string; data: Buffer; centralExtra?: number }>): Buffer {
   const local: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
@@ -33,7 +37,13 @@ export function makeStoredZip(files: Array<{ name: string; data: Buffer }>): Buf
     cdh.writeUInt32LE(f.data.length, 24);
     cdh.writeUInt16LE(nameBuf.length, 28);
     cdh.writeUInt32LE(offset, 42);
-    central.push(cdh, nameBuf);
+    const extra = Buffer.alloc(f.centralExtra ?? 0);
+    if (extra.length > 0) {
+      extra.writeUInt16LE(0xcafe, 0);
+      extra.writeUInt16LE(extra.length - 4, 2);
+    }
+    cdh.writeUInt16LE(extra.length, 30);
+    central.push(cdh, nameBuf, extra);
 
     offset += lfh.length + nameBuf.length + f.data.length;
   }

@@ -45,9 +45,14 @@ export function collectAclPermissions(
     }
   }
 
-  const acls = [...requested].filter((p) => ACL_PERMISSIONS.has(p)).sort();
+  const acls = aclPermissionsAmong(requested);
   if (acls.length > 0) {
     logger.info(`[harmonyos] Project requests ${acls.length} ACL permission(s): ${acls.join(', ')}`);
   }
   return acls;
+}
+
+/** The ACL-gated permissions among `names`, which a profile must name; sorted and unique. */
+export function aclPermissionsAmong(names: Iterable<string>): string[] {
+  return [...new Set(names)].filter((p) => ACL_PERMISSIONS.has(p)).sort();
 }

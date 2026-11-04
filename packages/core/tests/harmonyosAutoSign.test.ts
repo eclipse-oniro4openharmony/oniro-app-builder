@@ -5,6 +5,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import JSON5 from 'json5';
 import { harmonyOsAutoSign } from '../src/harmonyos/signing/autoSign.js';
+import { harmonyOsSignHap } from '../src/harmonyos/signing/signHap.js';
+import { defaultSignedHapPath, readHapSigningInfo } from '../src/sign/hapInfo.js';
+import { signHapFile } from '../src/harmonyos/signing/keystore.js';
+import { makeStoredZip } from './_helpers/storedZip.js';
 import { SIGNING_ERRORS } from '../src/harmonyos/signing/errors.js';
 import type { LocalDevice } from '../src/harmonyos/signing/devices.js';
 import type { HarmonyOsSession } from '../src/harmonyos/auth/session.js';
@@ -29,6 +33,10 @@ vi.mock('../src/harmonyos/signing/keystore.js', async (importOriginal) => ({
     fs.copyFileSync(path.join(FIXTURES, 'debug.p12'), opts.p12Path);
     fs.writeFileSync(opts.csrPath, 'CSR');
     return { keyPwd: P12_PWD, csr: 'CSR' };
+  }),
+  // Stands in for `hap-sign-tool sign-app`: the output is the input with a marker appended.
+  signHapFile: vi.fn(async (opts: { inFile: string; outFile: string }) => {
+    fs.writeFileSync(opts.outFile, Buffer.concat([fs.readFileSync(opts.inFile), Buffer.from('SIGNED')]));
   }),
 }));
 
@@ -366,5 +374,178 @@ describe('harmonyOsAutoSign', () => {
     expect(readBuildProfile().app.signingConfigs).toBeUndefined();
     // The AGC record is cleaned up either way.
     expect(agc.state.profiles.size).toBe(0);
+  });
+});
+
+describe('harmonyOsSignHap', () => {
+  let tmp: string;
+  let signingDir: string;
+  let hapPath: string;
+  let agc: ReturnType<typeof fakeAgc>;
+  let session: HarmonyOsSession & { resolveAgcAuth: ReturnType<typeof vi.fn> };
+  let originalProgramFiles: string | undefined;
+
+  const writeHap = (file: string, moduleJson: object | string | null, extra: Array<{ name: string; data: Buffer }> = []) => {
+    const entries = [...extra];
+    if (moduleJson !== null) {
+      entries.push({ name: 'module.json', data: Buffer.from(typeof moduleJson === 'string' ? moduleJson : JSON.stringify(moduleJson)) });
+    }
+    fs.writeFileSync(file, makeStoredZip(entries));
+  };
+  const moduleJson = (bundleName: string, permissions: string[] = []) => ({
+    app: { bundleName },
+    module: { name: 'entry', requestPermissions: permissions.map((name) => ({ name })) },
+  });
+  const signHap = (overrides: Partial<Parameters<typeof harmonyOsSignHap>[0]> = {}) =>
+    harmonyOsSignHap({
+      config: staticConfig({ harmonyosSdkPath: path.join(tmp, 'sdk'), harmonyosSigningDir: signingDir }),
+      session,
+      hapPath,
+      http: agc.http,
+      ...overrides,
+    });
+  const agcCalls = (suffix: string) => agc.state.calls.filter((c) => c.path.endsWith(suffix));
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-signhap-'));
+    originalProgramFiles = process.env.ProgramFiles;
+    process.env.ProgramFiles = path.join(tmp, 'program-files');
+    signingDir = path.join(tmp, 'signing');
+    fs.mkdirSync(path.join(tmp, 'sdk', 'default', 'openharmony'), { recursive: true });
+    hapPath = path.join(tmp, 'entry-default-unsigned.hap');
+    writeHap(hapPath, moduleJson('com.example.prebuilt', ['ohos.permission.READ_CONTACTS', 'ohos.permission.INTERNET']));
+
+    vi.mocked(signHapFile).mockClear();
+    connected.devices = [{ serial: 'serial-1', udid: UDID, kind: 'phone' }];
+    connected.skipped = [];
+    agc = fakeAgc();
+    session = {
+      resolveAgcAuth: vi.fn(async ({ teamId }: { teamId?: string } = {}) => ({
+        uid: 'u1',
+        teamId: teamId ?? 'u1',
+        accessToken: 'at',
+        baseUrl: BASE,
+      })),
+    } as unknown as typeof session;
+  });
+
+  afterEach(() => {
+    if (originalProgramFiles === undefined) delete process.env.ProgramFiles;
+    else process.env.ProgramFiles = originalProgramFiles;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("issues material for the HAP's own bundle and ACL permissions, and signs a copy next to it", async () => {
+    const result = await signHap();
+
+    const outPath = path.join(tmp, 'entry-default-signed.hap');
+    expect(result).toMatchObject({ bundleName: 'com.example.prebuilt', teamId: 'u1', regenerated: true, deviceIds: [UDID], outPath });
+    expect(agcCalls('/provision/add').map((c) => c.opts?.body)).toEqual([
+      expect.objectContaining({ packageName: 'com.example.prebuilt', aclPermissionList: ['ohos.permission.READ_CONTACTS'] }),
+    ]);
+    expect(agc.state.profiles.size).toBe(0);
+    for (const file of Object.values(result.paths)) expect(path.dirname(file)).toBe(signingDir);
+    expect(path.basename(result.paths.p12Path)).toMatch(/^hap_com\.example\.prebuilt_/);
+
+    expect(vi.mocked(signHapFile).mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          inFile: hapPath,
+          outFile: expect.stringContaining(path.join(tmp, '.entry-default-signed.hap.')),
+          cerPath: result.paths.cerPath,
+          profilePath: result.paths.profilePath,
+          p12Path: result.paths.p12Path,
+          keyPwd: P12_PWD,
+        }),
+      ],
+    ]);
+    expect(fs.readFileSync(outPath).subarray(-6).toString()).toBe('SIGNED');
+    // The input is left alone, and no temporary file survives.
+    expect(fs.readdirSync(tmp).filter((f) => f.endsWith('.hap')).sort()).toEqual(['entry-default-signed.hap', 'entry-default-unsigned.hap']);
+    expect(fs.readdirSync(tmp).some((f) => f.endsWith('.tmp'))).toBe(false);
+    // The keystore password is stored encrypted, so the next run can reuse the material.
+    const pwdFile = result.paths.p12Path.replace(/\.p12$/, '.pwd');
+    expect(decryptPwd(fs.readFileSync(pwdFile, 'utf8'), path.join(signingDir, 'material'))).toBe(P12_PWD);
+  });
+
+  it('reuses still-valid material, and regenerates when forced or when the password is gone', async () => {
+    const { paths } = await signHap();
+    const callsAfterFirst = agc.state.calls.length;
+
+    await expect(signHap({ outPath: path.join(tmp, 'again.hap') })).resolves.toMatchObject({ regenerated: false });
+    expect(agc.state.calls).toHaveLength(callsAfterFirst);
+    expect(vi.mocked(signHapFile).mock.calls[1]![0]).toMatchObject({ keyPwd: P12_PWD });
+
+    await expect(signHap({ force: true })).resolves.toMatchObject({ regenerated: true });
+    fs.rmSync(paths.p12Path.replace(/\.p12$/, '.pwd'));
+    await expect(signHap()).resolves.toMatchObject({ regenerated: true });
+    expect(agcCalls('/cert/add')).toHaveLength(3);
+  });
+
+  it('regenerates when the HAP requests an ACL permission the profile lacks', async () => {
+    await signHap();
+    writeHap(hapPath, moduleJson('com.example.prebuilt', ['ohos.permission.READ_CONTACTS', 'ohos.permission.READ_AUDIO']));
+    await expect(signHap()).resolves.toMatchObject({ regenerated: true });
+    expect(agcCalls('/provision/add').at(-1)!.opts?.body).toMatchObject({
+      aclPermissionList: ['ohos.permission.READ_AUDIO', 'ohos.permission.READ_CONTACTS'],
+    });
+  });
+
+  it('creates the output directory', async () => {
+    const outPath = path.join(tmp, 'out', 'nested', 'app.hap');
+    await expect(signHap({ outPath })).resolves.toMatchObject({ outPath });
+    expect(fs.existsSync(outPath)).toBe(true);
+  });
+
+  it('re-signs a HAP in place when the output is the input', async () => {
+    const before = fs.readFileSync(hapPath);
+    await expect(signHap({ outPath: hapPath })).resolves.toMatchObject({ outPath: hapPath });
+    expect(fs.readFileSync(hapPath)).toEqual(Buffer.concat([before, Buffer.from('SIGNED')]));
+  });
+
+  it('leaves no output behind when hap-sign-tool fails', async () => {
+    vi.mocked(signHapFile).mockImplementationOnce(async (opts) => {
+      fs.writeFileSync(opts.outFile, 'partial');
+      throw new Error('hap-sign-tool failed to sign');
+    });
+    await expect(signHap()).rejects.toThrow(/failed to sign/);
+    expect(fs.readdirSync(tmp).filter((f) => f.includes('signed'))).toEqual(['entry-default-unsigned.hap']);
+  });
+
+  it('refuses a HAP it cannot sign before contacting anyone', async () => {
+    writeHap(hapPath, moduleJson('bad'));
+    await expect(signHap()).rejects.toThrow(SIGNING_ERRORS.BUNDLE_NAME_INVALID);
+    writeHap(hapPath, { ...moduleJson('com.example.prebuilt'), app: { bundleName: 'com.example.prebuilt', compileSdkType: 'OpenHarmony' } });
+    await expect(signHap()).rejects.toThrow(/built for OpenHarmony.*without --harmonyos/);
+    writeHap(hapPath, null, [{ name: 'config.json', data: Buffer.from('{}') }]);
+    await expect(signHap()).rejects.toThrow(/FA-model HAP/);
+    fs.writeFileSync(hapPath, 'not a zip');
+    await expect(signHap()).rejects.toThrow(/Could not read .* as a HAP/);
+    await expect(signHap({ hapPath: path.join(tmp, 'absent.hap') })).rejects.toThrow(/does not exist/);
+    expect(session.resolveAgcAuth).not.toHaveBeenCalled();
+    expect(agc.state.calls).toEqual([]);
+  });
+});
+
+describe('readHapSigningInfo', () => {
+  it("reads the bundle name and requested permissions from a HAP's module.json", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-hapinfo-'));
+    try {
+      const hap = path.join(dir, 'a.hap');
+      const json = { app: { bundleName: 'com.example.a' }, module: { requestPermissions: [{ name: 'p.one' }, {}, { name: 'p.two' }] } };
+      fs.writeFileSync(hap, makeStoredZip([{ name: 'module.json', data: Buffer.from(`\uFEFF${JSON.stringify(json)}`) }]));
+      await expect(readHapSigningInfo(hap)).resolves.toEqual({ bundleName: 'com.example.a', requestedPermissions: ['p.one', 'p.two'] });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('defaultSignedHapPath', () => {
+  it('names the signed copy as hvigor does', () => {
+    expect(defaultSignedHapPath('/x/entry-default-unsigned.hap')).toBe(path.join('/x', 'entry-default-signed.hap'));
+    // Never the input itself.
+    expect(defaultSignedHapPath('/x/entry-default-signed.hap')).toBe(path.join('/x', 'entry-default-resigned.hap'));
+    expect(defaultSignedHapPath('/x/App.HAP')).toBe(path.join('/x', 'App-signed.hap'));
   });
 });

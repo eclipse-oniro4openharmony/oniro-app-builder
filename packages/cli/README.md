@@ -148,10 +148,34 @@ Only needed for HarmonyOS signing; see [HarmonyOS apps](#harmonyos-apps).
 | `--app-privilege-capabilities <list>` | Comma-separated privileges to write into the profile's `app-privilege-capabilities`, e.g. `AllowAppUsePrivilegeExtension` for an app with a privileged extension ability (without it, install fails with `9568344 not allow use privilege extension`). |
 | `--bootstrap` | No-op if signing material is already present; otherwise generate it. |
 | `--harmonyos` | Sign a HarmonyOS project via AppGallery Connect instead of the offline flow. See [HarmonyOS apps](#harmonyos-apps). |
+| `--hap <file>` | Sign a prebuilt `.hap` instead of a project and write a signed copy. See [Signing a prebuilt HAP for OpenHarmony](#signing-a-prebuilt-hap-for-openharmony), and with `--harmonyos`, [for HarmonyOS](#signing-a-prebuilt-hap). |
+| `--out <file>` | With `--hap`: where to write the signed HAP (default: next to the input, named `<name>-signed.hap`, or `<name>-resigned.hap` for a `*-signed.hap` input). |
 | `--team-id <id>` | With `--harmonyos`: AGC team to sign under. |
 | `--product <name>` | With `--harmonyos`: product to sign (default `default`). |
 | `--force` | With `--harmonyos`: regenerate even when the existing material is still valid. |
 | `--store-password <pwd>` / `--key-password <pwd>` | Keystore passwords (default `123456`, the SDK keystore password). |
+
+#### Signing a prebuilt HAP for OpenHarmony
+
+`sign --hap <file>` signs a HAP you have no project for: an unsigned build output, or a HAP signed
+with other material (its signature is replaced). It uses the same SDK development certificate as a
+project, with a profile for the bundle name in the HAP's `module.json`. `--apl`, `--app-feature`,
+`--acls`, `--app-privilege-capabilities` and the password flags apply as for a project; the ACLs are
+not read from the HAP, so pass `--acls` for a permission above the app's apl.
+
+```sh
+oniro-app sign --hap entry-default-unsigned.hap                  # writes entry-default-signed.hap
+oniro-app sign --hap SystemUI.hap --out SystemUI.hap --apl system_basic --acls ohos.permission.REBOOT
+oniro-app app install entry-default-signed.hap
+```
+
+The signed copy goes next to the input by default (`<name>-unsigned.hap` → `<name>-signed.hap`,
+`<name>.hap` → `<name>-signed.hap`, `<name>-signed.hap` → `<name>-resigned.hap`); only an `--out`
+naming the input re-signs it in place. `--team-id` and `--force` are refused here. Signing is
+offline and needs only `java` and an installed OpenHarmony SDK: the one the HAP's `targetAPIVersion`
+names, else the newest (every release ships the same signing material). Nothing is written to a
+project, and the material is made in a temporary directory that is removed afterwards. A HAP built
+for HarmonyOS is refused with a pointer to `--harmonyos`.
 
 #### `build` — build the app via `hvigorw`
 
@@ -537,6 +561,37 @@ using both on one team does not revoke the other's signing material.
 | `--team-id <id>` | AGC team to issue under (default: the account's own id) |
 | `--product <name>` | Product to sign (default `default`) |
 | `--force` | Regenerate even when the existing material is still valid |
+| `--hap <file>` | Sign a prebuilt HAP instead of a project (below) |
+| `--out <file>` | With `--hap`: where to write the signed HAP |
+
+### Signing a prebuilt HAP
+
+`oniro-app sign --harmonyos --hap <file>` signs a HAP you have no project for: an unsigned build
+output, or a HAP signed with other material (its signature is replaced). The bundle name and the
+ACL-gated permissions come from the `module.json` packed in the HAP; everything else works as for
+a project. AGC issues the certificate and debug profile, which name the team's registered devices.
+
+```sh
+oniro-app sign --harmonyos --hap entry-default-unsigned.hap   # writes entry-default-signed.hap
+oniro-app sign --harmonyos --hap app.hap --out /tmp/app.hap
+oniro-app app install entry-default-signed.hap
+```
+
+The signed copy goes next to the input by default: `<name>-unsigned.hap` becomes
+`<name>-signed.hap`, `<name>.hap` becomes `<name>-signed.hap`, and `<name>-signed.hap` becomes
+`<name>-resigned.hap`, so the input is never overwritten unless `--out` names it. The output is
+never left half-written either: the HAP is signed to a temporary file, then moved into place.
+`--apl`, `--acls` and the other OpenHarmony profile flags are refused here, since AGC decides
+the profile and the ACLs come from the HAP.
+
+The material is kept per bundle name (`hap_<bundle>_…` in `ONIRO_HARMONYOS_SIGNING_DIR`), with its
+keystore password stored encrypted next to it, and is reused while it is still valid, as for a
+project. All of oniro-app's material for a team, project or HAP, shares the team's one
+`oniro_debug_<team>.cer` certificate in AGC. Regenerating any of it deletes that certificate and
+has a new one issued, and the other material is not told: it is still reused locally, but was
+issued for a certificate AGC no longer has. If it then stops installing, regenerate it with
+`--force`. Only stage-model HAPs are supported, and a HAP built for OpenHarmony is refused, since
+a HarmonyOS device would not run it.
 
 ### Account regions
 
