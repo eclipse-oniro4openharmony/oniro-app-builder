@@ -21,6 +21,24 @@ describe('bundleNameFromHapConfig', () => {
   });
 });
 
+describe('reading a file that is not a HAP', () => {
+  it.skipIf(process.platform !== 'linux')('fails without leaking the file handle, which would lock it on Windows', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-nothap-'));
+    try {
+      const notZip = path.join(dir, 'broken.hap');
+      fs.writeFileSync(notZip, 'not a zip');
+      const before = fs.readdirSync('/proc/self/fd').length;
+      for (let i = 0; i < 5; i++) {
+        await expect(readHapBundleName(notZip)).rejects.toThrow();
+        await expect(diffHapAssets({ installedHap: notZip, newHap: notZip })).rejects.toThrow();
+      }
+      expect(fs.readdirSync('/proc/self/fd').length).toBe(before);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('reading a signed HAP', () => {
   it('reads one whose central directory hap-sign-tool padded past the default read window', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-signedhap-'));

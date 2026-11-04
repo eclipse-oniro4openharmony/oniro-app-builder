@@ -1,15 +1,4 @@
-import StreamZip from 'node-stream-zip';
-import { SIGNED_HAP_CHUNK_SIZE } from '../sdk/extract.js';
-
-// node-stream-zip's types are thin; this is the minimal shape we use (mirrors sdk/extract.ts).
-interface ZipEntry {
-  name: string;
-  isDirectory: boolean;
-}
-interface StreamZipAsync {
-  entries(): Promise<Record<string, ZipEntry>>;
-  close(): Promise<void>;
-}
+import { withHapZip } from '../sdk/extract.js';
 
 export interface HapAssetDiff {
   /** File paths present in the new HAP but not the installed one. */
@@ -28,19 +17,12 @@ export function diffEntryNames(installed: Iterable<string>, next: Iterable<strin
   };
 }
 
-async function listFileEntries(hapPath: string): Promise<string[]> {
-  const zip = new (StreamZip as unknown as { async: new (cfg: { file: string; chunkSize?: number }) => StreamZipAsync }).async({
-    file: hapPath,
-    chunkSize: SIGNED_HAP_CHUNK_SIZE,
-  });
-  try {
-    const entries = await zip.entries();
-    return Object.values(entries)
+function listFileEntries(hapPath: string): Promise<string[]> {
+  return withHapZip(hapPath, (zip) =>
+    Object.values(zip.entries())
       .filter((e) => !e.isDirectory)
-      .map((e) => e.name);
-  } finally {
-    await zip.close();
-  }
+      .map((e) => e.name),
+  );
 }
 
 /**

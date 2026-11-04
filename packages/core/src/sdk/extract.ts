@@ -135,21 +135,52 @@ export async function extractTarball(
  */
 export const SIGNED_HAP_CHUNK_SIZE = 128 * 1024;
 
+/** An open ZIP's central directory: what `withHapZip` hands its callback. */
+export interface HapZip {
+  /** Every entry, by name. */
+  entries(): Record<string, ZipEntry>;
+  /** The contents of the entry called `name`. */
+  entryData(name: string): Buffer;
+}
+
+interface StreamZipCallbackApi {
+  once(event: 'ready' | 'error', listener: (err?: Error) => void): void;
+  entries(): Record<string, ZipEntry>;
+  entryDataSync(name: string): Buffer;
+  close(callback?: () => void): void;
+}
+
+/**
+ * Open the ZIP at `zipPath` (a HAP, signed or not) for `use`, and close it again,
+ * whether or not it opened. Uses the callback API: on the async wrapper, `close()`
+ * waits for the open to succeed, so after a failed open (not a ZIP, truncated) it
+ * throws without closing the file, which then stays locked on Windows.
+ */
+export async function withHapZip<T>(zipPath: string, use: (zip: HapZip) => T | Promise<T>): Promise<T> {
+  const zip = new (StreamZip as unknown as {
+    new (cfg: { file: string; chunkSize?: number; storeEntries?: boolean }): StreamZipCallbackApi;
+  })({ file: zipPath, chunkSize: SIGNED_HAP_CHUNK_SIZE, storeEntries: true });
+  const close = () => new Promise<void>((resolve) => zip.close(() => resolve()));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      zip.once('ready', () => resolve());
+      zip.once('error', (err) => reject(err));
+    });
+    return await use({ entries: () => zip.entries(), entryData: (name) => zip.entryDataSync(name) });
+  } finally {
+    await close();
+  }
+}
+
 /**
  * Contents of the first entry of a ZIP whose name `match` accepts, or undefined. Reads
  * only the central directory and that entry, so it is cheap on multi-hundred-MB ZIPs.
  */
-export async function readZipEntry(zipPath: string, match: (entryName: string) => boolean): Promise<Buffer | undefined> {
-  const zip = new (StreamZip as unknown as { async: new (cfg: { file: string; chunkSize?: number }) => StreamZipAsync }).async({
-    file: zipPath,
-    chunkSize: SIGNED_HAP_CHUNK_SIZE,
+export function readZipEntry(zipPath: string, match: (entryName: string) => boolean): Promise<Buffer | undefined> {
+  return withHapZip(zipPath, (zip) => {
+    const entry = Object.values(zip.entries()).find((e) => !e.isDirectory && match(e.name));
+    return entry ? zip.entryData(entry.name) : undefined;
   });
-  try {
-    const entry = Object.values(await zip.entries()).find((e) => !e.isDirectory && match(e.name));
-    return entry ? await zip.entryData(entry) : undefined;
-  } finally {
-    await zip.close();
-  }
 }
 
 // node-stream-zip's TypeScript types aren't great; this is the minimal shape we use.
