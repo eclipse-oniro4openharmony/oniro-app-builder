@@ -27,12 +27,19 @@ describe('reading a file that is not a HAP', () => {
     try {
       const notZip = path.join(dir, 'broken.hap');
       fs.writeFileSync(notZip, 'not a zip');
-      const before = fs.readdirSync('/proc/self/fd').length;
-      for (let i = 0; i < 5; i++) {
-        await expect(readHapBundleName(notZip)).rejects.toThrow();
-        await expect(diffHapAssets({ installedHap: notZip, newHap: notZip })).rejects.toThrow();
-      }
-      expect(fs.readdirSync('/proc/self/fd').length).toBe(before);
+      // Other tests share this process, so look for a descriptor on this file, not a count.
+      const openOnFile = () =>
+        fs.readdirSync('/proc/self/fd').filter((fd) => {
+          try {
+            return fs.readlinkSync(`/proc/self/fd/${fd}`) === fs.realpathSync(notZip);
+          } catch {
+            return false;
+          }
+        });
+      await expect(readHapBundleName(notZip)).rejects.toThrow();
+      expect(openOnFile()).toEqual([]);
+      await expect(diffHapAssets({ installedHap: notZip, newHap: notZip })).rejects.toThrow();
+      expect(openOnFile()).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
