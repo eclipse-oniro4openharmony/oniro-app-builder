@@ -16,10 +16,10 @@ import { createMaterial, encryptPwd, getKey } from '../../sign/encryptKey.js';
 import { getBundleName } from '../../hdc/project.js';
 import { isValidBundleName } from '../../project/validators.js';
 import { createHttpClient, type HarmonyOsHttpClient } from '../http.js';
-import { requireHarmonyOsSdk } from '../sdk.js';
+import { requireHarmonyOsSdk, type HarmonyOsSdk } from '../sdk.js';
 import type { HarmonyOsSession } from '../auth/session.js';
-import { createAgcClient } from './agc.js';
-import { collectLocalDevices, registerDevices } from './devices.js';
+import { createAgcClient, type AgcClient } from './agc.js';
+import { collectLocalDevices, registerDevices, type LocalDevices } from './devices.js';
 import { AgcError, SIGNING_ERRORS } from './errors.js';
 import { KEY_ALIAS, SIGN_ALG, generateKeystoreAndCsr } from './keystore.js';
 import { resolveSigningMaterialPaths, type SigningMaterialPaths } from './paths.js';
@@ -61,7 +61,24 @@ export function shouldRegenerate(input: {
     return 'build-profile.json5 has no signingConfig for this material';
   }
 
-  const profile = readProvisionProfile(input.paths.profilePath);
+  return profileProblem({ ...input, profilePath: input.paths.profilePath });
+}
+
+/**
+ * Why the provisioning profile at `profilePath` cannot sign `bundleName` for this
+ * team, its connected devices and its ACL permissions; null when it can.
+ *
+ * @internal exposed for tests.
+ */
+export function profileProblem(input: {
+  profilePath: string;
+  bundleName: string;
+  teamId: string;
+  connectedUdids: string[];
+  aclPermissions: string[];
+  now?: Date;
+}): string | null {
+  const profile = readProvisionProfile(input.profilePath);
   if (!profile) return 'the provisioning profile could not be read';
   if (profile.bundleName !== input.bundleName) return `the profile is for bundle '${profile.bundleName}'`;
   if (profile.developerId && profile.developerId !== input.teamId) {
@@ -159,9 +176,7 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
   // A product may override the app's bundle name. Validated before anything reaches
   // AGC, so a bad name costs no certificate.
   const bundleName = product.bundleName || getBundleName(projectDir);
-  if (!isValidBundleName(bundleName) || bundleName.split('.').length < 3 || bundleName.length < 7 || bundleName.length > 128) {
-    throw new AgcError(SIGNING_ERRORS.BUNDLE_NAME_INVALID);
-  }
+  assertAgcBundleName(bundleName);
 
   const sdk = requireHarmonyOsSdk({ config: opts.config, logger });
   const auth = await opts.session.resolveAgcAuth({ teamId: opts.teamId });
@@ -194,8 +209,66 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
   }
   logger.info(`[harmonyos] Regenerating signing material: ${reason}.`);
 
+  const keyPwd = await issueSigningMaterial({
+    agc: createAgcClient(opts.http ?? createHttpClient({ logger }), auth),
+    local,
+    sdk,
+    paths,
+    bundleName,
+    aclPermissions,
+    teamId: auth.teamId,
+    logger,
+  });
+  const encryptedPassword = encryptPwd(keyPwd, sharedMaterialDir(paths));
+  writeSigningConfig({ buildProfilePath, buildProfile, productName, paths, encryptedPassword });
+  logger.info(`[harmonyos] Wrote signingConfigs['${productName}'] to ${buildProfilePath}.`);
+  return result(true);
+}
+
+/** Throw unless AGC will issue a profile for `bundleName`; checked before anything reaches AGC. */
+export function assertAgcBundleName(bundleName: string): void {
+  if (!isValidBundleName(bundleName) || bundleName.split('.').length < 3 || bundleName.length < 7 || bundleName.length > 128) {
+    throw new AgcError(SIGNING_ERRORS.BUNDLE_NAME_INVALID);
+  }
+}
+
+/** Where the encryption material shared by the keystores in `paths`'s directory lives. */
+export function materialDirFor(paths: SigningMaterialPaths): string {
+  return path.join(path.dirname(paths.p12Path), 'material');
+}
+
+/**
+ * The encryption material next to the keystores, created on first use. The
+ * OpenHarmony signing path's scheme, which hvigor decrypts. Shared by every
+ * keystore there, so existing material is kept.
+ */
+export function sharedMaterialDir(paths: SigningMaterialPaths): string {
+  const materialDir = materialDirFor(paths);
+  try {
+    getKey(materialDir);
+  } catch {
+    createMaterial(materialDir);
+  }
+  return materialDir;
+}
+
+/**
+ * Have AGC issue fresh material into `paths`: register the connected devices, swap
+ * oniro-app's debug certificate for one over a new keystore, and download a debug
+ * profile for `bundleName`. Returns the keystore password, in the clear.
+ */
+export async function issueSigningMaterial(opts: {
+  agc: AgcClient;
+  local: LocalDevices;
+  sdk: HarmonyOsSdk;
+  paths: SigningMaterialPaths;
+  bundleName: string;
+  aclPermissions: string[];
+  teamId: string;
+  logger: Logger;
+}): Promise<string> {
+  const { agc, local, sdk, paths, logger } = opts;
   // Before anything is deleted: a profile must name at least one device.
-  const agc = createAgcClient(opts.http ?? createHttpClient({ logger }), auth);
   const deviceIds = await registerDevices(agc, local.devices, logger);
   if (local.devices.length === 0) {
     // A device that is attached but unusable is not the same as none: each was named above.
@@ -207,7 +280,7 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
   // AGC will not issue a second certificate under one name, so ours is replaced.
   // The name is oniro-app's own: upstream uses DevEco Studio's `auto_debug_`, and
   // replacing that certificate would revoke the material Studio signs with.
-  const certName = `oniro_debug_${auth.teamId.replace(/[\\/.:]/g, '')}.cer`;
+  const certName = `oniro_debug_${opts.teamId.replace(/[\\/.:]/g, '')}.cer`;
   const stale = (await agc.listCertificates()).find((c) => c.certName === certName);
   if (stale) {
     logger.info(`[harmonyos] Replacing the previous '${certName}' certificate in AppGallery Connect...`);
@@ -224,10 +297,10 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
   logger.info('[harmonyos] Issuing the debug provisioning profile...');
   const profile = await agc.addDebugProfile({
     provisionName: `oniro_${crypto.randomBytes(6).toString('hex')}`,
-    bundleName,
+    bundleName: opts.bundleName,
     certId: cert.id,
     deviceIds,
-    aclPermissions,
+    aclPermissions: opts.aclPermissions,
   });
   try {
     await agc.download('profile', profile.provisionFileUrl, paths.profilePath);
@@ -243,16 +316,5 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
     fs.rmSync(paths.profilePath, { force: true });
     throw err;
   }
-
-  // The OpenHarmony signing path's encryption, with its material next to the keystores.
-  // Shared by every project there, so existing material is kept.
-  const materialDir = path.join(path.dirname(paths.p12Path), 'material');
-  try {
-    getKey(materialDir);
-  } catch {
-    createMaterial(materialDir);
-  }
-  writeSigningConfig({ buildProfilePath, buildProfile, productName, paths, encryptedPassword: encryptPwd(keyPwd, materialDir) });
-  logger.info(`[harmonyos] Wrote signingConfigs['${productName}'] to ${buildProfilePath}.`);
-  return result(true);
+  return keyPwd;
 }

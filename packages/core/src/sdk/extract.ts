@@ -127,11 +127,23 @@ export async function extractTarball(
 }
 
 /**
+ * Read-window size for opening a HAP. node-stream-zip never grows its window past
+ * `chunkSize` (by default about a thousandth of the file) while reading the
+ * central directory, and hap-sign-tool pads each signed HAP's directory records
+ * with kilobytes of alignment, so with the default every signed HAP fails with
+ * "Entries read error". The library caps the value at 128 KiB.
+ */
+export const SIGNED_HAP_CHUNK_SIZE = 128 * 1024;
+
+/**
  * Contents of the first entry of a ZIP whose name `match` accepts, or undefined. Reads
  * only the central directory and that entry, so it is cheap on multi-hundred-MB ZIPs.
  */
 export async function readZipEntry(zipPath: string, match: (entryName: string) => boolean): Promise<Buffer | undefined> {
-  const zip = new (StreamZip as unknown as { async: new (cfg: { file: string }) => StreamZipAsync }).async({ file: zipPath });
+  const zip = new (StreamZip as unknown as { async: new (cfg: { file: string; chunkSize?: number }) => StreamZipAsync }).async({
+    file: zipPath,
+    chunkSize: SIGNED_HAP_CHUNK_SIZE,
+  });
   try {
     const entry = Object.values(await zip.entries()).find((e) => !e.isDirectory && match(e.name));
     return entry ? await zip.entryData(entry) : undefined;

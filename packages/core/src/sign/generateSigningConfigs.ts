@@ -25,7 +25,7 @@ export interface SigningPasswords {
   key: string;
 }
 
-const DEFAULT_PASSWORDS: SigningPasswords = { store: '123456', key: '123456' };
+export const DEFAULT_PASSWORDS: SigningPasswords = { store: '123456', key: '123456' };
 
 /**
  * Which signing key pairs with the chosen `apl`.
@@ -55,7 +55,7 @@ interface SigningKindConfig {
   certBasename: string;
 }
 
-const SIGNING_KIND_CONFIG: Record<SigningKind, SigningKindConfig> = {
+export const SIGNING_KIND_CONFIG: Record<SigningKind, SigningKindConfig> = {
   'profile-release': {
     hapKeyAlias: 'openharmony application profile release',
     certBasename: 'OpenHarmonyProfileRelease.pem',
@@ -114,15 +114,33 @@ export interface GenerateSigningConfigsOptions {
   logger?: Logger;
 }
 
-function copyFilesToProject(
-  projectDir: string,
-  paths: { keystore: string; profileCert: string; unsignedProfileTemplate: string },
+/** The SDK files signing uses, from `<sdkHome>/<api>/toolchains/lib`. */
+export interface SdkSigningFiles {
+  signTool: string;
+  keystore: string;
+  profileCert: string;
+  unsignedProfileTemplate: string;
+}
+
+/** @internal exposed for tests. */
+export function sdkSigningFiles(sdkPath: string): SdkSigningFiles {
+  return {
+    signTool: path.join(sdkPath, 'toolchains/lib/hap-sign-tool.jar'),
+    keystore: path.join(sdkPath, 'toolchains/lib/OpenHarmony.p12'),
+    profileCert: path.join(sdkPath, 'toolchains/lib/OpenHarmonyProfileRelease.pem'),
+    unsignedProfileTemplate: path.join(sdkPath, 'toolchains/lib/UnsgnedReleasedProfileTemplate.json'),
+  };
+}
+
+/** Copy the SDK's keystore, certificates and profile template into `signaturesDir`. */
+export function copySigningFiles(
+  signaturesDir: string,
+  paths: Omit<SdkSigningFiles, 'signTool'>,
   kind: SigningKind,
   logger: Logger,
   applicationCertPath?: string,
 ): void {
-  logger.info('[sign] Copying signing material into project...');
-  const signaturesDir = path.join(projectDir, 'signatures');
+  logger.info(`[sign] Copying signing material into ${signaturesDir}...`);
   fs.mkdirSync(signaturesDir, { recursive: true });
 
   fs.copyFileSync(paths.keystore, path.join(signaturesDir, 'OpenHarmony.p12'));
@@ -171,11 +189,7 @@ export function modifyProfileTemplate(
   logger: Logger,
   options: { kind?: SigningKind; acls?: string[]; appPrivilegeCapabilities?: string[] } = {},
 ): void {
-  const kind = options.kind ?? pickSigningKind(apl);
-  logger.info(`[sign] Modifying profile template (apl=${apl}, app-feature=${appFeature}, kind=${kind})...`);
   const appJsonPath = path.join(projectDir, 'AppScope/app.json5');
-  const profileTemplatePath = path.join(projectDir, 'signatures/UnsgnedReleasedProfileTemplate.json');
-
   if (!fs.existsSync(appJsonPath)) {
     throw new OniroError(`${appJsonPath} does not exist.`);
   }
@@ -186,6 +200,30 @@ export function modifyProfileTemplate(
   } catch (e) {
     throw new OniroError(`Error parsing ${appJsonPath}: ${(e as Error).message}`, e);
   }
+  if (!appJson.app?.bundleName) {
+    throw new OniroError('app.json5 does not contain app.bundleName.');
+  }
+  applyProfileTemplate(path.join(projectDir, 'signatures'), appJson.app.bundleName, apl, appFeature, logger, options);
+}
+
+/**
+ * Fill `signaturesDir/UnsgnedReleasedProfileTemplate.json` in for `bundleName`:
+ * apl, app-feature, the distribution certificate of the signing `kind`, and the
+ * ACLs and privileges when given.
+ *
+ * @internal exposed for tests.
+ */
+export function applyProfileTemplate(
+  signaturesDir: string,
+  bundleName: string,
+  apl: Apl,
+  appFeature: AppFeature,
+  logger: Logger,
+  options: { kind?: SigningKind; acls?: string[]; appPrivilegeCapabilities?: string[] } = {},
+): void {
+  const kind = options.kind ?? pickSigningKind(apl);
+  logger.info(`[sign] Modifying profile template (apl=${apl}, app-feature=${appFeature}, kind=${kind})...`);
+  const profileTemplatePath = path.join(signaturesDir, 'UnsgnedReleasedProfileTemplate.json');
 
   let profileTemplate: {
     'bundle-info'?: {
@@ -203,22 +241,15 @@ export function modifyProfileTemplate(
     throw new OniroError(`Error parsing ${profileTemplatePath}: ${(e as Error).message}`, e);
   }
 
-  if (!appJson.app?.bundleName) {
-    throw new OniroError('app.json5 does not contain app.bundleName.');
-  }
   if (!profileTemplate['bundle-info']) {
     throw new OniroError('UnsgnedReleasedProfileTemplate.json is missing the bundle-info section.');
   }
 
-  profileTemplate['bundle-info']['bundle-name'] = appJson.app.bundleName;
+  profileTemplate['bundle-info']['bundle-name'] = bundleName;
   profileTemplate['bundle-info']['apl'] = apl;
   profileTemplate['bundle-info']['app-feature'] = appFeature;
 
-  const distCertChainPath = path.join(
-    projectDir,
-    'signatures',
-    SIGNING_KIND_CONFIG[kind].certBasename,
-  );
+  const distCertChainPath = path.join(signaturesDir, SIGNING_KIND_CONFIG[kind].certBasename);
   profileTemplate['bundle-info']['distribution-certificate'] = extractLeafCertificate(distCertChainPath);
 
   if (options.acls !== undefined) {
@@ -232,14 +263,14 @@ export function modifyProfileTemplate(
   fs.writeFileSync(profileTemplatePath, JSON.stringify(profileTemplate, null, 2));
 }
 
-function generateP7bFile(
-  projectDir: string,
-  paths: { signTool: string; profileCert: string; keystore: string },
+/** Sign the filled-in profile template in `signaturesDir` into `app1-profile.p7b`. */
+export function generateP7bFile(
+  signaturesDir: string,
+  paths: Pick<SdkSigningFiles, 'signTool' | 'profileCert' | 'keystore'>,
   logger: Logger,
   passwords: SigningPasswords,
 ): void {
   logger.info('[sign] Generating P7b profile via hap-sign-tool...');
-  const signaturesDir = path.join(projectDir, 'signatures');
   const profileTemplatePath = path.join(signaturesDir, 'UnsgnedReleasedProfileTemplate.json');
   const outputProfilePath = path.join(signaturesDir, 'app1-profile.p7b');
 
@@ -389,24 +420,20 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
     throw new SdkNotInstalledError(String(sdkVersion), sdkPath, ALL_SDKS.find((s) => s.api === String(sdkVersion))?.version);
   }
 
-  const paths = {
-    signTool: path.join(sdkPath, 'toolchains/lib/hap-sign-tool.jar'),
-    keystore: path.join(sdkPath, 'toolchains/lib/OpenHarmony.p12'),
-    profileCert: path.join(sdkPath, 'toolchains/lib/OpenHarmonyProfileRelease.pem'),
-    unsignedProfileTemplate: path.join(sdkPath, 'toolchains/lib/UnsgnedReleasedProfileTemplate.json'),
-  };
+  const paths = sdkSigningFiles(sdkPath);
 
   const kind = pickSigningKind(apl);
   const passwords = options.passwords ?? DEFAULT_PASSWORDS;
 
   logger.info('[sign] Starting signing configuration generation...');
-  copyFilesToProject(projectDir, paths, kind, logger, options.applicationCertPath);
+  const signaturesDir = path.join(projectDir, 'signatures');
+  copySigningFiles(signaturesDir, paths, kind, logger, options.applicationCertPath);
   modifyProfileTemplate(projectDir, apl, appFeature, logger, {
     kind,
     acls: options.acls,
     appPrivilegeCapabilities: options.appPrivilegeCapabilities,
   });
-  generateP7bFile(projectDir, paths, logger, passwords);
+  generateP7bFile(signaturesDir, paths, logger, passwords);
   prepareMaterialDirectory(projectDir, logger);
   updateBuildProfile(projectDir, kind, logger, passwords);
   logger.info('[sign] Signing configuration generated successfully.');
