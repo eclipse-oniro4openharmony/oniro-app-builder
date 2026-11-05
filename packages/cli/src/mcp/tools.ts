@@ -5,12 +5,16 @@ import {
   analyzeFaultLog,
   captureBurst,
   describeLayoutNode,
+  findLayoutNodes,
+  listLayoutWindows,
+  selectableTree,
   diffLayouts,
   dumpLayout,
   inventoryScreens,
   latestCrash,
   locateTarget,
   parseLayoutBaseline,
+  parseSelector,
   performInput,
   runDoctor,
   runTests,
@@ -48,7 +52,7 @@ import {
 } from '../lib/screenshotImage.js';
 import type { McpTool, ToolContent, ToolResult } from './protocol.js';
 import type { JsonSchema } from './schema.js';
-import { selectorFromArgs, targetIndexFromArgs, targetProperties } from './target.js';
+import { selectorFromArgs, targetIndexFromArgs, targetProperties, windowFromArgs, windowProperty } from './target.js';
 
 /** What every tool call knows besides its arguments: the server's `--project` and `--device`. */
 export interface ToolContext {
@@ -382,6 +386,11 @@ const dumpLayoutTool: Tool = {
       'Compare with a saved `dump layout` JSON (relative to the project): matched elements with IoU, missing, extra, and a 0-1 similarity (JSON).',
     ),
     output: str('Also write what is returned (the JSON, or the flat text) to this file, e.g. as a later diff baseline.'),
+    selector: str(
+      'Return only the elements matching this selector (attribute clauses or xpath=..., as in input), numbered for its [n] ' +
+        'suffix: { display, selector, matches }.',
+    ),
+    window: windowProperty,
     ...PROJECT,
     ...DEVICE,
   }),
@@ -393,18 +402,30 @@ const dumpLayoutTool: Tool = {
     const modes = [a.flat && 'flat', a.summary && 'summary', a.diff !== undefined && 'diff'].filter(Boolean);
     if (modes.length > 1) throw new Error(`${modes.join(' and ')} cannot be combined.`);
     if (a.raw && modes.length > 0) throw new Error(`raw cannot be combined with ${modes[0]}.`);
+    const selector = a.selector === undefined ? undefined : parseSelector(a.selector as string);
+    if (selector && (a.raw || a.summary || a.diff !== undefined)) {
+      throw new Error('selector cannot be combined with raw, summary or diff.');
+    }
+    const windowId = windowFromArgs(a);
     const diffPath = pathArg(a, 'diff', ctx);
     // Read the baseline before touching the device, so a bad path fails fast.
     const baseline = diffPath !== undefined ? readLayoutBaseline(diffPath) : undefined;
     const result = await dumpLayout({
       config,
       bundleName: a.bundle as string | undefined,
+      windowId,
       prune: !a.raw,
       detectKeyboard: !a.raw,
       deviceSerial: deviceOf(a, ctx),
       logger,
     });
     const output = pathArg(a, 'output', ctx);
+    if (selector) {
+      const matches = findLayoutNodes(selectableTree(result, windowId), selector);
+      const json = { display: result.display, selector: selector.raw, matches } as unknown as Args;
+      if (output) fs.writeFileSync(output, `${JSON.stringify(json, null, 2)}\n`);
+      return jsonResult(json);
+    }
     if (a.flat) {
       const text = formatFlatLayout(result);
       if (output) fs.writeFileSync(output, text);
@@ -459,6 +480,7 @@ const input: Tool = {
       type: a.type as UiInputType,
       target: selectorFromArgs(a),
       targetIndex: targetIndexFromArgs(a),
+      windowId: windowFromArgs(a),
       fx: a.fx as number | undefined,
       fy: a.fy as number | undefined,
       fx2: a.fx2 as number | undefined,
@@ -517,10 +539,11 @@ const screenshot: Tool = {
     const maxDim = a.maxDim as number;
     const output = pathArg(a, 'output', ctx);
     const selector = selectorFromArgs(a);
+    const windowId = windowFromArgs(a);
 
     if (a.diff !== undefined) {
-      if (a.crop !== undefined || selector || a.grid || a.contactSheet) {
-        throw new Error('diff cannot be combined with crop, target*, grid, or contactSheet.');
+      if (a.crop !== undefined || selector || windowId !== undefined || a.grid || a.contactSheet) {
+        throw new Error('diff cannot be combined with crop, target* / selector / window, grid, or contactSheet.');
       }
       const baselinePath = pathArg(a, 'diff', ctx)!;
       let baseline: Buffer;
@@ -536,8 +559,10 @@ const screenshot: Tool = {
       return jsonResult({ baseline: baselinePath, current: output ?? null, ...diff }, false, [jpeg(shown.buf)]);
     }
 
-    if (a.crop !== undefined || selector) {
-      if (a.crop !== undefined && selector) throw new Error('Use either crop or target*, not both.');
+    if (a.crop !== undefined || selector || windowId !== undefined) {
+      if (a.crop !== undefined && (selector || windowId !== undefined)) {
+        throw new Error('Use either crop or target* / selector / window, not both.');
+      }
       if (a.grid || a.contactSheet) throw new Error('crop / target cannot be combined with grid or contactSheet.');
       let rect: CropRect;
       let label: string;
@@ -547,6 +572,7 @@ const screenshot: Tool = {
           config,
           selector,
           index: targetIndexFromArgs(a),
+          windowId,
           hideKeyboard: false,
           deviceSerial,
           logger,
@@ -554,6 +580,12 @@ const screenshot: Tool = {
         if (!located.node.b) throw new Error(`${describeLayoutNode(located.node)} has no bounds to crop to.`);
         rect = padCropRect(located.node.b, TARGET_CROP_PAD);
         label = describeLayoutNode(located.node);
+      } else if (windowId !== undefined) {
+        const { tree } = await dumpLayout({ config, windowId, deviceSerial, logger });
+        const win = listLayoutWindows(tree).find((w) => w.windowId === windowId);
+        if (!win?.b) throw new Error(`Window ${windowId} has no bounds to crop to.`);
+        rect = win.b;
+        label = `window ${windowId}${win.bundle ? ` (${win.bundle})` : ''}`;
       } else {
         rect = parseCropRect(a.crop as string);
         label = rect.map((n) => n.toFixed(3)).join(',');
@@ -596,7 +628,7 @@ const wait: Tool = {
   title: 'Wait for a device condition',
   description:
     'Wait for a device condition (`oniro-app wait --json`): a hilog line (log), boot (boot), a bundle to start ' +
-    '(bundle), or an on-screen element (target / targetId / targetType, or its absence with gone). Returns the ' +
+    '(bundle), or an on-screen element (target / targetId / targetType or selector, optionally in one window, or its absence with gone). Returns the ' +
     'matched log entry or element, or {booted}, {gone}, {bundle, running}. isError on timeout.',
   inputSchema: object({
     log: str('Resolve when a hilog line (tag: message) logged after the call starts matches this regex.'),
@@ -621,6 +653,8 @@ const wait: Tool = {
     const deviceSerial = deviceOf(a, ctx);
     const timeoutMs = a.timeout as number;
     const selector = selectorFromArgs(a);
+    const windowId = windowFromArgs(a);
+    if (windowId !== undefined && !selector) throw new Error('window applies only to target* and selector.');
     if (a.since !== undefined && !a.log) throw new Error('since applies only to log.');
     if (a.log) {
       const entry = await waitForLog({
@@ -644,6 +678,7 @@ const wait: Tool = {
         config,
         selector,
         gone: a.gone as boolean,
+        windowId,
         timeoutMs,
         pollMs: a.interval as number,
         deviceSerial,
@@ -655,7 +690,7 @@ const wait: Tool = {
       await waitForBundle({ config, bundle: a.bundle as string, timeoutMs, deviceSerial, logger });
       return jsonResult({ bundle: a.bundle, running: true });
     }
-    throw new Error('Specify one of log, boot, bundle, or target (or targetId / targetType).');
+    throw new Error('Specify one of log, boot, bundle, target (or targetId / targetType), or selector.');
   },
 };
 
