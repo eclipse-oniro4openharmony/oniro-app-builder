@@ -124,7 +124,7 @@ are the pair the installers use; `resolveTmpRoot(config, override?, installRoot?
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `installCmdTools` | `(InstallCmdToolsOptions) => Promise<void>` | Install the tools by download or from a local zip (`localZipPath`); `tmpDir` overrides the scratch directory (default: next to the install target). |
+| `installCmdTools` | `(InstallCmdToolsOptions) => Promise<void>` | Install the tools by download or from a local zip (`localZipPath`); `tmpDir` overrides the scratch directory (default: next to the install target). The archive is staged inside the install directory and swapped in only once complete, so a failed install leaves the previous tools untouched (or rolls them back), and a successful one leaves exactly what a clean extraction holds. |
 | `getCmdToolsStatus` | `(config) => CmdToolsStatus` | `{ installed, status }` (version when present). |
 | `isCmdToolsInstalled` | `(config) => boolean` | — |
 | `removeCmdTools` | `(config) => void` | Delete the install. |
