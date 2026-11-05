@@ -12,11 +12,27 @@ import {
   signOpenHarmonyHap,
   prepareSigning,
   getOhosBaseSdkHome,
+  describeProfileValidity,
+  describeSigningMaterial,
   type Apl,
   type AppFeature,
+  type HarmonyOsSigningResult,
+  type SigningMaterialSummary,
   type SigningPasswords,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+
+/** `profile names 6 device(s), debug, valid until 2026-10-01 11:50 UTC`. */
+function profileSummary(result: HarmonyOsSigningResult): string {
+  const validity = describeProfileValidity({ type: result.profileType, notAfter: result.notAfter });
+  return [`profile names ${result.deviceIds.length} device(s)`, validity].filter(Boolean).join(', ');
+}
+
+/** ` (release profile, apl normal; certificate valid until …)`, or nothing when nothing is known. */
+function materialSuffix(summary: SigningMaterialSummary): string {
+  const text = describeSigningMaterial(summary);
+  return text ? ` (${text})` : '';
+}
 
 function parseAclsList(value: string): string[] {
   return value
@@ -37,6 +53,7 @@ export function registerSignCommand(program: Command): void {
         'HarmonyOS projects need --harmonyos instead, which has AppGallery Connect issue the',
         'certificate and profile for a signed-in Huawei account (`oniro-app auth login`).',
         'With --hap <file>, signs a prebuilt HAP instead of a project (with --harmonyos, for HarmonyOS).',
+        'Ends by naming the profile type and expiry; `oniro-app app verify <hap>` checks what signed a built HAP.',
       ].join(' '),
     )
     .addOption(
@@ -144,7 +161,7 @@ export function registerSignCommand(program: Command): void {
               applicationCertPath: config.get('applicationCertPath', '') || undefined,
               logger,
             });
-            logger.info(`Signed ${result.bundleName} into ${result.outPath}.`);
+            logger.info(`Signed ${result.bundleName} into ${result.outPath}${materialSuffix(result.material)}.`);
             return;
           }
           const result = await harmonyOsSignHap({
@@ -156,7 +173,7 @@ export function registerSignCommand(program: Command): void {
             force: opts.force,
             logger,
           });
-          logger.info(`Signed ${result.bundleName} into ${result.outPath} (profile names ${result.deviceIds.length} device(s)).`);
+          logger.info(`Signed ${result.bundleName} into ${result.outPath} (${profileSummary(result)}).`);
           return;
         }
 
@@ -170,7 +187,7 @@ export function registerSignCommand(program: Command): void {
             force: opts.force,
             logger,
           });
-          logger.info(`Signing configs ready for ${result.bundleName} (profile names ${result.deviceIds.length} device(s)).`);
+          logger.info(`Signing configs ready for ${result.bundleName} (${profileSummary(result)}).`);
           return;
         }
         // The OpenHarmony development certificate cannot sign for a HarmonyOS device.
@@ -197,7 +214,7 @@ export function registerSignCommand(program: Command): void {
 
         const sdkHome = getOhosBaseSdkHome(config);
         logger.info(`Generating signing configs in ${dir} using SDK at ${sdkHome}...`);
-        generateSigningConfigs({
+        const generated = generateSigningConfigs({
           projectDir: dir,
           sdkHome,
           apl: opts.apl,
@@ -207,7 +224,7 @@ export function registerSignCommand(program: Command): void {
           passwords,
           logger,
         });
-        logger.info('Signing configs generated.');
+        logger.info(`Signing configs generated${materialSuffix(generated)}.`);
       },
     );
 }

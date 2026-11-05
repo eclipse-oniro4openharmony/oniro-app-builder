@@ -17,6 +17,8 @@ import {
   generateP7bFile,
   pickSigningKind,
   resolveAppFeature,
+  summarizeSigningMaterial,
+  type SigningMaterialSummary,
   sdkSigningFiles,
   type Apl,
   type AppFeature,
@@ -69,6 +71,8 @@ export interface SignOpenHarmonyHapResult {
   /** API level of the SDK whose signing material was used. */
   sdkApi: string;
   kind: SigningKind;
+  /** The profile and certificate the HAP was signed with. */
+  material: SigningMaterialSummary;
 }
 
 /**
@@ -113,6 +117,7 @@ export async function signOpenHarmonyHap(opts: SignOpenHarmonyHapOptions): Promi
   logger.info(`[sign] Signing ${path.basename(hapPath)} as ${info.bundleName} with the API ${sdk.api} SDK's material...`);
 
   const signaturesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-sign-hap-'));
+  let material: SigningMaterialSummary = {};
   try {
     copySigningFiles(signaturesDir, files, kind, logger, opts.applicationCertPath);
     applyProfileTemplate(signaturesDir, info.bundleName, apl, appFeature, logger, {
@@ -148,10 +153,11 @@ export async function signOpenHarmonyHap(opts: SignOpenHarmonyHapOptions): Promi
         );
       }
     });
+    material = summarizeSigningMaterial(signaturesDir, kind);
   } finally {
     fs.rmSync(signaturesDir, { recursive: true, force: true });
   }
 
   logger.info(`[sign] Wrote ${outPath}.`);
-  return { bundleName: info.bundleName, outPath, sdkApi: sdk.api, kind };
+  return { bundleName: info.bundleName, outPath, sdkApi: sdk.api, kind, material };
 }

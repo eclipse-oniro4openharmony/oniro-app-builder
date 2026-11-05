@@ -103,6 +103,7 @@ function fakeAgc() {
         state.objects.set(
           `obj-${id}`,
           p7b({
+            type: 'debug',
             validity: { 'not-before': 1700000000, 'not-after': 4102444800 },
             'bundle-info': { 'bundle-name': packageName, 'developer-id': 'u1', 'development-certificate': state.profileCertificate },
             'debug-info': { 'device-ids': state.devices.filter((d) => deviceList.includes(d.id)).map((d) => d.udid) },
@@ -207,6 +208,8 @@ describe('harmonyOsAutoSign', () => {
     const result = await sign();
 
     expect(result).toMatchObject({ bundleName: 'com.example.signme', teamId: 'u1', regenerated: true, deviceIds: [UDID] });
+    // What `sign --harmonyos` prints: "debug, valid until ...".
+    expect(result).toMatchObject({ profileType: 'debug', notAfter: new Date(4102444800 * 1000) });
     for (const file of Object.values(result.paths)) {
       expect(path.dirname(file)).toBe(signingDir);
       expect(fs.existsSync(file)).toBe(true);
@@ -440,6 +443,7 @@ describe('harmonyOsSignHap', () => {
 
     const outPath = path.join(tmp, 'entry-default-signed.hap');
     expect(result).toMatchObject({ bundleName: 'com.example.prebuilt', teamId: 'u1', regenerated: true, deviceIds: [UDID], outPath });
+    expect(result).toMatchObject({ profileType: 'debug', notAfter: new Date(4102444800 * 1000) });
     expect(agcCalls('/provision/add').map((c) => c.opts?.body)).toEqual([
       expect.objectContaining({ packageName: 'com.example.prebuilt', aclPermissionList: ['ohos.permission.READ_CONTACTS'] }),
     ]);

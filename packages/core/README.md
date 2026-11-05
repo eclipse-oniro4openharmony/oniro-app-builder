@@ -137,7 +137,11 @@ are the pair the installers use; `resolveTmpRoot(config, override?, installRoot?
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `generateSigningConfigs` | `(GenerateSigningConfigsOptions) => void` | Generate keys/certs/material and write the `signingConfigs` block into `build-profile.json5`. |
+| `generateSigningConfigs` | `(GenerateSigningConfigsOptions) => GenerateSigningConfigsResult` | Generate keys/certs/material and write the `signingConfigs` block into `build-profile.json5`. Returns the `signaturesDir`, the signing `kind`, and a `SigningMaterialSummary` (profile type, apl, profile and certificate expiry). |
+| `describeSigningMaterial` | `(SigningMaterialSummary) => string` | `release profile, apl normal; certificate valid until 2049-12-31 12:21 UTC`, as `sign` prints it. `signOpenHarmonyHap` returns the same summary as `material`. |
+| `verifyHap` | `(VerifyHapOptions) => Promise<VerifyHapResult>` | Run `hap-sign-tool verify-app` on a HAP and report its `status` (`valid`/`invalid`/`unverified`), whether it is signed and the signature valid, the chain (leaf first, `CertificateInfo`) and root, the `signer` (`openharmony-dev`, `harmonyos-agc`, `other`), the profile (`HapProfileReport`: type, issuer, bundle, apl, app-feature, device count, validity, days left, whether its expiry is enforced and whether it names the signing certificate), and the `problems` that make it invalid. Never throws for a bad HAP. |
+| `verifyHapExitCode` / `formatHapVerification` | `(VerifyHapResult) => number` / `=> string` | `0` valid, `1` invalid, `2` could not verify; the text `app verify` prints. |
+| `findHapSignTool` | `(config, logger?) => string \| null` | The `hap-sign-tool.jar` of an installed OpenHarmony SDK, else the HarmonyOS SDK, else the command-line tools. |
 | `pickSigningKind` | `(apl) => SigningKind` | `'profile-release'` for `normal`, `'application-release'` for `system_basic`/`system_core`. |
 | `detectSigningConfigNames` | `(projectDir) => string[]` | The `products[*].signingConfig` names (falls back to `['default']`). |
 | `createMaterial` / `getKey` / `encryptPwd` / `decryptPwd` | — | Signing-material key derivation + password encryption used in the profile. |
@@ -375,7 +379,8 @@ HarmonyOS support is additive: a project is HarmonyOS only when its product decl
 | `createHarmonyOsSession(opts)` | `login` / `logout` / `getUserInfo` / `listTeams` / `resolveAgcAuth` / `getDeveloperAgreement` for a Huawei developer account. The token is stored encrypted, with the account's region. `onLoginUrl(url, { port })` reports the sign-in URL and loopback port. |
 | `session.login(HarmonyOsLoginOptions)` | `timeoutMs`; `port` to listen on a fixed loopback port (for an `ssh -L` tunnel); `openBrowser: false` to leave opening the URL to the user; `pastedCallbacks`, an `AsyncIterable<string>` (e.g. a `readline` interface over stdin) of callback addresses pasted from a browser on another machine, checked like a request to the loopback port. |
 | `harmonyOsAutoSign(opts)` | Keystore + CSR → AGC debug certificate → device registration → debug profile → `build-profile.json5`, reusing still-valid material. |
-| `readProvisionProfile(path)` | Bundle name, team, expiry, devices and ACLs of a `.p7b`. |
+| `readProvisionProfile(path)` / `parseProvisionProfile(buffer)` | Type, issuer, bundle name, team, apl, app-feature, validity, devices, ACLs and certificates of a `.p7b`. |
+| `describeProfileValidity(profile, now?)` / `formatUtc(date)` | `debug, valid until 2026-10-01 11:50 UTC`, as `sign --harmonyos` prints it. `harmonyOsAutoSign` and `harmonyOsSignHap` return the profile's `profileType` and `notAfter`. |
 | `HUAWEI_SITES` | Each region's sign-in and AppGallery Connect hosts. |
 
 ```ts

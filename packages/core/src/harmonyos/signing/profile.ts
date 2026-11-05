@@ -8,17 +8,26 @@ import { X509Certificate } from 'node:crypto';
 import forge from 'node-forge';
 import { AgcError, SIGNING_ERRORS } from './errors.js';
 
-/** The fields of a provisioning profile that decide whether it can be reused. */
+/** The fields of a provisioning profile that decide whether it can be reused, and what it allows. */
 export interface ProvisionProfileInfo {
+  /** `debug` or `release`. */
+  type?: string;
+  /** Who signed the profile: `app_gallery` for AGC, `pki_internal` for the OpenHarmony SDK's. */
+  issuer?: string;
   bundleName?: string;
-  /** The AGC team the profile was issued to. */
+  /** The AGC team the profile was issued to; `OpenHarmony` for the SDK's. */
   developerId?: string;
+  apl?: string;
+  appFeature?: string;
+  notBefore?: Date;
   notAfter?: Date;
   /** Uppercased UDIDs the debug profile is valid for. */
   deviceIds: string[];
   aclPermissions: string[];
-  /** PEM of the certificate the profile was issued for. */
+  /** PEM of the certificate a debug profile was issued for. */
   developmentCertificate?: string;
+  /** PEM of the certificate a release profile was issued for. */
+  distributionCertificate?: string;
 }
 
 /**
@@ -59,14 +68,32 @@ export function extractProfileJson(buffer: Buffer): string | null {
 
 /** Read a `.p7b` profile; null when it is missing or unreadable, which means "regenerate". */
 export function readProvisionProfile(profilePath: string): ProvisionProfileInfo | null {
+  try {
+    return parseProvisionProfile(fs.readFileSync(profilePath));
+  } catch {
+    return null;
+  }
+}
+
+/** {@link readProvisionProfile} on the bytes of a `.p7b`; null when they hold no profile. */
+export function parseProvisionProfile(buffer: Buffer): ProvisionProfileInfo | null {
   let raw: {
-    validity?: { 'not-after'?: unknown };
-    'bundle-info'?: { 'bundle-name'?: unknown; 'developer-id'?: unknown; 'development-certificate'?: unknown };
+    type?: unknown;
+    issuer?: unknown;
+    validity?: { 'not-before'?: unknown; 'not-after'?: unknown };
+    'bundle-info'?: {
+      'bundle-name'?: unknown;
+      'developer-id'?: unknown;
+      apl?: unknown;
+      'app-feature'?: unknown;
+      'development-certificate'?: unknown;
+      'distribution-certificate'?: unknown;
+    };
     'debug-info'?: { 'device-ids'?: unknown };
     acls?: { 'allowed-acls'?: unknown };
   };
   try {
-    const json = extractProfileJson(fs.readFileSync(profilePath));
+    const json = extractProfileJson(buffer);
     if (!json) return null;
     raw = JSON.parse(json);
   } catch {
@@ -74,17 +101,42 @@ export function readProvisionProfile(profilePath: string): ProvisionProfileInfo 
   }
   const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
   const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
-  const notAfter = raw.validity?.['not-after'];
+  // Epoch seconds.
+  const date = (v: unknown) => (typeof v === 'number' ? new Date(v * 1000) : undefined);
   const bundle = raw['bundle-info'] ?? {};
   return {
+    type: str(raw.type),
+    issuer: str(raw.issuer),
     bundleName: str(bundle['bundle-name']),
     developerId: str(bundle['developer-id']),
-    // Epoch seconds.
-    notAfter: typeof notAfter === 'number' ? new Date(notAfter * 1000) : undefined,
+    apl: str(bundle.apl),
+    appFeature: str(bundle['app-feature']),
+    notBefore: date(raw.validity?.['not-before']),
+    notAfter: date(raw.validity?.['not-after']),
     deviceIds: strings(raw['debug-info']?.['device-ids']).map((d) => d.toUpperCase()),
     aclPermissions: strings(raw.acls?.['allowed-acls']),
     developmentCertificate: str(bundle['development-certificate']),
+    distributionCertificate: str(bundle['distribution-certificate']),
   };
+}
+
+/** `2026-10-01 11:50 UTC`. */
+export function formatUtc(date: Date): string {
+  return `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+/**
+ * The profile's type and expiry, for a one-line summary: `debug, valid until
+ * 2026-10-01 11:50 UTC`, or `debug, expired 2026-10-01 11:50 UTC`. Omits what
+ * the profile does not say.
+ */
+export function describeProfileValidity(profile: Pick<ProvisionProfileInfo, 'type' | 'notAfter'>, now = new Date()): string {
+  const parts: string[] = [];
+  if (profile.type) parts.push(profile.type);
+  if (profile.notAfter) {
+    parts.push(`${profile.notAfter <= now ? 'expired' : 'valid until'} ${formatUtc(profile.notAfter)}`);
+  }
+  return parts.join(', ');
 }
 
 function parseCertificate(pem: string): X509Certificate {

@@ -9,6 +9,8 @@ import { ALL_SDKS } from '../sdk/constants.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError, SdkNotInstalledError } from '../ports/errors.js';
+import { formatUtc, readProvisionProfile } from '../harmonyos/signing/profile.js';
+import { leafCertificateOf } from './certChain.js';
 
 /** Ability Privilege Level written into the profile's `bundle-info.apl`. */
 export type Apl = 'normal' | 'system_basic' | 'system_core';
@@ -387,6 +389,51 @@ function prepareMaterialDirectory(projectDir: string, logger: Logger): void {
   createMaterial(materialDir);
 }
 
+/** What the signing material in a `signatures` directory amounts to, for a one-line summary. */
+export interface SigningMaterialSummary {
+  /** The profile's type: `release` for the SDK's template. */
+  profileType?: string;
+  apl?: string;
+  /**
+   * The end of the profile's validity window. The SDK's template carries a fixed
+   * one that ended in 2023, which OpenHarmony devices do not enforce.
+   */
+  profileNotAfter?: Date;
+  /** When the certificate that signs HAPs expires. */
+  certificateNotAfter?: Date;
+}
+
+/** @internal exposed for tests. */
+export function summarizeSigningMaterial(signaturesDir: string, kind: SigningKind): SigningMaterialSummary {
+  const profile = readProvisionProfile(path.join(signaturesDir, 'app1-profile.p7b'));
+  let leaf;
+  try {
+    leaf = leafCertificateOf(fs.readFileSync(path.join(signaturesDir, SIGNING_KIND_CONFIG[kind].certBasename), 'utf8'));
+  } catch {
+    leaf = null;
+  }
+  return {
+    profileType: profile?.type,
+    apl: profile?.apl,
+    profileNotAfter: profile?.notAfter,
+    certificateNotAfter: leaf ? new Date(leaf.validTo) : undefined,
+  };
+}
+
+/** `release profile, apl normal; certificate valid until 2049-12-31 12:21 UTC`. Empty when nothing is known. */
+export function describeSigningMaterial(summary: SigningMaterialSummary): string {
+  const profile = [summary.profileType && `${summary.profileType} profile`, summary.apl && `apl ${summary.apl}`]
+    .filter(Boolean)
+    .join(', ');
+  const cert = summary.certificateNotAfter && `certificate valid until ${formatUtc(summary.certificateNotAfter)}`;
+  return [profile, cert].filter(Boolean).join('; ');
+}
+
+export interface GenerateSigningConfigsResult extends SigningMaterialSummary {
+  signaturesDir: string;
+  kind: SigningKind;
+}
+
 /**
  * Generate signing configs for an OpenHarmony project: copies certs, signs the profile,
  * generates the signing material, and writes the resulting `signingConfigs` entry into
@@ -394,7 +441,7 @@ function prepareMaterialDirectory(projectDir: string, logger: Logger): void {
  *
  * Requires `java` on PATH (the OpenHarmony hap-sign-tool ships as a .jar).
  */
-export function generateSigningConfigs(options: GenerateSigningConfigsOptions): void {
+export function generateSigningConfigs(options: GenerateSigningConfigsOptions): GenerateSigningConfigsResult {
   const { projectDir, sdkHome } = options;
   const logger = options.logger ?? noopLogger;
   const apl: Apl = options.apl ?? 'normal';
@@ -437,4 +484,5 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
   prepareMaterialDirectory(projectDir, logger);
   updateBuildProfile(projectDir, kind, logger, passwords);
   logger.info('[sign] Signing configuration generated successfully.');
+  return { signaturesDir, kind, ...summarizeSigningMaterial(signaturesDir, kind) };
 }

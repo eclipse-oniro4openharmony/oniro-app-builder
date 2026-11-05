@@ -151,6 +151,16 @@ export interface HarmonyOsSigningResult {
   regenerated: boolean;
   /** UDIDs the profile is valid for. */
   deviceIds: string[];
+  /** The profile's type: `debug` for the material AGC issues here. */
+  profileType?: string;
+  /** When the profile expires. AGC debug profiles last 14 days. */
+  notAfter?: Date;
+}
+
+/** The profile-derived fields of a {@link HarmonyOsSigningResult}. */
+export function profileResultFields(profilePath: string): Pick<HarmonyOsSigningResult, 'deviceIds' | 'profileType' | 'notAfter'> {
+  const profile = readProvisionProfile(profilePath);
+  return { deviceIds: profile?.deviceIds ?? [], profileType: profile?.type, notAfter: profile?.notAfter };
 }
 
 /**
@@ -190,7 +200,7 @@ export async function harmonyOsAutoSign(opts: HarmonyOsAutoSignOptions): Promise
     teamId: auth.teamId,
     paths,
     regenerated,
-    deviceIds: readProvisionProfile(paths.profilePath)?.deviceIds ?? [],
+    ...profileResultFields(paths.profilePath),
   });
 
   const reason = shouldRegenerate({

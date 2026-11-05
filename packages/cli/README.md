@@ -163,6 +163,8 @@ Only needed for HarmonyOS signing; see [HarmonyOS apps](#harmonyos-apps).
 
 `sign [project-dir]` (defaults to the current directory). Requires `java` on `PATH`. Rewrites the `signingConfigs` block of `build-profile.json5`, and points any product that names no `signingConfig` at the generated one (other keys are preserved). The generated profile uses the SDK's built-in development cert (`issuer=pki_internal`) and its validity window — **dev/local builds only, not distribution.** See [Signing apps that need system permissions](#signing-apps-that-need-system-permissions) for `--apl` / `--acls`.
 
+The last line names what was made: `Signing configs generated (release profile, apl normal; certificate valid until 2049-12-31 12:21 UTC).` With `--harmonyos`, it names the profile's type and expiry, which for AGC's debug profiles is 14 days out: `Signing configs ready for com.example.myapp (profile names 6 device(s), debug, valid until 2026-10-01 11:50 UTC).` `oniro-app app verify <hap>` checks what actually signed a built HAP.
+
 | Flag | Description |
 | --- | --- |
 | `--apl <level>` | Ability Privilege Level: `normal` (default), `system_basic`, or `system_core`. |
@@ -361,6 +363,7 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 | `app apply [project-dir] --bundle <b> [options]` | Install a HAP **and verify it took**: fails when the bundle manager rejects it or `bm dump` does not then list the bundle, and handles sign-info mismatch, asset-cache invalidation, and persistent-bundle restart. Uses the newest signed HAP, else the unsigned one, and explains a target's refusal of an unsigned HAP like `app install`. |
 | `app uninstall <bundle> [--device <serial>]` | Uninstall an app by bundle name. |
 | `app stop <bundle> [--device <serial>]` | Force-stop an app by bundle name. |
+| `app verify <hap> [--json]` | Verify a HAP's signature and report what signed it, profile expiry included. See [Verifying a HAP's signature](#verifying-a-haps-signature). |
 
 `app apply` options:
 
@@ -390,6 +393,41 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 | --- | --- |
 | `--smoke-delay <ms>` | Wait between the process appearing and the screenshot (default `2000`). |
 | `--smoke-screenshot <file>` | Where to write the screenshot (default: `oniro-smoke-<bundle>-<time>.jpeg` in the system temp dir). |
+
+#### Verifying a HAP's signature
+
+`app verify <hap>` runs the SDK's `hap-sign-tool.jar verify-app` on the HAP (from an installed
+OpenHarmony SDK, else the HarmonyOS SDK, else the command-line tools; it needs `java`), then reads
+the certificate chain and provisioning profile the HAP carries. No device is needed.
+
+```console
+$ oniro-app app verify entry/build/default/outputs/default/entry-default-signed.hap
+…/entry-default-signed.hap: valid
+  signature:    valid
+  signer:       HarmonyOS, issued by AppGallery Connect (chains to Huawei CBG Root CA G2)
+  chain:        Jane Dev(1234),Development  [leaf, until 2026-10-01 11:50 UTC]
+                Huawei CBG Developer Relations CA G2 DRE  [intermediate, until 2030-08-16 16:23 UTC]
+                Huawei CBG Root CA G2  [root, until 2049-03-16 03:04 UTC]
+  profile:      debug, issuer app_gallery
+  bundle:       com.example.myapp
+  apl:          normal
+  app-feature:  hos_normal_app
+  devices:      6
+  validity:     2026-09-17 12:00 UTC to 2026-10-01 11:50 UTC, 6 days left
+  note:         a debug profile installs only on the devices it names
+```
+
+It reports whether the signature is valid; the chain, leaf first, and its root; whether the
+material is OpenHarmony development material (the SDK's certificate, profile issuer `pki_internal`),
+which only OpenHarmony devices accept, or a HarmonyOS certificate from AppGallery Connect; and the
+profile's type, bundle name, apl, app-feature, device count and validity. A HAP is **invalid** when
+it is unsigned, hap-sign-tool rejects its signature, a certificate or (for AGC material) the
+profile has expired, the profile names another certificate or bundle than the HAP's, or a HAP
+built for HarmonyOS carries OpenHarmony development material. The SDK's development profile
+carries a fixed validity window that ended in 2023, which OpenHarmony devices do not enforce, so
+that is only a note. `--json` emits every field (dates as ISO strings).
+
+Exit codes: `0` valid, `1` invalid, `2` could not verify (no HAP, no `java`, no `hap-sign-tool.jar`).
 
 #### `file` — transfer files to/from the device
 
@@ -638,7 +676,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `app verify`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.
@@ -790,6 +828,11 @@ DevEco Studio also uses) and is **reused**, without contacting AGC for anything,
 still valid: same bundle name and team, unexpired, naming the attached devices and requested
 permissions, and wired into this project's `build-profile.json5`. Certificates are a small
 per-team quota; `--force` regenerates anyway.
+
+AGC's debug certificate and profile last 14 days, after which a device refuses to install the
+HAP. `sign --harmonyos` therefore ends by naming the profile's type and expiry, e.g.
+`(profile names 6 device(s), debug, valid until 2026-10-01 11:50 UTC)`, and
+`oniro-app app verify <hap>` reports both, with the days left, for a built HAP.
 
 The AGC certificate is named `oniro_debug_<team>.cer`, distinct from DevEco Studio's
 `auto_debug_<team>.cer`: each tool replaces only its own certificate when regenerating, so
