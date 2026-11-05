@@ -268,9 +268,15 @@ describe('provisioning profile', () => {
       const file = path.join(tmp, 'profile.p7b');
       fs.writeFileSync(file, fakeProfile(PROFILE_PAYLOAD));
       expect(readProvisionProfile(file)).toEqual({
+        type: 'debug',
+        issuer: undefined,
         bundleName: 'com.example.app',
         developerId: 'team-1',
+        apl: undefined,
+        appFeature: undefined,
+        notBefore: new Date(1700000000 * 1000),
         notAfter: new Date(4102444800 * 1000),
+        distributionCertificate: undefined,
         deviceIds: ['AA'.repeat(32)],
         aclPermissions: ['ohos.permission.READ_CONTACTS'],
         developmentCertificate: 'PEM',

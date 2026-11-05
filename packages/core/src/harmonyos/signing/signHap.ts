@@ -14,13 +14,13 @@ import {
   issueSigningMaterial,
   materialDirFor,
   profileProblem,
+  profileResultFields,
   sharedMaterialDir,
   type HarmonyOsSigningResult,
 } from './autoSign.js';
 import { collectLocalDevices } from './devices.js';
 import { signHapFile } from './keystore.js';
 import { resolveSigningMaterialPaths, type SigningMaterialPaths } from './paths.js';
-import { readProvisionProfile } from './profile.js';
 import { aclPermissionsAmong } from './project.js';
 import { defaultSignedHapPath, readHapSigningInfo, writeHapAtomically } from '../../sign/hapInfo.js';
 
@@ -137,7 +137,7 @@ export async function harmonyOsSignHap(opts: HarmonyOsSignHapOptions): Promise<H
     signHapFile({ sdk, inFile: hapPath, outFile: tmpPath, ...material, keyPwd: password, logger }),
   );
 
-  const deviceIds = readProvisionProfile(material.profilePath)?.deviceIds ?? [];
+  const profile = profileResultFields(material.profilePath);
   logger.info(`[harmonyos] Wrote ${outPath}.`);
-  return { bundleName, teamId: auth.teamId, paths: material, regenerated: !!reason, deviceIds, outPath };
+  return { bundleName, teamId: auth.teamId, paths: material, regenerated: !!reason, ...profile, outPath };
 }

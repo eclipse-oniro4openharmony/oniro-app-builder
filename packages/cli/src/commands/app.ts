@@ -22,6 +22,7 @@ import {
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 import { decodeGreyscale } from '../lib/screenshotImage.js';
+import { registerAppVerifyCommand } from './appVerify.js';
 
 interface SmokeOpts {
   smoke?: boolean;
@@ -278,4 +279,6 @@ export function registerAppCommand(program: Command): void {
       await forceStop({ config, bundle, deviceSerial: opts.device, logger });
       logger.info(`Stopped ${bundle}.`);
     });
+
+  registerAppVerifyCommand(app);
 }

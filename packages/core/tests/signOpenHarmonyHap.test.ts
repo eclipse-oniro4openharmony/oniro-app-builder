@@ -70,7 +70,14 @@ describe('signOpenHarmonyHap', () => {
 
     const outPath = path.join(tmp, 'entry-default-signed.hap');
     // The SDK the HAP targets, though a newer one is installed.
-    expect(result).toEqual({ bundleName: 'com.example.prebuilt', outPath, sdkApi: '20', kind: 'profile-release' });
+    expect(result).toEqual({
+      bundleName: 'com.example.prebuilt',
+      outPath,
+      sdkApi: '20',
+      kind: 'profile-release',
+      // Read back from the material: the stand-in's profile is the bare template, its PEMs not certificates.
+      material: { apl: 'normal', profileType: undefined, profileNotAfter: undefined, certificateNotAfter: undefined },
+    });
     expect(tool.signedProfile!['bundle-info']).toMatchObject({
       'bundle-name': 'com.example.prebuilt',
       apl: 'normal',

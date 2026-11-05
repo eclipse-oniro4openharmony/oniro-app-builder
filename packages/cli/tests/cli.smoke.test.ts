@@ -322,3 +322,39 @@ describe('oniro-app create + sign end-to-end (no network)', () => {
     expect(fs.existsSync(path.join(projectDir, 'entry', 'oh-package.json5'))).toBe(true);
   });
 });
+
+describe('oniro-app app verify (no SDK)', () => {
+  let tmp: string;
+  let env: NodeJS.ProcessEnv;
+
+  beforeAll(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-cli-verify-'));
+    env = { ONIRO_SDK_ROOT_DIR: path.join(tmp, 'no-sdk'), ONIRO_CMD_TOOLS_PATH: path.join(tmp, 'no-tools'), ONIRO_HARMONYOS_SDK_PATH: '' };
+    fs.writeFileSync(path.join(tmp, 'app.hap'), 'not really a hap');
+  });
+
+  afterAll(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('documents its exit codes', () => {
+    const r = runCli(['app', 'verify', '--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('--json');
+    expect(r.stdout.replace(/\s+/g, ' ')).toContain(
+      'Exits 0 when valid, 1 when unsigned, invalid, expired or mismatched, 2 when it could not verify',
+    );
+  });
+
+  it('exits 2 when it cannot verify: no HAP, or no hap-sign-tool', () => {
+    let r = runCli(['app', 'verify', path.join(tmp, 'absent.hap')], env);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toContain('absent.hap: could not verify');
+
+    r = runCli(['app', 'verify', path.join(tmp, 'app.hap'), '--json'], env);
+    expect(r.status).toBe(2);
+    const result = JSON.parse(r.stdout) as { status: string; problems: string[] };
+    expect(result.status).toBe('unverified');
+    expect(result.problems[0]).toMatch(/no hap-sign-tool\.jar found/);
+  });
+});
