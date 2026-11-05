@@ -790,6 +790,114 @@ oniro-app input --type swipe --fx 0.5 --fy 0.8 --fx2 0.5 --fy2 0.3
 oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400}]'
 ```
 
+#### `replay` — run a UI flow and report where it diverged
+
+`replay <flow.json>` runs a [flow file](#flow-files), written by hand or by `record`, on the device. For each step it waits for the step's `selector` (as `wait --selector` does), acts on that element (as `input --selector` does: covered elements are skipped, the soft keyboard is dismissed when it hides the target), pauses `waitMs`, then waits for the step's `expect`. It stops at the first step that fails and reports why:
+
+| `reason` | Meaning |
+| --- | --- |
+| `not-found` | The step's element did not appear within the step timeout (for a `wait` step with `gone`, it did not go away). |
+| `expect-not-found` | The step ran, but its `expect` element did not appear. |
+| `wrong-screen` | The flow's `bundle` has no window on screen (it crashed, another app or the lock screen is in front). Overrides the two above. |
+| `ambiguous` | Several elements match the selector; make it more specific or append `[n]`. |
+| `covered` | The element is there but under an overlay. |
+| `action-failed` | The input could not be sent. |
+
+The report adds a screenshot of the screen at that moment, the app's elements as `dump layout --flat` would list them (or every element when the app is not on screen), and the elements that match all but one clause of the selector (`near match: Button "Next" #continueBtn (differs in text=Continue)`), which is usually the renamed element.
+
+| Flag | Description |
+| --- | --- |
+| `--from <i>` / `--to <i>` | Run only steps `i` to `j` (0-based, inclusive). |
+| `--step-timeout <ms>` | How long to wait for a step's selector and its `expect` (default `10000`); a step's `timeoutMs` overrides it. |
+| `--screenshots <dir>` | Save a screenshot after every step (`step-<i>.jpeg`) and the divergence screenshot (`failed-step-<i>.jpeg`) here. Without it the divergence screenshot goes to a new directory under the system temp dir. |
+| `--fallback` | When a step's selector is not found, act on its `fallback` point instead of stopping (the step is reported with `usedFallback`). |
+| `--launch` | Force-stop and start the flow's `bundle` (its `ability`, else the main ability) before the first step. |
+| `--no-wake` | Leave the screen as it is. By default it is turned on, a lock screen without a credential is swiped away, and it is kept on during the run (`power-shell timeout`, restored afterwards). |
+| `--device <serial>` | Target device serial. |
+| `--json` | Print the report: `ok`, `outcome` (`passed`, `diverged`, `error`), `range`, `steps` (`index`, `action`, `selector`, `ok`, `durationMs`, `target`, `usedFallback`, `screenshot`), `failedStep`, `reason`, `message`, `selector`, `screenshot`, `layout` (`windows`, `appOnScreen`, `lockScreen`, `keyboard`, `elements`, `elementCount`), `nearMatches`, `error`, `warnings`. |
+
+Exit codes: `0` every step ran, `1` the flow diverged, `2` it could not run (the flow file is invalid, a step range is out of bounds, no device, the lock screen needs a credential, `--launch` failed).
+
+```bash
+oniro-app replay login.json --launch
+oniro-app replay login.json --from 3 --step-timeout 5000 --screenshots shots/ --json
+```
+
+```text
+[0] wait type=Text,text=Flow probe  ok  0.9 s
+[1] inputText type=TextInput,hint=Your name  ok  2.6 s
+[2] click type=Button,text=Continue  FAILED  4.2 s
+Diverged at step 2 (not-found): No element matching type=Button,text=Continue appeared within 4000 ms.
+  screenshot: /tmp/oniro-replay-N0vlTn/failed-step-02.jpeg
+  near match: Button "Next" #continueBtn at 0.500,0.305 (differs in text=Continue)
+  on screen in com.example.flowprobe (3 element(s), keyboard up):
+    Text "Flow probe" #title at 0.500,0.169
+    TextInput "Ann" #nameInput at 0.500,0.235
+    Button "Next" #continueBtn at 0.500,0.305
+```
+
+#### `record` — record a flow from what is done on the device
+
+`record --out flow.json` runs uitest's own recorder (`uitest uiRecord record -l`) until Ctrl+C or `--for <ms>`, and turns what it logged into a flow file for `replay`. Act on the device by hand, or with `input` by coordinates (uitest records injected events too). Each touch becomes a step on the element under the finger in the layout on screen at that moment, with the most specific stable selector for it (`type` plus a unique `id`, `key`, `text`, `desc` or `hint`, `[n]` only when needed; exact `=` clauses), the touch point as `fallback`, and as `expect` an element that appeared after it (ids first, then new texts). Taps on the soft keyboard and typed keys collapse into one `inputText` step on the focused field, with the text read off the field afterwards; other keys, Back and Home become `keyEvent` steps.
+
+| Flag | Description |
+| --- | --- |
+| `--out <file>` | **Required.** Where to write the flow. |
+| `--for <ms>` | Stop after this long instead of waiting for Ctrl+C. |
+| `--bundle <bundle>` | The app being recorded (default: the foreground app when recording starts, as the recorder reports it). |
+| `--raw <dir>` | Also keep uitest's raw recording here: `record.csv`, its layout dumps, the recorder console, and `recording.json` (display, touch and layout times, the layouts before and after). For bug reports. |
+| `--no-wake` | Leave the screen as it is (by default it is woken, unlocked when there is no credential, and kept on while recording). |
+| `--device <serial>` | Target device serial. |
+| `--json` | Print `{ out, steps, events, warnings }`. |
+
+What uitest's recorder does on OpenHarmony (checked on API 26), and how `record` deals with it:
+
+- `uitest uiRecord record [-W true|false] [-l] [-c true|false]` writes one JSON object per line (despite the name) to `/data/local/tmp/record.csv`; `uitest uiRecord read` prints it. Pointer events carry `OP_TYPE` (`click`, `longClick`, `doubleClick`, `swipe`, `fling`, `drag`, `back`, `home`, `recent`), the touch points in pixels, the foreground bundle and ability, and the widget under the finger (`W1_ID`, `W1_Text`, `W1_Type`, `W1_BOUNDS`); key events carry KeyCode ids. With `-l` it dumps the layout to `/data/local/tmp/layout_<n>_<i>.json` for each event. It runs until SIGINT; `record` starts it in the background and stops it that way.
+- uitest only writes an event, hit-tests its widget and dumps its layout once the next touch has started (or 1.5 to 3 s later), so with a quick next action uitest's widget and layout already show the next screen (a tap on Continue is reported on the next page's list). `record` therefore follows the multimodal input service's hilog domain while recording for the time of every touch-down, and matches each touch to the last layout uitest wrote before it, by the files' modification times. When the touches and events do not line up it warns and falls back to event order; pausing about 3 s between actions then gives correct selectors.
+- While the recorder runs, `uitest dumpLayout` blocks (for every user of the device), so `dump layout`, `input --selector` and `screenshot --target` do not work until it stops; `input` by coordinates does.
+- The recorder has no replay of its own; `replay` is that.
+
+#### Flow files
+
+A flow is JSON, meant to be written and edited by hand:
+
+```json
+{
+  "version": 1,
+  "bundle": "com.example.flowprobe",
+  "ability": "EntryAbility",
+  "device": { "api": 26, "display": { "width": 1080, "height": 2400 } },
+  "steps": [
+    { "action": "wait", "selector": "type=Text,text=Flow probe", "note": "the start page is up" },
+    { "action": "inputText", "selector": "type=TextInput,hint=Your name", "text": "Ann" },
+    { "action": "click", "selector": "type=Button,text=Continue", "fallback": { "fx": 0.5, "fy": 0.305 }, "expect": "type=Text,text=Hello Ann" },
+    { "action": "swipe", "selector": "type=List,id=fruitList", "to": { "fx": 0.5, "fy": 0.3 } },
+    { "action": "click", "selector": "type=Text,text=Banana", "expect": "type=Text,text=Picked: Banana", "timeoutMs": 5000 },
+    { "action": "keyEvent", "key": "Back", "expect": "id=title" }
+  ]
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `version` | **Required.** `1`. |
+| `bundle` | The app the flow drives: `replay --launch` starts it, and a divergence where it is not on screen is `wrong-screen`. |
+| `ability` | The ability `--launch` starts (default: the bundle's main ability). |
+| `device` | Informational: the `api` level and `display` size the flow was recorded on. |
+| `steps[].action` | **Required.** `click`, `longClick`, `doubleClick`, `swipe`, `inputText`, `keyEvent`, or `wait`. |
+| `steps[].selector` | The element to wait for and act on, in the [selector syntax](#selectors-and-windows) (`type=Button,id=ok`, `text*=Sign`, `xpath=//Button[@text="OK"]`). Click-like actions and `swipe` need it or `fallback`; `wait` needs it; for `keyEvent` it is only waited for; `inputText` without it types into the focused field. |
+| `steps[].fallback` | `{ "fx", "fy" }` (0–1 fractions of the display): where to act when there is no selector, or with `replay --fallback` when it is not found. |
+| `steps[].text` / `steps[].clear` | `inputText`: the text to type (the field is tapped first); `clear` empties it first. |
+| `steps[].key` | `keyEvent`: as `input --key` (`Back`, `Home`, `Enter`, `Delete`, a KeyCode id, `Ctrl+A`, …). |
+| `steps[].to` / `steps[].speed` | `swipe`: the end point (`{ "fx", "fy" }`) from the element's center, and the velocity in px/s. |
+| `steps[].gone` | `wait`: wait until no element matches, instead of until one does. |
+| `steps[].expect` | A selector for an element that must be on screen after the step. |
+| `steps[].waitMs` | Pause after the action, before `expect` and the next step. |
+| `steps[].timeoutMs` | This step's timeout for its selector and `expect` (default `--step-timeout`). |
+| `steps[].note` | Free text, ignored. |
+
+Unknown fields are errors (so a typo such as `selecter` does not silently drop a selector), and every selector is parsed when the file is loaded; `replay` lists every problem with its path (`steps[2].selector: …`) and exits 2. Step indices are 0-based everywhere. Prefer `id` selectors where the app sets ids (a recorded flow uses them): they survive text changes that `text=` selectors flag as divergences.
+
 ### Agents
 
 #### `serve mcp` — the gate commands as MCP tools
@@ -849,9 +957,9 @@ Tools (the inputs are the command's flags in camelCase, with the same defaults; 
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target` / `--selector`, `dump windows`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `app verify`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target` / `--selector`, `dump windows`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `app verify`, `build`, `test`, `record`, `replay`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
-- **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. Set `ONIRO_DEBUG=1` to also print full stack traces.
+- **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. `test` and `replay` exit 1 when a case fails or the flow diverges, and 2 when they could not run. Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.
 
 ## Configuration
