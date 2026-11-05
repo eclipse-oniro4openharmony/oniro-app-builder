@@ -1,5 +1,313 @@
 # @oniroproject/core
 
+## 0.17.0
+
+### Minor Changes
+
+- 4379401: Features:
+
+  - New `api search <query...>`: a ranked search of what the SDK at one API level declares, read from its own typings:
+    the ArkTS API (`ets/api`, `ets/arkts`), the global ArkUI components and decorators (`ets/component`), with the kit
+    that re-exports each symbol (`ets/kits/@kit.*.d.ts`), and the Node-API headers (`node_api*.h`,
+    `js_native_api*.h`, `napi/*.h`). Each hit has the symbol, its kind (class, interface, function, method, property,
+    enum, namespace, component, decorator, macro, ...), kit, module, how to import it, `@since`, `@deprecated` with
+    `@useinstead`, `@syscap`, `@systemapi`, `file:line`, the declaration text and the first doc line. `--kit`,
+    `--kind`, `--lang`, `--limit`, `--no-deprecated`, `--no-systemapi`, `--json`.
+  - New `api show <symbol>`: an exact lookup (`NavPathStack.pushPathByName`, `router.pushUrl`, `@Local`) that exits 1
+    when the SDK does not declare the symbol, naming the other installed SDKs that do (with their `@since`) and the
+    closest names this SDK declares. `api index` builds or refreshes an index.
+  - The SDK is `--sdk`, `--api`, the project's `compileSdkVersion`, or the newest installed one. The index is built on
+    first use with the SDK's bundled TypeScript (about 3 s for API 23) and cached under `~/.oniro/cache`
+    (`ONIRO_CACHE_DIR`, config key `cacheDir`), rebuilt when the SDK is reinstalled.
+  - Core exports `loadApiIndex`, `buildApiIndex`, `searchApi`, `showApi`, `suggestApiSymbols`, `findApiInOtherSdks`,
+    `resolveApiSdk` and the `ApiEntry` and `ApiIndex` types.
+
+- 97dd96c: Features:
+
+  - New `app verify <hap> [--json]` (#24): runs the SDK's `hap-sign-tool verify-app`, then reports whether the
+    signature is valid, the certificate chain (leaf first) and its root, whether the HAP carries OpenHarmony
+    development material or a HarmonyOS certificate from AppGallery Connect (`Huawei CBG Root CA G2`), and the
+    profile's type, bundle name, apl, app-feature, device count, validity and days left. A HAP is invalid when it is
+    unsigned, its signature is rejected, a certificate or AGC profile has expired, the profile names another
+    certificate or bundle, or a HarmonyOS HAP carries OpenHarmony development material. Exits 0 valid, 1 invalid,
+    2 could not verify (no java or hap-sign-tool.jar).
+  - `sign --harmonyos` names the profile's type and expiry (#24):
+    `Signing configs ready for … (profile names 6 device(s), debug, valid until 2026-10-01 11:50 UTC)`. The
+    OpenHarmony `sign` and `sign --hap` name the profile type, apl and certificate expiry.
+  - Core exports `verifyHap`, `verifyHapExitCode`, `formatHapVerification`, `findHapSignTool`,
+    `parseProvisionProfile`, `describeProfileValidity`, `formatUtc` and `describeSigningMaterial`;
+    `readProvisionProfile` also returns the type, issuer, apl, app-feature, `notBefore` and the distribution
+    certificate; `generateSigningConfigs` returns a summary of the material instead of nothing;
+    `harmonyOsAutoSign`/`harmonyOsSignHap` return `profileType` and `notAfter`, and `signOpenHarmonyHap` `material`.
+
+- 96cdcc0: Features:
+
+  - `auth login` completes when the browser is not on the build host (#20). `--manual` (or `--no-browser`) does not
+    open a browser: it prints the URL, then takes the callback address the browser ends up on, pasted on stdin as the
+    whole URL or its query, through the same checks as a request to the loopback port. `--port <n>` listens on a fixed
+    port, so an `ssh -L <n>:127.0.0.1:<n>` tunnel can be set up beforehand. `--print-url` writes the URL alone to
+    stdout and `--json` writes `{"loginUrl","port","callbackUrl"}` then the account as JSON lines, so scripts need not
+    scrape stderr.
+  - Core: `session.login()` takes `port`, `openBrowser` and `pastedCallbacks` (`HarmonyOsLoginOptions`), and
+    `onLoginUrl` receives the port.
+
+- a8fac5f: Features:
+
+  - `build --json` prints one result object whether the build passes or fails (a failed build still exits 1):
+    `ok`, `exitCode`, `durationMs`, `failedTask`, `diagnostics`, `summary`, `discoveredHaps`, `warnings`, `error` and
+    `rawTail` (the last 200 lines of output, colour codes removed). Each diagnostic has `severity`, `source` (`arkts`,
+    `hvigor`, `native`, `ohpm` or `sdk`), `code`, `rule`, `message`, a project-relative `file`, `line`, `column` and the
+    hvigor `task`. hvigor prints the ArkTS block twice; each diagnostic is listed once.
+  - A failed build lists its errors on stderr, one per line, after hvigor's output.
+  - When the project uses kit symbols its SDK lacks but a newer installed SDK declares, the build names that API level
+    in an `sdk` diagnostic and in the error, instead of pointing at the full SDK (#22).
+  - Core exports `buildWithDiagnostics` (returns `ok: false` instead of throwing for a failed build or a missing SDK),
+    `BuildFailedError` (what `buildHap` now throws when ohpm or hvigor fails), `parseBuildOutput`,
+    `sdkTooOldDiagnostic` and `missingSdkSymbols`. `BuildHapResult` gains `diagnostics` and `summary`.
+
+  Fixes:
+
+  - A failed native build no longer gets the hint that hvigor cannot find the SDK: hvigor wraps every native failure
+    in its catch-all `00308018 Unknown Error`, which was read as a missing SDK.
+
+- 49e3592: Features:
+
+  - A failed build names the SDK it compiled against, e.g. `Built against HarmonyOS 5.1.0 (API 18) at
+~/command-line-tools/sdk.`, and `build --json` reports it as `sdk` (`runtimeOS`, `displayName`, `version`, `api`,
+    `path`), for a build that passed too (#22).
+  - When the ArkTS errors are missing properties or names (`Property '…' does not exist on type …`,
+    `Cannot find name '…'`) in code under `oh_modules/`, the build adds a `warning` `sdk` diagnostic, also in the
+    error. It names the dependency and the SDK and says the dependency may need a newer API level, with how to get
+    one: newer command-line tools for HarmonyOS, `sdk install` for OpenHarmony. It reads only the compiler messages.
+  - Core exports `resolveBuildSdk`, `describeBuildSdk`, `dependencyApiDiagnostic` and `ohModulesPackage`;
+    `BuildHapResult`, `BuildReport` and `BuildFailedError` gain `sdk`.
+
+- dbc01e0: Features:
+
+  - New `check arkts [project-dir]`: the SDK's own ArkTS type check and linter (what the build's `CompileArkTS` runs),
+    plus the ArkUI component-model and project rules hvigor enforces later in a build, in seconds and without hvigor,
+    a device or codelinter. It checks against the SDK the project compiles with (`compileSdkVersion`, or the HarmonyOS
+    SDK for a HarmonyOS project). `--files` checks only the files given, `--fix` applies the fixes it can verify and
+    reverts any that adds an error, `--json` prints `ok`, `completed`, `diagnostics` (the `build --json` shape, with
+    `source: "arkts-check"`), `fixed` and `summary`. Exits 0 when clean, 1 on an error, 2 when the checker could not
+    run. The checker is deveco-cli's `arkts-check.cjs` (MIT), adapted to take the SDK directory. Beyond upstream,
+    `--fix` adds the missing `export` when the imported file exports nothing at all ("File '...' is not a module"),
+    not only when it exports something else.
+  - `lint --engine arkts` runs `check arkts`.
+  - `lint` exits 2 when codelinter reports that its run was incomplete (for example with command-line tools of the
+    other flavour), since a clean report then says nothing; `--allow-incomplete` restores exit 0.
+  - Core exports `checkArkts`, `resolveArktsCheckSdk`, `parseArktsCheckOutput` and `arktsCheckerScript`, and ships
+    `vendor/deveco-cli/`.
+
+- 2c05d4c: Features:
+
+  - `cmdtools install --force` says what it replaces before deleting it (#25), e.g.
+    `Replacing command-line tools 5.1.0.840 (HarmonyOS 5.1.0, API 18, hvigor 5.18.5) with 6.1.1.280 (HarmonyOS 6.1.1,
+API 24, hvigor 6.24.2).`. Further lines say when hvigor changes major version, when the new release is older, and
+    how to go back. The final line names the installed release, and without `--force` the message names the release
+    already installed.
+  - `installCmdTools` returns `{ path, installed, previous? }` with both releases' `CmdToolsInfo` (version, flavour,
+    SDK, tool versions), and core exports `describeReplacement`.
+
+- 9a2d6c6: Features:
+
+  - New `doctor [project-dir]`: one verdict on whether this machine can build, check, sign, install and test, with a
+    fix for each problem. It checks node and java, the SDK the project compiles with (`--fix` installs it), that the
+    command-line tools are a complete install (#16) and of the project's flavour, a `check arkts` self-test, hdc and a
+    reachable device at the project's API, the signing material, and free disk space. `--json` adds the versions in
+    use (tools, SDK, java, hdc, device API), so a change between two runs shows (#25). Exits 1 when a check fails.
+  - Core exports `runDoctor` and its checks, and `resolveProjectSdkDir`.
+
+- d860755: Features:
+
+  - Emulator pool: `emulator start --instance <n>` (1..99) runs pool instance `n`, its own QEMU with `run.sh`'s
+    command line on qcow2 copy-on-write overlays of the bundled images (`<emulator dir>/instances/<n>/`), so several
+    emulators run side by side, each with its own `/data`, and the bundled images are only read. Ports are bound to
+    127.0.0.1 at the instance's number: hdc `55555+n`, VNC display `n` (`5900+n`), telnet serial `4444+n`; a taken
+    port fails the start, naming it. Headless by default (`--window` for SDL), `--memory` (default `2048M`), `--smp`
+    (default 2), `--resolution`, `--fresh` (discard the overlays: a factory reset), `--boot-timeout`, `--qemu`,
+    `--accel`, `--json`.
+  - `emulator start --wait-ready <s>` waits until the guest reports `bootevent.boot.completed=true`, for pool
+    instances and the default emulator alike. It connects with `hdc tconn` only and never restarts the hdc server.
+  - `emulator status` lists every instance (the default emulator as 0) with a health code: `stopped`, `booting`,
+    `ready`, `hdc-lost` (was ready, hdc can no longer reach it), `stuck` (not ready `--boot-timeout` seconds after
+    launch). `--json` adds an `instances` array to the existing fields; `--instance <n>` reports one instance.
+  - `emulator stop --instance <n>` stops only that instance's QEMU (by its recorded PID) and drops it from hdc;
+    `--discard` also deletes its overlays. `emulator stop` without `--instance` behaves as before.
+  - The default emulator (`run.sh`) and pool instances share the base images, which `run.sh` opens read-write, so
+    each refuses to start while the other runs. `emulator status`'s `running` no longer counts pool instances.
+  - Core exports `startPoolInstance`, `stopPoolInstance`, `getPoolInstanceStatus`, `listPoolInstanceStatuses`,
+    `waitPoolInstanceReady`, `probeEmulatorBoot`, `classifyEmulatorHealth`, `poolInstancePorts`, `buildPoolQemuArgs`,
+    `emulatorAccelArgs` and the `EmulatorHealth`, `EmulatorInstanceStatus` and `PoolInstanceState` types;
+    `EmulatorStatus` gains `instances`, and `StartEmulatorOptions` gains `waitReadySeconds`.
+
+- 1ab2486: Features:
+
+  - The HarmonyOS SDK is no longer invisible (#21). `cmdtools status` prints what the tools are, e.g.
+    `Installed 6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2)`, then the SDK they bundle (name, API level, build,
+    path) and the hvigor version; `--json` adds `version`, `sdk` and `tools` (hvigor, ohpm, codelinter, hstack).
+  - `sdk list` says HarmonyOS SDKs come with the command-line tools (`cmdtools`) or DevEco Studio and lists the one a
+    HarmonyOS build would use, with where it came from; `--json` appends it as a `flavour: "HarmonyOS"` entry and marks
+    the others `flavour: "OpenHarmony"`.
+  - The `cmdtools` description says it supplies the HarmonyOS SDK, and "No HarmonyOS SDK found" names
+    `oniro-app cmdtools install`.
+  - Core exports `readCmdToolsInfo`, `describeCmdTools`, `getHarmonyOsSdkListing` and `readSdkPkg`. `CmdToolsStatus`
+    gains `version`, `sdk` and `tools`; `HarmonyOsSdk` gains `apiVersion` and `source`.
+
+- 9d90668: Features:
+
+  - `dump layout --summary`: per window, and in total, the element, content, clickable and text-node counts.
+  - `dump layout --diff <baseline.json>`: compare the live layout with a saved `dump layout`. Elements pair within a
+    window by id, key, label and type, then type with overlapping boxes; the result lists each pair's IoU and changed
+    fields, the `missing` and `extra` elements, and a 0-1 `similarity`.
+  - `screenshot --diff <baseline.jpeg> [--json]`: pHash and dHash distance, the share of pixels that changed, the
+    contact sheet's mean change, and a `same` verdict.
+  - `app launch --smoke` and `app apply --smoke` (`--smoke-delay <ms>`, `--smoke-screenshot <file>`): wake the
+    screen, launch, wait for the process, screenshot after the delay, and report
+    `{ smoke: { passed, failures, pid, alive, blankScreen, blankScore, screenshot, crash } }`. Exits 1 when the
+    process did not start or died, a crash was recorded since the launch (`crash` holds the `logs crash` verdict),
+    or the screen is blank (the deveco-cli smoke-inspector pattern).
+  - Core exports `summarizeLayout`, `diffLayouts`, `parseLayoutBaseline`, `boxIoU`, `smokeCheck` (with an optional
+    `crashProbe` hook for crash detection) and `smokeVerdict`, and an image module: `pHash`, `dHash`,
+    `hammingDistance`, `compareImages`, `analyzeBlank` and their helpers, over greyscale pixels the caller decodes.
+
+- 1872e01: Features:
+
+  - New `logs crash`: fetches an app's newest faultlog from the device and says what happened. It classifies the log as
+    `cpp_crash`, `js_crash`, `app_freeze`, `sample_stack` or `unknown` with a confidence, and reports the reason, the top
+    frame, the first frame in the project's own code with `file`, `line` and `column` (for a native crash, the ArkTS
+    code that called into it), the JS error name, message and stack, the native frames (library, symbol, build id) and,
+    for a freeze, the binder chain and any deadlock. `--bundle` defaults to the project in the current directory,
+    `--since` takes seconds or an ISO time, `--wait` polls until hiview has written the log, `--path` analyses a local
+    file, and `--json` prints the verdict. The fetched log is saved under `--output` (`~/.oniro/faultlogs`).
+  - `logs crash` also reads faultloggerd's crash records in `/data/log/faultlog/temp`. Some builds never turn an app's
+    native crash into a faultlog (hiview rejects processdump at `/root/system/bin/processdump`), so the record is the
+    only trace of it.
+  - Core exports `latestCrash` (the newest fault of a bundle since a time, or null), `analyzeFaultLog`,
+    `classifyFaultLog`, `listFaultLogs`, `readFaultLog`, the per-kind parsers and the frame and binder-chain helpers.
+    The classifier and parsers are adapted from deveco-cli's `faultlog/` module (MIT); they also read the frame form
+    devices print, `at f entry (file:line:col)`, which upstream's patterns miss.
+
+- f13edd8: Features:
+
+  - New `perf trace`: captures a `hitrace` trace on the device while the app cold-launches (`--launch`), a flow is
+    replayed through the `replay` engine (`--flow <file>`), or for a fixed time (`--for <ms>`), pulls it and
+    summarises it for the bundle: its UI frames (one `ReceiveVsync` slice on the main thread each, timed from the
+    vsync, janky when longer than one refresh interval) with `total`, `janky`, `jankRate`, `p50Ms`, `p95Ms`, `maxMs`,
+    `missedVsyncs` and the longest frames; the refresh rate from the vsync period; the cold start from `aa`'s
+    `StartAbility` to RenderService compositing the first frame (`coldMs`, `firstFrameMs`, `processMs`); main-thread
+    busy time (CPU time with `--categories …,sched`); and RenderService's own jank reports per scene.
+    `--max-jank-rate <r>` and `--max-startup-ms <ms>` make it a gate: exit 0 when the capture completed, 1 when a
+    threshold is exceeded (or the flow diverged), 2 when it could not capture. `--hiperf` also samples the app's
+    process with `hiperf` and lists its top functions. `--out`, `--categories`, `--buffer-kb`, `--bundle`,
+    `--ability`, `--no-wake`, `--json`.
+  - New `perf summary <trace>`: the same summary and thresholds for a trace taken earlier.
+  - New `perf_trace` tool in `serve mcp` (left out with `--read-only`: it launches the app and replays flows).
+  - Core exports `perfTrace`, `evaluatePerfGate`, the hitrace text parser (`parseTraceText`, `parseTraceFile`,
+    `TraceParser`), `summarizeTrace`, `parseHiperfReport` and their helpers. `trace_streamer` is not used.
+
+- 8997e6e: Features:
+
+  - New `replay <flow.json>`: runs a flow file (hand-written or recorded) on the device through the same path as
+    `input --selector`, waiting for each step's selector before acting and for its `expect` after. It stops at the
+    first step that fails and reports the step, the reason (`not-found`, `expect-not-found`, `wrong-screen`,
+    `ambiguous`, `covered`, `action-failed`), a screenshot, the app's elements on screen, and the elements that match
+    all but one clause of the selector. `--from` / `--to`, `--step-timeout`, `--screenshots <dir>` (one per step),
+    `--fallback` (act on the recorded point when the selector is not found), `--launch`, `--no-wake`, `--json`. Exits
+    0 when every step ran, 1 when the flow diverged, 2 when it could not run (invalid flow file, no device).
+  - New `record --out flow.json`: runs uitest's recorder (`uitest uiRecord record -l`) until Ctrl+C or `--for <ms>`
+    and writes a flow: each touch becomes a step on the element under the finger with the most specific stable
+    selector for it, the touch point as fallback, and an `expect` element that appeared after it; soft-keyboard taps
+    and typed keys become one `inputText` step per field. uitest only reports an event once the next touch has
+    started, so its own widget and layout often show the next screen; `record` follows the multimodal input hilog
+    for the touch-down times and matches each touch to the layout on screen at that moment. `--raw <dir>` keeps the
+    raw recording.
+  - Flow files are versioned JSON (`version: 1`, `bundle`, `ability`, `device`, `steps` with `action`, `selector`,
+    `fallback`, `text`, `key`, `to`, `expect`, `waitMs`, `timeoutMs`, …), validated with every problem listed by
+    path; the format is documented in the CLI README.
+  - Core exports `replayFlow`, `recordFlow`, `flowFromRecording`, `parseFlow`, `readFlowFile`, `formatFlow`, the
+    `Flow` types and the pure helpers behind them.
+
+- ff5bb28: Features:
+
+  - New `screens [project-dir]`: a static inventory of a project's pages and routes, from the sources of every module
+    in `build-profile.json5`, with no build, SDK or device. Pages are the `@Entry` pages of `main_pages.json` (and
+    `@Entry({ routeName })` named routes) and the `NavDestination`s registered in a route map (`routerMap`) or in a
+    `.navDestination(builder)` builder that dispatches on the route name; unlisted `@Entry` structs and unregistered
+    `NavDestination` structs are listed as unregistered. Each page has its content-node count (the component calls it
+    renders through its custom components and `@Builder`s, layout containers excluded) and its routes out. Routes are
+    the `router` `pushUrl`/`replaceUrl`/`pushNamedRoute`/`replaceNamedRoute` and `NavPathStack`
+    `pushPath*`/`replacePath*`/`pushDestination*` call sites and `loadContent`, with literal, constant and local
+    `RouterOptions` targets resolved. Placeholders are `TODO`/`FIXME` comments, placeholder-like text in code and
+    `string.json` (`placeholder`, `lorem ipsum`, `coming soon`, `Hello World`, ...), empty `build()`s and pages with no
+    content. Prints tables, or the inventory with `--json`. Exits 0, or 1 when the project cannot be read.
+  - Core exports `inventoryScreens`, and `checkScreensAgainstSpec`, the G2 gate ("every spec screen has a page with at
+    least k content nodes and every spec route has a push call site") as a pure function of the inventory, plus
+    `pagesMatching`, `scanEts` and `LAYOUT_COMPONENTS`.
+
+- 8a6f692: Features:
+
+  - `--selector <expr>` on `input`, `wait` (including `--gone`), `screenshot` (crops to the element) and `dump layout`
+    (lists only the matches, numbered), as an alternative to `--target` / `--target-id` / `--target-type`, which keep
+    working unchanged. Attribute selectors: comma-separated `key<op>value` clauses over `text`, `desc`, `hint`, `id`,
+    `key`, `type`, `enabled`, `focused`, `checked`, `selected`, `visible`, `clickable`, `longClickable`, `checkable`
+    and `scrollable`, with `=`, `*=` (contains), `^=` (prefix), `$=` (suffix) and `/=` (regex, `/flags`), and a `[n]`
+    suffix (0-based, `[-1]` / `[last]` from the end) that picks one match of the list `dump layout --selector` prints.
+    `xpath=<expr>` evaluates a documented XPath subset over the same tree: `/`, `//`, `*`, `.`, `..`, `[@attr="v"]`,
+    `[@attr]`, `!=`, `contains`, `starts-with`, `ends-with`, `not`, `text()`, `and` / `or`, `[n]`, `[last()]`,
+    `[position()<n]` and `(path)[n]`. Anything outside the language is an error, not an empty match. Adapted from
+    deveco-cli (MIT).
+  - `--window <id>` on `dump layout`, `input`, `wait` and `screenshot` restricts dumping, selection and the screenshot
+    to one window. The layout is still dumped whole, so overlays from other windows still mark elements covered.
+  - `dump windows` lists every window from `hidumper -s WindowManagerService` (id, name, pid, type, z-order,
+    rectangle, focus); `--json` for JSON.
+  - `dump layout --flat` window headers now carry the window id (`[window 92 com.example.app]`), and two windows of the
+    same bundle get a header each. The JSON tree carries `windowId` on each window's root and `hidden` on components
+    with `visible: false`; a structural container kept for its id or click handler keeps its type (`Column`, `Row`, …).
+  - Core exports `parseSelector`, `matchSelector`, `selectorFor` (the most specific stable selector for a recorded
+    element, for record/replay), `formatSelector`, `parseXPath`, `evaluateXPath`, `findVisibleMatch`,
+    `selectableTree`, `listLayoutWindows`, `windowSubtree`, `rawWindowSubtree`, `listWindows` and `parseWindowList`.
+    `pickTarget`, `findLayoutNodes`, `locateTarget`, `performInput` and `waitForTarget` accept a parsed selector
+    (`ElementQuery`), and `dumpLayout`, `locateTarget`, `performInput` and `waitForTarget` take `windowId`.
+
+- 2a77371: Features:
+
+  - `oniro-app test` builds a module's main and `ohosTest` HAPs, installs both, runs the suite with `aa test` and
+    prints one line per case, with the message and the test-file location of a failure. It exits 0 when every case
+    passed, 1 when one failed or threw, and 2 when the run did not complete (build failed, HAP missing, test module not
+    found, no case ran, timeout, no device). `--json` prints the cases (with the runner's raw status code), the summary,
+    the runner's result code, the app's hilog lines during the run, and a failed build's diagnostics. `--class`,
+    `--timeout`, `--run-timeout`, `--no-build`, `--module`, `--product` and `--device` select what runs where.
+  - Before the run the screen is turned on, a lock screen without a credential is swiped away, and the screen is kept on
+    until the run ends (`--no-wake` leaves it alone).
+  - Core exports `runTests`, `parseTestOutput`, `aaTestCommand`, `testHapPath`, `readTestModuleName`,
+    `decideOutcome`, `isTestHap`, `wakeAndUnlock`, `holdScreenOn`, `parsePowerState` and `isLockScreenShown`.
+
+  Fixes:
+
+  - `discoverHaps` grouped a module's test HAP (`entry-ohosTest-signed.hap`) with its own HAPs and, the test HAP being
+    newer, `app apply` and `pickHap` chose it over the app. Test HAPs are now left out.
+
+### Patch Changes
+
+- 8d6a262: Fixes:
+
+  - `build` no longer silently ships an OpenHarmony-signed HAP for a HarmonyOS product (#19). When the product's
+    `runtimeOS` is HarmonyOS and its signingConfig lacks `type: "HarmonyOS"` (the material a plain `sign` writes), the
+    build still passes but warns on stderr, and `build --json` adds a `signing` warning diagnostic naming
+    `oniro-app sign --harmonyos`. The mirror case, HarmonyOS material on an OpenHarmony product, warns too.
+  - Core exports `signingMismatch`; `DiagnosticSource` gains `signing`.
+
+- 449bbe3: Fixes:
+
+  - `cmdtools install` no longer leaves the install directory half-written when it fails part-way (a full disk,
+    say) (#16). The extracted tools are staged inside the install directory and swapped in only once complete; a
+    failure before the swap leaves the existing tools untouched, one during it rolls them back, and a failed first
+    install leaves no directory behind. A successful install replaces the tools' own entries (`bin`, `sdk`, `hvigor`,
+    `tool`, … and whatever the archive brings) outright, whatever an earlier attempt or an older version left there;
+    anything else in the directory is not the tools' and stays. If the rollback itself fails, the previous tools are
+    kept in a directory the error names, never deleted.
+
 ## 0.16.0
 
 ### Minor Changes
