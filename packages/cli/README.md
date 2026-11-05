@@ -785,10 +785,10 @@ Tools (the inputs are the command's flags in camelCase, with the same defaults; 
 | `test` | `test --json` | `project`, `module`, `product`, `class`, `timeout`, `runTimeout`, `build`, `wake`, `mode`, `deps`, `device` |
 | `apply` | `app apply --json` | `project`, `hap`, `bundle`, `module`, `installedHap`, `system`, `allowUninstall`, `smoke`, `smokeDelay`, `smokeScreenshot`, `device` |
 | `launch` | `app launch --smoke --json` | `project`, `bundle`, `module`, `ability`, `smoke`, `smokeDelay`, `smokeScreenshot`, `device` |
-| `dump_layout` | `dump layout` | `bundle`, `raw`, `flat`, `summary`, `diff`, `output`, `project`, `device` |
-| `input` | `input` | `type` (required), `target`, `targetId`, `targetType`, `targetIndex`, `fx`, `fy`, `fx2`, `fy2`, `x`, `y`, `x2`, `y2`, `speed`, `key`, `text`, `clear`, `hideKeyboard`, `device` |
-| `screenshot` | `screenshot --max-dim` | `output`, `grid`, `maxDim` (default 1024), `crop`, `target`, `targetId`, `targetType`, `targetIndex`, `contactSheet`, `burst`, `interval`, `diff`, `project`, `device` |
-| `wait` | `wait --json` | `log`, `since`, `boot`, `bundle`, `pidOf`, `domain`, `target`, `targetId`, `targetType`, `gone`, `interval`, `timeout`, `device` |
+| `dump_layout` | `dump layout` | `bundle`, `raw`, `flat`, `summary`, `diff`, `output`, `selector`, `window`, `project`, `device` |
+| `input` | `input` | `type` (required), `target`, `targetId`, `targetType`, `targetIndex`, `selector`, `window`, `fx`, `fy`, `fx2`, `fy2`, `x`, `y`, `x2`, `y2`, `speed`, `key`, `text`, `clear`, `hideKeyboard`, `device` |
+| `screenshot` | `screenshot --max-dim` | `output`, `grid`, `maxDim` (default 1024), `crop`, `target`, `targetId`, `targetType`, `targetIndex`, `selector`, `window`, `contactSheet`, `burst`, `interval`, `diff`, `project`, `device` |
+| `wait` | `wait --json` | `log`, `since`, `boot`, `bundle`, `pidOf`, `domain`, `target`, `targetId`, `targetType`, `selector`, `window`, `gone`, `interval`, `timeout`, `device` |
 | `logs_crash` | `logs crash --json` | `bundle`, `since`, `wait`, `path`, `output`, `project`, `device` |
 | `screens` | `screens --json` | `project` |
 | `api_search` | `api search --json` | `query` (required), `kit`, `kind[]`, `lang`, `limit`, `deprecated`, `systemapi`, `api`, `sdk`, `project`, `rebuild` |

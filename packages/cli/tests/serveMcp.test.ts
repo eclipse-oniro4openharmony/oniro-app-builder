@@ -192,10 +192,16 @@ describe('tool selection', () => {
   it('every tool takes the same target inputs where it takes one', () => {
     for (const name of ['input', 'screenshot', 'wait']) {
       const props = ALL_TOOLS.find((t) => t.name === name)!.inputSchema.properties!;
-      expect(Object.keys(props)).toEqual(expect.arrayContaining(['target', 'targetId', 'targetType']));
+      expect(Object.keys(props)).toEqual(expect.arrayContaining(['target', 'targetId', 'targetType', 'selector', 'window']));
     }
+    const dumpProps = ALL_TOOLS.find((t) => t.name === 'dump_layout')!.inputSchema.properties!;
+    expect(Object.keys(dumpProps)).toEqual(expect.arrayContaining(['selector', 'window']));
     expect(selectorFromArgs({ target: 'OK' })).toEqual({ text: 'OK', id: undefined, type: undefined });
     expect(selectorFromArgs({})).toBeUndefined();
+    // The selector string is parsed by the CLI's own rules.
+    expect(selectorFromArgs({ selector: 'type=Button,text*=Sign[1]' })).toMatchObject({ raw: 'type=Button,text*=Sign[1]' });
+    expect(() => selectorFromArgs({ selector: 'type=Button', target: 'OK' })).toThrow(/either --selector or --target/);
+    expect(() => selectorFromArgs({ selector: 'type=Button', targetIndex: 1 })).toThrow(/append \[n\]/);
   });
 });
 
@@ -297,6 +303,13 @@ describe('tools over mocked core', () => {
     expect(core.performInput).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'click', target: { text: 'OK', id: undefined, type: undefined }, targetIndex: 1, clear: false }),
     );
+  });
+
+  it('input forwards a selector and a window', async () => {
+    core.performInput.mockResolvedValue({ x: 200, y: 300, keyboardHidden: false });
+    await call(await initialized(), 'input', { type: 'click', selector: 'xpath=//Button[@text="OK"]', window: 97 });
+    const opts = core.performInput.mock.calls.at(-1)![0];
+    expect(opts).toMatchObject({ type: 'click', windowId: 97, target: { raw: 'xpath=//Button[@text="OK"]' } });
   });
 
   it('logs_crash reports no crash as a result, not an error', async () => {
