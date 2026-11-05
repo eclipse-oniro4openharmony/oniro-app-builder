@@ -66,6 +66,17 @@ describe('hitrace text parser', () => {
     expect(m.threads.get(100)).toEqual({ comm: 'ample.perfprobe', pid: 100 });
   });
 
+  it('counts main-thread CPU from sched_switch without a tgid column', () => {
+    const m = parseTraceText(
+      [
+        '          <idle>-0     [001] d..2. 20.000000: sched_switch: prev_comm=swapper/1 prev_pid=0 prev_prio=120 prev_state=R ==> next_comm=ample.perfprobe next_pid=100 next_prio=120',
+        ' ample.perfprobe-100   [001] d..2. 20.004000: sched_switch: prev_comm=ample.perfprobe prev_pid=100 prev_prio=120 prev_state=S ==> next_comm=swapper/1 next_pid=0 next_prio=120',
+      ].join('\n'),
+    );
+    expect(m.schedSwitchCount).toBe(2);
+    expect(m.mainThreadCpuMs.get(100)).toBeCloseTo(4, 6);
+  });
+
   it('keepSlice drops what the summary does not need', () => {
     const text = [
       mark('ample.perfprobe', 100, 100, 1.0, 'B|100|H:ReceiveVsync now:1'),

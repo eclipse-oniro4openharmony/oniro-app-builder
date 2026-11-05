@@ -323,7 +323,8 @@ export function summarizeTrace(model: TraceModel, opts: SummarizeTraceOptions): 
     // A relaunch leaves two: the launched one when we launched, else the one that drew the most.
     const score = (p: number): number =>
       (opts.launched && model.slices.some((s) => s.pid === p && SPAWN_RE.test(s.name)) ? 1e9 : 0) + appFrames(model, p).length;
-    pid = [...candidates].sort((a, b) => score(b) - score(a))[0]!;
+    const scores = new Map(candidates.map((p) => [p, score(p)]));
+    pid = [...candidates].sort((a, b) => scores.get(b)! - scores.get(a)!)[0]!;
     notes.push(`Several processes of ${opts.bundle} in the trace (${candidates.join(', ')}); summarised ${pid}.`);
   }
   if (pid === null) notes.push(`No process of ${opts.bundle} in the trace.`);
