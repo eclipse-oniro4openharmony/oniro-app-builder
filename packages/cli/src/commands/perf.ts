@@ -17,6 +17,7 @@ import {
   type TraceSummary,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+import { withInterrupt } from '../lib/interrupt.js';
 import { projectBundle } from '../lib/crashReport.js';
 
 interface TraceOpts {
@@ -181,9 +182,10 @@ export function registerPerfCommand(program: Command): void {
       let report: PerfTraceReport;
       try {
         const flow = opts.flow ? readFlowFile(path.resolve(opts.flow)) : undefined;
-        report = await perfTrace({
+        report = await withInterrupt(logger, 'stopping the trace', (abortSignal) => perfTrace({
           config,
           logger,
+          abortSignal,
           deviceSerial: opts.device,
           bundle: opts.bundle ?? flow?.bundle ?? projectBundle(process.cwd()),
           ability: opts.ability,
@@ -200,7 +202,7 @@ export function registerPerfCommand(program: Command): void {
           bufferKb: opts.bufferKb,
           hiperf: opts.hiperf,
           wake: opts.wake,
-        });
+        }));
       } catch (err) {
         report = emptyReport(opts.bundle ?? '', (err as Error).message);
       }
