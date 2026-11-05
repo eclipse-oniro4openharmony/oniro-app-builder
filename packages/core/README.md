@@ -282,6 +282,15 @@ Pure functions over decoded greyscale pixels (`GreyImage`: `{ width, height, dat
 | `resolveArktsCheckSdk` | `(config, projectDir, logger?) => ArktsCheckSdk` | The SDK directory the check loads: `<sdk home>/<compileSdkVersion>` for OpenHarmony, `default/openharmony` plus `default/hms/ets` of the located HarmonyOS SDK for HarmonyOS. |
 | `parseArktsCheckOutput` / `arktsCheckerScript` | — | Read the checker's JSON; the path of the vendored `arkts-check.cjs`. |
 
+### Screens
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `inventoryScreens` | `(ScreensOptions) => ScreensInventory` | Static page and route inventory of every module (`oniro-app screens`): `pages` (`@Entry` pages from `main_pages.json` and `routeName`, `NavDestination`s from route maps and `.navDestination()` builders; `name`, `module`, `file`, `line`, `component`, `entry`, `kind`, `registered`, `contentNodes`, `routesOut`), `routes` (`router` and `NavPathStack` push/replace call sites and `loadContent`; `from`, `to`, `file`, `line`, `via`, `dynamic`), `placeholders` (`TODO`/`FIXME`, placeholder text, empty `build()`, pages without content), `warnings`. Synchronous, no SDK. Throws `OniroError` when the project cannot be read. |
+| `checkScreensAgainstSpec` | `(inventory, { screens, routes, minContentNodes }) => ScreensSpecReport` | The G2 gate as a pure function of the inventory: every spec screen has a page with at least `minContentNodes` content nodes (per-screen override), every spec route (`{ from?, to }`) a push or replace call site. Returns `{ ok, screens, routes, failures }`, the matching page and call site for each. Names match a page's route name, its last path segment or its component, ignoring case. |
+| `pagesMatching` | `(inventory, name) => ScreenPage[]` | The pages a spec name refers to, by that rule. |
+| `scanEts` / `LAYOUT_COMPONENTS` | — | The ArkTS token scanner (comments, strings, templates, regex literals, matched brackets, declarations with decorators) the inventory uses; the components that do not count as content. |
+
 ### Doctor
 
 | Export | Signature | Description |

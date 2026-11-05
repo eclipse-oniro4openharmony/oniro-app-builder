@@ -1,0 +1,4 @@
+{
+  app: { products: [{ name: 'default', compileSdkVersion: 20, runtimeOS: 'OpenHarmony' }] },
+  modules: [{ name: 'entry', srcPath: './entry' }],
+}

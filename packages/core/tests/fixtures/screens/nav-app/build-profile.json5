@@ -1,0 +1,10 @@
+{
+  // Two modules: the entry HAP and a feature HSP whose pages come from a route map.
+  app: {
+    products: [{ name: 'default', compileSdkVersion: 20, compatibleSdkVersion: 20, runtimeOS: 'OpenHarmony' }],
+  },
+  modules: [
+    { name: 'entry', srcPath: './entry', targets: [{ name: 'default', applyToProducts: ['default'] }] },
+    { name: 'feature', srcPath: './feature' },
+  ],
+}

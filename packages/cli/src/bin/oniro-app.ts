@@ -20,6 +20,7 @@ import { registerLintCommand } from '../commands/lint.js';
 import { registerTestCommand } from '../commands/test.js';
 import { registerCheckCommand } from '../commands/check.js';
 import { registerDoctorCommand } from '../commands/doctor.js';
+import { registerScreensCommand } from '../commands/screens.js';
 import { registerInputCommand } from '../commands/input.js';
 import { registerLogsCommand } from '../commands/logs.js';
 import { registerHdcCommand } from '../commands/hdc.js';
@@ -60,6 +61,7 @@ function buildProgram(): Command {
   registerLintCommand(program);
   registerCheckCommand(program);
   registerDoctorCommand(program);
+  registerScreensCommand(program);
   registerTestCommand(program);
   registerInputCommand(program);
   registerLogsCommand(program);

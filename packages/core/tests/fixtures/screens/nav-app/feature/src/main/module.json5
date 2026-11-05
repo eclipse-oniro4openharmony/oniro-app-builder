@@ -1,0 +1,8 @@
+{
+  module: {
+    name: 'feature',
+    type: 'shared',
+    deviceTypes: ['default'],
+    routerMap: '$profile:route_map',
+  },
+}
