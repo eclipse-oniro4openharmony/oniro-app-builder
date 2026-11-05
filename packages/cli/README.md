@@ -217,6 +217,35 @@ With `--json`, stdout gets one object whether the build passes or fails, and a f
 | `--install-sdk` | Install the missing OpenHarmony SDK the project compiles against, then build. |
 | `--json` | Print the result as one JSON object, described above, whether the build passes or fails. |
 
+#### `test` — run the module's ohosTest suite on the device
+
+`test [project-dir]` (defaults to the current directory) builds the module's main HAP and its test HAP (`hvigorw … -p module=entry@ohosTest`), installs the main HAP the way `app apply` does and the test HAP after it, runs the suite with `aa test -b <bundle> -m <test module> -s unittest OpenHarmonyTestRunner`, and prints one line per case:
+
+```text
+FAIL ActsAbilityTest > listHasItems (2 ms)
+    expect 0 equals 3
+    at entry/src/ohosTest/ets/test/Ability.test.ets:26:17
+PASS IndexTest > tapShowsWelcome (656 ms)
+4 run: 3 passed, 1 failed, 0 errors, 0 ignored.
+```
+
+Exits **0** when every case passed, **1** when a case failed (an assertion, runner code -2) or threw (-1), and **2** when the run itself did not complete: the build failed (its diagnostics are listed, as for `build`), a HAP is missing, the install failed, the runner did not find the test module, no case ran, the run timed out, or there is no device. The test module (`entry_test` in the templates, read from `src/ohosTest/module.json5`) stays installed. Before the run the screen is turned on, a lock screen without a credential is swiped away, and the screen is kept on until the run ends; a lock screen that asks for a credential is reported as a warning, since UI tests cannot get past it.
+
+| Flag | Description |
+| --- | --- |
+| `--module <module>` | Module whose `src/ohosTest` suite runs (default `entry`). |
+| `--product <product>` | hvigor product (default `default`). |
+| `--class <filter>` | Run only `Suite`, `Suite#case`, or several of them joined by commas. |
+| `--timeout <ms>` | Per-case timeout passed to the runner (default 15000). |
+| `--run-timeout <ms>` | Wall-clock limit for the whole run (default 600000); `aa test` can hang when the app dies. |
+| `--no-build` | Use the HAPs already built (`<module>/build/<product>/outputs/{default,ohosTest}`). |
+| `--no-wake` | Leave the screen as it is. |
+| `--mode <mode>` / `--no-deps` | As for `build`. |
+| `--device <serial>` | Target device serial. |
+| `--json` | Print the report: `ok`, `outcome` (`passed`, `failed`, `runner-error`), `tests` (`suite`, `name`, `status`, the runner's raw `statusCode`, `durationMs`, `message`, `stack`), `summary` (`run`, `pass`, `fail`, `error`, `ignore`), `resultCode`, `resultMessage`, `reportCode`, `bundle`, `testModule`, `haps`, `log` (the app's hilog lines during the run), `warnings`, `error`, `diagnostics` and `failedTask` (for a failed build), `rawTail`. |
+
+`build` and `app install`/`app apply` leave test HAPs (`*-ohosTest-*.hap`) out of the HAPs they pick for a module.
+
 #### `lint` — run the OpenHarmony codelinter
 
 `lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0, although codelinter itself exits 1 for them. When codelinter says its report is incomplete, for example because the command-line tools' flavour (see `cmdtools status`) does not match the project's `runtimeOS`, a warning on stderr explains it: treat the counts as a lower bound.
@@ -456,7 +485,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `app apply`, `build`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.

@@ -27,6 +27,16 @@ function moduleOfHap(hapFileName: string): string {
   return dash > 0 ? hapFileName.slice(0, dash) : hapFileName.replace(/\.hap$/i, '');
 }
 
+/**
+ * A module's test HAP (`<module>-ohosTest-{signed,unsigned}.hap`, built from
+ * `src/ohosTest`). Its filename starts with the module name, so without this it
+ * would be grouped with the module's own HAPs, and, being built last by
+ * `oniro-app test`, picked over them for install.
+ */
+export function isTestHap(hapFileName: string): boolean {
+  return /-ohosTest-(?:un)?signed\.hap$/i.test(hapFileName);
+}
+
 /** A DevEco app project root: it holds `AppScope/app.json5` (a module folder does not). */
 function isAppProjectRoot(dir: string): boolean {
   return fs.existsSync(path.join(dir, 'AppScope', 'app.json5'));
@@ -34,7 +44,8 @@ function isAppProjectRoot(dir: string): boolean {
 
 /**
  * Walk a project's build outputs and group `*-signed.hap` / `*-unsigned.hap`
- * by build module name (parsed from the HAP filename). Skips `node_modules` /
+ * by build module name (parsed from the HAP filename). Test HAPs
+ * (`*-ohosTest-*.hap`, see {@link isTestHap}) are left out. Skips `node_modules` /
  * `oh_modules` / `.git`, and, when `projectDir` is an app project root, any
  * other app project nested inside it, whose HAPs belong to another app.
  * Ported from the proven MCP `findHaps`, extended with per-module grouping so
@@ -57,7 +68,7 @@ export async function discoverHaps(opts: DiscoverHapsOptions): Promise<Record<st
         if (e.name === 'node_modules' || e.name === 'oh_modules' || e.name === '.git') continue;
         if (skipNestedProjects && isAppProjectRoot(full)) continue;
         await walk(full, depth + 1);
-      } else if (e.isFile() && e.name.endsWith('.hap')) {
+      } else if (e.isFile() && e.name.endsWith('.hap') && !isTestHap(e.name)) {
         const moduleName = moduleOfHap(e.name);
         const bucket = (result[moduleName] ??= { signed: [], unsigned: [] });
         if (e.name.includes('unsigned')) bucket.unsigned.push(full);

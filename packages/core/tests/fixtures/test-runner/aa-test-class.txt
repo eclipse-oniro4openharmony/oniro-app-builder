@@ -1,0 +1,37 @@
+start ability successfully.
+
+OHOS_REPORT_SUM: 1
+OHOS_REPORT_STATUS: class=IndexTest
+
+
+OHOS_REPORT_STATUS: class=IndexTest
+OHOS_REPORT_STATUS: current=1
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=1
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=tapShowsWelcome
+OHOS_REPORT_STATUS_CODE: 1
+
+
+OHOS_REPORT_STATUS: class=IndexTest
+OHOS_REPORT_STATUS: current=1
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=1
+OHOS_REPORT_STATUS: stack=    at anonymous entry (entry/src/ohosTest/ets/test/Index.test.ets:23:29)
+OHOS_REPORT_STATUS: stream=Error in tapShowsWelcome, Cannot read property getText of null
+OHOS_REPORT_STATUS: test=tapShowsWelcome
+OHOS_REPORT_STATUS_CODE: -1
+OHOS_REPORT_STATUS: consuming=5662
+
+
+OHOS_REPORT_STATUS: class=IndexTest
+OHOS_REPORT_STATUS: suiteconsuming=5662
+
+
+OHOS_REPORT_RESULT: stream=Tests run: 1, Failure: 0, Error: 1, Pass: 0, Ignore: 0
+OHOS_REPORT_CODE: 0
+OHOS_REPORT_STATUS: taskconsuming=5662
+
+TestFinished-ResultCode: 0
+TestFinished-ResultMsg: your test finished!!!
+user test finished.
