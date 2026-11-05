@@ -259,6 +259,21 @@ Pure functions over decoded greyscale pixels (`GreyImage`: `{ width, height, dat
 | `setHilogLevel` | `(SetHilogLevelOptions) => Promise<void>` | Set the buffer level. |
 | `parseHilogLine` / `dedupEntries` | — | Pure helpers; `HilogEntry` / `HilogLevel` types. |
 
+### Faultlogs (crashes and freezes)
+
+Adapted in part from deveco-cli's `faultlog/` module (MIT); see `src/faultlog/NOTICE.md`.
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `latestCrash` | `({ config, bundle?, since?, deviceSerial?, waitMs?, pollMs?, saveDir? }) => Promise<CrashVerdict \| null>` | The newest fault of `bundle` (any process when unset) since `since` (a `Date`, or seconds before the device clock), classified and parsed; null when there is none. `waitMs` keeps polling, since hiview writes the faultlog seconds after the process dies. `saveDir` saves the whole log and sets `rawPath`. |
+| `analyzeFaultLog` | `(text, { name?, path?, rawPath? }) => CrashVerdict` | Pure: classify a faultlog (or faultloggerd crash record) and read `crashed`, `kind` (`cpp_crash`, `js_crash`, `app_freeze`, `sample_stack`, `unknown`), `subtype`, `confidence`, `bundle`, `pid`, `tid`, `time`, `reason`, `topFrame`, `projectFrame`, `file`/`line`/`column` of the first project ArkTS frame, `jsError {name, message, stack}`, `stack`, `nativeFrames`, `jsFrames`, `binderChain`, `deadlocks`, `notes`. |
+| `listFaultLogs` | `(ListFaultLogsOptions) => Promise<FaultLogEntry[]>` | Newest first: `hidumper -s 1201 -a '-p Faultlogger -LogSuffixWithMs'` (else `ls /data/log/faultlog/faultlogger`), plus the `cppcrash-<pid>-<ms>.json` records in `/data/log/faultlog/temp` that hiview did not turn into a faultlog. Filters by `bundle` and `since`. |
+| `readFaultLog` | `({ config, entry, deviceSerial? }) => Promise<string>` | A listed entry's text: `hidumper … -f <name>` without its banner, else `cat`. |
+| `classifyFaultLog` | `(text) => FaultLogClassification` | Pure: the kind, confidence, completeness (`full` faultlog or `fragment`), evidence and excluded kinds, by structure alone. |
+| `parseCppCrash` / `parseJsCrash` / `parseFreeze` / `parseBinder` / `buildPropagation` | — | The per-kind parsers and the binder-chain analysis behind `analyzeFaultLog`. |
+| `parseNativeFrame` / `parseJsFrame` / `parseThreadStacks` | — | Frame parsers: `#00 pc … /system/lib64/x.so(sym+8)(buildid)` and `at f entry (entry/src/main/ets/x.ets:8:13)`. |
+| `parseFaultLogList` / `parseFaultLogName` / `parseCrashRecordHeads` / `stripHidumperBanner` / `renderCrashJson` | — | Pure helpers for the device listing and the crash-record format. |
+
 ### Build & dependencies
 
 | Export | Signature | Description |

@@ -452,6 +452,39 @@ owner-only permissions where the host OS supports POSIX modes.
 | `--redact` | Redact text evidence; create the archive only from the redacted copy. |
 | `--json` | Emit bundle paths and completion status as JSON. |
 
+#### `logs crash` — what the last crash was, and where
+
+```bash
+oniro-app app launch && oniro-app logs crash --since 30 --wait 15000 --json
+```
+
+Fetches the newest faultlog of an app and classifies it: `cpp_crash` (a native signal), `js_crash` (an uncaught
+ArkTS/JS error), `app_freeze` (`THREAD_BLOCK_6S`, `APP_INPUT_BLOCK`, `LIFECYCLE_TIMEOUT`, or a service's
+`SERVICE_BLOCK`), `sample_stack` or `unknown`, each with a `confidence`. The bundle defaults to the project in the
+current directory, else the newest fault of any process. Faultlogs are listed with
+`hidumper -s 1201 -a '-p Faultlogger -LogSuffixWithMs'` and read with `-f <name>`. Some builds never turn an app's
+native crash into a faultlog (hiview logs `Fail to add fault log … is not processdump`); the command then reads
+faultloggerd's record in `/data/log/faultlog/temp/cppcrash-<pid>-<ms>.json` instead and says so in `notes`. The
+whole log is saved under `--output`.
+
+The verdict (`--json`) has `crashed`, `kind`, `subtype` (the freeze event), `confidence`, `bundle`, `pid`, `tid`,
+`time` (device local), `reason`, `topFrame`, `projectFrame` (the first frame in the project's own code), `file`, `line`
+and `column` of the first project ArkTS frame (for a native crash, the ArkTS code that called into it),
+`jsError {name, message, stack}`, `stack` (the faulting thread's frames as printed), `nativeFrames` (`index`, `pc`,
+`library`, `symbol`, `buildId`, `area`), `jsFrames`, `binderChain` and `deadlocks` (freeze), `notes`, `name`, `path`
+(on the device) and `rawPath` (the saved copy). Without a fault it prints `{ "crashed": false, "kind": null, … }`.
+The command exits 0 either way: a gate reads `crashed`.
+
+| Flag | Description |
+| --- | --- |
+| `--bundle <bundle>` | App to look for (default: the current project's `bundleName`, else any process). |
+| `--since <s\|ISO>` | Only faults from the last N seconds by the device clock, or since an ISO 8601 time. |
+| `--wait <ms>` | Keep looking this long when there is no fault yet (hiview writes it a few seconds after the process dies). |
+| `--path <file>` | Analyse a local faultlog or `.json` crash record instead of fetching one. |
+| `-o, --output <directory>` | Where to save the fetched log (default `~/.oniro/faultlogs`). |
+| `--device <serial>` | Target device serial. |
+| `--json` | Print the verdict as JSON. |
+
 #### `hdc` — run the bundled hdc
 
 `hdc [args...]` runs the `hdc` binary oniro-app itself uses (the one `cmdtools status` shows), with stdio passed through, so it needs nothing on `PATH`. Device commands are addressed at `--device` or `ONIRO_DEVICE_SERIAL` unless the arguments start with `-t`. `hdc --path` prints the binary's location. The exit code is hdc's own, which is 0 even for a `[Fail]` line.
