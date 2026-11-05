@@ -222,9 +222,26 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `takeScreenshot` | `(ScreenshotOptions) => Promise<Screenshot>` | `{ pixels: Buffer, width, height }` — raw JPEG, no decode. |
 | `captureBurst` | `(CaptureBurstOptions) => Promise<Buffer[]>` | N frames `intervalMs` apart, pulled back in order. |
 | `getDisplaySize` | `(config, opts?) => Promise<DisplaySize \| null>` | Render resolution from `hidumper` (no image work). |
-| `dumpLayout` | `(DumpLayoutOptions) => Promise<DumpLayoutResult>` | `uitest dumpLayout` → pruned, 0–1-normalized `LayoutNode` tree, with `hint`, `disabled`, and `covered` (painted over by a later filled layer). `detectKeyboard` adds `keyboard: KeyboardState`. |
+| `dumpLayout` | `(DumpLayoutOptions) => Promise<DumpLayoutResult>` | `uitest dumpLayout` → pruned, 0–1-normalized `LayoutNode` tree, with `hint`, `disabled`, `hidden`, `covered` (painted over by a later filled layer), and `windowId` on each window's root. `detectKeyboard` adds `keyboard: KeyboardState`; `windowId` keeps one window (the screen is still dumped whole, so covering and the keyboard are judged on all of it). |
 | `parseBounds` / `pruneLayout` / `findCoveredNodes` | — | Pure helpers behind `dumpLayout`. |
-| `flattenLayout` / `findLayoutNodes` / `pickTarget` | — | Pure: flatten a tree (nodes tagged with their `window`), match a `LayoutSelector` (`text` / `id` / `type`), and choose one uncovered, preferably clickable node (throws `TargetNotFoundError` with `reason` `none` / `covered` / `ambiguous`). |
+| `flattenLayout` / `findLayoutNodes` / `pickTarget` / `findVisibleMatch` | — | Pure: flatten a tree (nodes tagged with their `window` bundle and `windowId`), match an `ElementQuery` (a `LayoutSelector` — `text` / `id` / `type` — or a parsed `ElementSelector`), choose one uncovered, preferably clickable node (throws `TargetNotFoundError` with `reason` `none` / `covered` / `ambiguous`; a selector's `[n]` picks from all matches instead), and the first uncovered match (what `waitForTarget` polls for). |
+| `listLayoutWindows` / `windowSubtree` / `rawWindowSubtree` / `windowNotFoundError` | — | Pure: the windows in a pruned tree (`LayoutWindow`: `windowId`, `bundle`, `b`), one window's part of a pruned or raw tree, and the error listing the on-screen windows. |
+| `listWindows` / `parseWindowList` | `(ListWindowsOptions) => Promise<WindowInfo[]>` / `(text) => WindowInfo[]` | Every window from `hidumper -s WindowManagerService -a -a`: `id`, `name`, `pid`, `displayId`, `type`, `zOrder` (-1 = not shown), `rect`, `focused`. |
+| `getImeBundles` / `parseImeBundles` / `findKeyboardWindow` | — | Installed input methods (`hidumper -s 3703`) and the soft-keyboard window in a layout. |
+
+### hdc — element selectors
+
+The `--selector` language of the CLI, evaluated over the pruned tree. All pure. The attribute DSL and the `xpath=` form follow openharmony-sig/deveco-cli (MIT); the XPath evaluator is a dependency-free subset (`/`, `//`, `*`, `.`, `..`, `[@a="v"]`, `[@a]`, `!=`, `contains` / `starts-with` / `ends-with` / `not` / `text()`, `and` / `or`, `[n]`, `[last()]`, `[position()<n]`, `(path)[n]`); anything else is a `SelectorParseError`.
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `parseSelector` | `(text) => ElementSelector` | `xpath=<expr>` → `XPathSelector`; otherwise `key<op>value[,…][n]` → `DslSelector` (`clauses`, `index`: 0-based, negative from the end). Operators `=`, `*=`, `^=`, `$=`, `/=` (regex, `/flags`). Throws `SelectorParseError` (`position`, `input`) on bad syntax, an unknown key, or a repeated key. |
+| `matchSelector` | `(tree, ElementSelector) => FlatLayoutNode[]` | Every match in paint order, window-tagged; the DSL index is left to the caller (`pickTarget`, `findVisibleMatch`). |
+| `selectorFor` | `(tree, RecordedElement) => string` | The most specific stable selector for a recorded element (`Partial<FlatLayoutNode>`, e.g. from `wait --json`): `type` plus the first unique of `id`, `key`, `text`, `desc`, `hint`, then all of them, then all of them with `[n]`. Exact `=` clauses only; the result resolves back to that element. For record/replay. |
+| `formatSelector` | `(clauses, index?) => string` | Render DSL clauses back to text `parseSelector` reads, quoting values as needed. |
+| `clauseMatches` / `selectorAttribute` / `resolveSelectorKey` / `SELECTOR_KEYS` | — | One clause against a node; a key's value on a node (booleans as `"true"` / `"false"`; `key` falls back to `id`; `visible` = not `hidden` and not `covered`); key aliases (`description` → `desc`); the key list. |
+| `parseXPath` / `evaluateXPath` | `(text) => XPathExpression` / `(tree, expr) => FlatLayoutNode[]` | The XPath subset on its own. Elements are named by component type (`node` when untyped). |
+| `isElementSelector` / `ElementQuery` | — | Tell a parsed selector from a plain `LayoutSelector`; the union every target-taking function accepts. |
 | `getImeBundles` / `parseImeBundles` / `findKeyboardWindow` | — | Installed input methods (`hidumper -s 3703`) and the soft-keyboard window in a layout. |
 | `summarizeLayout` | `(DumpLayoutResult) => LayoutSummary` | Pure: per window (and in total) the element, content (text, description, placeholder or image), clickable and text-node counts. |
 | `diffLayouts` | `(baseline, current) => LayoutDiff` | Pure: pair elements within a window by id, key, label and type, then type with overlapping boxes (greedy by IoU); report each pair's IoU and changed fields, the `missing` and `extra` elements, and a 0–1 `similarity`. |
@@ -247,10 +264,11 @@ Pure functions over decoded greyscale pixels (`GreyImage`: `{ width, height, dat
 | Export | Signature | Description |
 | --- | --- | --- |
 | `sendInput` | `(SendInputOptions) => Promise<void>` | One `uitest uiInput` action in **pixel** space (`InputType`: click/doubleClick/longClick/swipe/drag/fling/keyEvent/inputText). `key` accepts names and combos (see `resolveKeyEvent`). |
-| `performInput` | `(PerformInputOptions) => Promise<PerformInputResult>` | `sendInput` plus a start point from an element selector (`target`), 0–1 fractions, or pixels; `clearText`, `inputText` with `clear`, and keyboard-aware `hideKeyboard`. |
-| `locateTarget` | `(LocateTargetOptions) => Promise<LocatedTarget>` | Resolve a selector against the live layout to one element and its pixel center, dismissing the keyboard if it hides the element. |
+| `performInput` | `(PerformInputOptions) => Promise<PerformInputResult>` | `sendInput` plus a start point from an element selector (`target`: a `LayoutSelector` or parsed `ElementSelector`, optionally limited to `windowId`), 0–1 fractions, or pixels; `clearText`, `inputText` with `clear`, and keyboard-aware `hideKeyboard`. |
+| `locateTarget` | `(LocateTargetOptions) => Promise<LocatedTarget>` | Resolve a selector against the live layout (optionally one `windowId`) to one element and its pixel center, dismissing the keyboard if it hides the element. |
+| `selectableTree` | `(DumpLayoutResult, windowId?) => LayoutNode` | What selectors search: the tree minus the soft-keyboard window, unless a window was asked for. |
 | `hideKeyboard` | `(opts) => Promise<boolean>` | Press Back only when the soft keyboard is shown. |
-| `waitForTarget` | `(WaitForTargetOptions) => Promise<FlatLayoutNode \| null>` | Poll the layout until an uncovered element matches (or, with `gone`, until none does). |
+| `waitForTarget` | `(WaitForTargetOptions) => Promise<FlatLayoutNode \| null>` | Poll the layout until an uncovered element matches (or, with `gone`, until none does); `windowId` limits it to one window, which counts as empty while it is not on screen. |
 | `sendGesture` | `(SendGestureOptions) => Promise<void>` | Multi-`Waypoint` path; routes through `uinput` when `holdStartMs`/`holdEndMs` need real press timing. |
 | `sendRawTouch` | `(SendRawTouchOptions) => Promise<void>` | Low-level `uinput -T` down/move/up events. |
 | `buildInputCommand` / `buildGestureCommands` / `buildRawTouchCommand` / `resolveKeyEvent` | — | Pure command builders (unit-testable). |

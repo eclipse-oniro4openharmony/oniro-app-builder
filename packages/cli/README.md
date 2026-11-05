@@ -550,7 +550,7 @@ oniro-app hdc --device 127.0.0.1:5555 shell aa dump -l
 
 #### `wait` — wait for a device condition
 
-Specify exactly one of `--log`, `--boot`, `--bundle`, or an element selector (`--target` / `--target-id` / `--target-type`).
+Specify exactly one of `--log`, `--boot`, `--bundle`, or an element selector (`--target` / `--target-id` / `--target-type`, or `--selector`).
 
 | Flag | Description |
 | --- | --- |
@@ -561,6 +561,8 @@ Specify exactly one of `--log`, `--boot`, `--bundle`, or an element selector (`-
 | `--domain <domain>` | With `--log`: hilog domain filter (e.g. `0xD003900`). |
 | `--target <text>` | Resolve when an uncovered element whose text, description, or placeholder matches is on screen (case-insensitive; exact matches win, else substring). |
 | `--target-id <id>` / `--target-type <type>` | Match the element by id/key, or restrict it to a component type (e.g. `Button`). |
+| `--selector <expr>` | Instead of `--target*`: an attribute selector or `xpath=` expression (see [Selectors and windows](#selectors-and-windows)). With a `[n]` suffix, waits for that match. |
+| `--window <id>` | With a selector: only look in this window; while it is not on screen nothing matches. |
 | `--gone` | With a selector: resolve when no uncovered element matches any more. |
 | `--interval <ms>` | With a selector: poll interval (default `500`; each poll is a layout dump). |
 | `--timeout <ms>` | Max wait (default `30000`). |
@@ -581,7 +583,7 @@ Specify exactly one of `--log`, `--boot`, `--bundle`, or an element selector (`-
 
 #### `screenshot` — capture the screen as a JPEG
 
-Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP screenshot (downscaled + grid overlay). `--crop` / `--target` write a full-resolution crop of one region or element — detail where it is needed without the cost of a full-resolution screenshot. `--contact-sheet` captures a burst (default 8 frames) into one tiled sheet and prints per-frame diffs (0..1) on stdout — one image instead of N, pointing you at the frame where something changed. `--diff <baseline.jpeg>` captures the screen (to `--output`) and compares it with a baseline.
+Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP screenshot (downscaled + grid overlay). `--crop` / `--target` / `--selector` / `--window` write a full-resolution crop of one region, element or window — detail where it is needed without the cost of a full-resolution screenshot. `--contact-sheet` captures a burst (default 8 frames) into one tiled sheet and prints per-frame diffs (0..1) on stdout — one image instead of N, pointing you at the frame where something changed. `--diff <baseline.jpeg>` captures the screen (to `--output`) and compares it with a baseline.
 
 | Flag | Description |
 | --- | --- |
@@ -590,6 +592,8 @@ Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP sc
 | `--max-dim <px>` | Longest-side cap for `--grid` / `--crop` / `--target` / `--contact-sheet` (256–4096, default `1024`). On its own, downscales without a grid. |
 | `--crop <x1,y1,x2,y2>` | Crop to this region, given as 0–1 fractions of the screen (as in `dump layout` and the grid). |
 | `--target <text>` | Crop to the element whose text, description, or placeholder matches, plus a small margin. Also `--target-id`, `--target-type`, `--target-index`. |
+| `--selector <expr>` | Crop to the element this selector picks, like `--target` (see [Selectors and windows](#selectors-and-windows)). |
+| `--window <id>` | Crop to this window; with `--target*` / `--selector`, only look for the element in it. |
 | `--contact-sheet` | Capture a burst and composite it into one tiled image with per-frame change diffs. |
 | `--burst <count>` | Capture N frames; writes `<base>-<i><ext>` (or sets the `--contact-sheet` frame count). |
 | `--interval <ms>` | Delay between burst frames (default `50`). |
@@ -606,18 +610,21 @@ different: pHash 9/64, dHash 5/64, 2.47% of pixels changed, mean change 0.0072
 
 | Command | Description |
 | --- | --- |
-| `dump [layout]` | Dump the on-screen UI layout (the default and currently only target) to stdout: a pruned, 0–1-normalized JSON tree, or one line per element with `--flat`. |
+| `dump [layout]` | Dump the on-screen UI layout (the default target) to stdout: a pruned, 0–1-normalized JSON tree, or one line per element with `--flat`. |
+| `dump windows` | List every window from `hidumper -s WindowManagerService`: id (what `--window` takes), name, pid, type (1 = an app's main window), z-order (-1 = not shown), rectangle, and which one has focus. `--json` for JSON. |
 
 | Flag | Description |
 | --- | --- |
 | `--bundle <bundle>` | Filter the layout to a single window/bundle. |
 | `--flat` | One line per labelled or interactive element, grouped by window: type, label, `#id`, center `c=x,y` (0–1 fractions), and flags (`click`, `focus`, `disabled`, `covered`, …). The soft keyboard collapses to one `[keyboard …]` line. |
-| `--raw` | Return the unpruned tree (no keyboard detection; not combinable with `--flat`, `--summary` or `--diff`). |
+| `--raw` | Return the unpruned tree (no keyboard detection; not combinable with `--flat`, `--summary`, `--diff` or `--selector`). |
 | `--summary` | Per window, and in total: `elements`, `content` (text, description, placeholder or image), `clickable` and `text` node counts (JSON). |
 | `--diff <baseline.json>` | Compare the live layout with one saved by `dump layout > baseline.json` (JSON). Elements pair within a window by id, then key, then label and type, then type with overlapping boxes; each pair reports `by`, its `iou` (boxes are 0–1 fractions, so layouts from different resolutions compare) and `changed` fields. Unpaired ones are listed as `missing` and `extra`, and `similarity` (0–1) is the sum of pair IoUs (halved when a field changed) over pairs plus missing plus extra. Exits 0 either way. |
+| `--selector <expr>` | List only the elements matching this expression (see [Selectors and windows](#selectors-and-windows)), numbered with the index its `[n]` suffix picks; JSON `{ display, selector, matches }`, or one line each with `--flat`. Soft-keyboard keys are left out, as `input` and `wait` leave them out. |
+| `--window <id>` | Only this window (`[window <id> …]` in `--flat`, or `dump windows`). The whole screen is still dumped, so an overlay in another window still marks elements `covered`. |
 | `--device <serial>` | Target device serial. |
 
-The pruned output marks elements as `covered` when a later layer with a visible background (a dialog scrim, an overlay, the keyboard) paints over their center, so a tap there would land on that layer instead. A fully transparent layer that only intercepts touches is not detected. Placeholder text is reported as `hint`, and disabled components as `disabled`. The JSON result also carries `keyboard: { shown, bundle, b }`.
+The pruned output marks elements as `covered` when a later layer with a visible background (a dialog scrim, an overlay, the keyboard) paints over their center, so a tap there would land on that layer instead. A fully transparent layer that only intercepts touches is not detected. Placeholder text is reported as `hint`, disabled components as `disabled`, and components with `visible: false` as `hidden`. The node where a window starts carries its `windowId`. The JSON result also carries `keyboard: { shown, bundle, b }`.
 
 ```text
 $ oniro-app dump layout > before.json
@@ -631,16 +638,68 @@ layout similarity 0.978: 28 matched (1 moved, 1 changed), 0 missing, 0 extra.   
 ```text
 $ oniro-app dump layout --flat
 # display 1080x2400; c = element center as 0-1 fractions (input --fx/--fy), or act by label with input --target "<text>"
-[window com.example.app]
+[window 92 com.example.app]
 Text "Sign in" c=0.500,0.180
 TextInput hint="you@example.com" c=0.500,0.320 click focus
 Button "Sign in" c=0.500,0.520 click
-[keyboard dev.patrickgold.florisboard] up — dismiss with input --type hideKeyboard
+[keyboard 41 dev.patrickgold.florisboard] up — dismiss with input --type hideKeyboard
+
+$ oniro-app dump layout --selector 'type=Button,text*=Sign' --flat
+# display 1080x2400; 2 element(s) match "type=Button,text*=Sign"; append [n] to the selector to act on one
+[0] Button "Sign in" #signIn c=0.361,0.214 click (window 92 com.example.app)
+[1] Button "Sign up" #signUp c=0.631,0.214 click (window 92 com.example.app)
+```
+
+#### Selectors and windows
+
+`input`, `wait`, `screenshot` and `dump layout` take `--selector <expr>` as an alternative to `--target` / `--target-id` / `--target-type`, which stay the default and keep their behaviour. A selector is exact where `--target` is forgiving: values compare case-sensitively, and every clause must hold. It is evaluated over the same pruned tree `dump layout` prints, so what you see there is what you can select.
+
+**Attribute selectors** are comma-separated `key<op>value` clauses, optionally followed by an index:
+
+| Keys | |
+| --- | --- |
+| `text`, `desc` (or `description`), `hint`, `id`, `key`, `type` | Strings as `dump layout` shows them. `key` falls back to `id`; `type` is the component type (`Button`, `TextInput`, `Column`, …). |
+| `enabled`, `focused`, `checked`, `selected`, `visible`, `clickable`, `longClickable`, `checkable`, `scrollable` | `true` or `false`. `visible` means drawn and not `covered` by an overlay. |
+
+| Operator | Matches when the value… |
+| --- | --- |
+| `=` | equals |
+| `*=` | contains |
+| `^=` | starts with |
+| `$=` | ends with |
+| `/=` | matches a JavaScript regular expression; flags after a slash (`text/=^sign/i`) |
+
+Spaces inside a bare value are kept (`text=Sign in`); quote a value that holds `,`, `[`, a quote or edge spaces (`text="a, b"`, `id/="^item[0-9]$"`), with `\` escaping inside quotes. A key may appear once. An unknown key is an error, not an empty match.
+
+The `[n]` suffix picks the n-th match, 0-based, in paint order: the list `dump layout --selector` prints. `[-1]` or `[last]` is the last one. The picked element must be on screen and not covered. Without an index, the selector picks the way `--target` does: covered elements are skipped, clickable matches preferred, a label inside a clickable match counts as that match, and more than one candidate is an error listing them. `--target-index` does not combine with `--selector`.
+
+**XPath** (`xpath=<expr>`) runs over the same tree, each element named after its component type (`node` when it has none) and carrying the keys above as attributes. The subset is deliberately small, and anything outside it is a parse error rather than a wrong answer:
+
+| Supported | Example |
+| --- | --- |
+| `//` (any depth) and `/` (child) steps, from the top | `//Row/Button`, `/node/root/Text` |
+| `*`, `.` and `..` | `//Column[@id="items"]/*`, `//Text[@id="b"]/..` |
+| `[@attr="v"]`, `[@attr!="v"]`, `[@attr]` (has it) | `//Button[@enabled="false"]` |
+| `contains`, `starts-with`, `ends-with`, `not`, `text()` (same as `@text`) | `//Button[contains(@text,"Sign")]` |
+| `and`, `or`, parentheses | `//*[@id="ok" or @id="cancel"]` |
+| `[n]` (1-based), `[last()]`, `[position()<3]` | `//Column/Text[2]` |
+| `(path)[n]`: the n-th match of the whole path | `(//Button)[1]` |
+
+As in XPath, `[n]` counts among the step's matches under one parent: `//Button[1]` is every Button that is its parent's first, while `(//Button)[1]` is the first Button on screen. Not supported: axis names (`child::`), unions (`|`), attribute steps (`/@text`), paths inside predicates, and other functions.
+
+**`--window <id>`** restricts dump, selection and screenshot to one window. Window ids are the `WinId` column of `hidumper -s WindowManagerService -a -a`: `dump windows` lists all of them, `dump layout --flat` shows the on-screen ones in its `[window <id> <bundle>]` headers, and the JSON tree carries `windowId` on each window's root. The layout is still dumped whole and then filtered, so overlays from other windows still count; `dump layout` and `input` fail with the list of on-screen windows when the id is not among them. Window ids come from uitest's `hostWindowId` attribute, which this was verified with on an API 26 device; deveco-cli notes that uitest's own `dumpLayout -w` / `-d` flags need API 20 or newer, and `--window` does not use them.
+
+```bash
+oniro-app input --type click --selector 'type=Button,text*=Sign[1]' --window 92
+oniro-app wait --selector 'xpath=//Text[@id="status" and contains(@text,"Signed")]' --timeout 5000
+oniro-app wait --selector 'id=spinner' --gone
+oniro-app screenshot --selector 'xpath=//Column[@id="items"]' -o items.jpeg
+oniro-app dump layout --window 92 --flat
 ```
 
 #### `input` / `gesture` — inject UI input
 
-`input` injects a single event via `uitest uiInput`. Give the start point one way: an on-screen element (`--target`), 0–1 fractions of the display (`--fx`/`--fy`, as read from `dump layout` or the screenshot grid), or pixels (`--x`/`--y`).
+`input` injects a single event via `uitest uiInput`. Give the start point one way: an on-screen element (`--target`, or `--selector`), 0–1 fractions of the display (`--fx`/`--fy`, as read from `dump layout` or the screenshot grid), or pixels (`--x`/`--y`).
 
 | Flag | Description |
 | --- | --- |
@@ -648,6 +707,8 @@ Button "Sign in" c=0.500,0.520 click
 | `--target <text>` | Act on the center of the element whose text, description, or placeholder matches (case-insensitive; exact matches win, else substring). Covered elements and soft-keyboard keys are skipped and clickable ones preferred; if the keyboard hides the element, it is dismissed first. |
 | `--target-id <id>` / `--target-type <type>` | Match by id/key, or restrict to a component type (e.g. `Button`, `TextInput`). |
 | `--target-index <n>` | Pick the n-th (0-based) of several matching elements; without it, an ambiguous match fails and lists the candidates. |
+| `--selector <expr>` | Instead of `--target*`: act on the element an attribute selector or `xpath=` expression picks (see [Selectors and windows](#selectors-and-windows)). |
+| `--window <id>` | Only look for the element in this window; fails when the window is not on screen. |
 | `--fx <fraction>` / `--fy <fraction>` | Start point as 0–1 fractions of the display. |
 | `--fx2 <fraction>` / `--fy2 <fraction>` | End point as fractions (swipe / drag / fling). |
 | `--x <px>` / `--y <px>` | Start point in pixels. |
@@ -665,6 +726,7 @@ Button "Sign in" c=0.500,0.520 click
 oniro-app input --type inputText --target "you@example.com" --text 'me@example.com'
 oniro-app input --type inputText --target-id password --clear --text 'secret' --hide-keyboard
 oniro-app input --type click --target "Sign in" --target-type Button
+oniro-app input --type click --selector 'type=Button,id=signIn'
 oniro-app input --type swipe --fx 0.5 --fy 0.8 --fx2 0.5 --fy2 0.3
 ```
 
@@ -683,7 +745,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `app verify`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target` / `--selector`, `dump windows`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `app verify`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.

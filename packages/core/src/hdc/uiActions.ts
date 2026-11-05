@@ -4,13 +4,14 @@ import { OniroError } from '../ports/errors.js';
 import {
   assertLayoutSelector,
   dumpLayout,
-  findLayoutNodes,
+  findVisibleMatch,
   pickTarget,
   withoutWindow,
+  windowSubtree,
   TargetNotFoundError,
   type DumpLayoutResult,
+  type ElementQuery,
   type FlatLayoutNode,
-  type LayoutSelector,
 } from './dump.js';
 import { getDisplaySize, type DisplaySize } from './display.js';
 import { sendInput, type InputType } from './input.js';
@@ -26,10 +27,14 @@ const KEYBOARD_SETTLE_MS = 400;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** The app's elements: the tree minus the soft-keyboard window, whose keys are not targets. */
-function targetTree(layout: DumpLayoutResult): DumpLayoutResult['tree'] {
+/**
+ * What selectors search (input, wait, screenshot and `dump layout --selector`):
+ * the tree minus the soft-keyboard window, whose keys are not targets, unless
+ * the caller restricted the dump to one window, which is then the one asked for.
+ */
+export function selectableTree(layout: DumpLayoutResult, windowId?: number): DumpLayoutResult['tree'] {
   const kb = layout.keyboard;
-  return kb?.shown && kb.bundle ? withoutWindow(layout.tree, kb.bundle) : layout.tree;
+  return kb?.shown && kb.bundle && windowId === undefined ? withoutWindow(layout.tree, kb.bundle) : layout.tree;
 }
 
 /** A 0–1 fraction of a display dimension as a pixel inside it (1.0 maps to the last pixel). */
@@ -60,9 +65,12 @@ export async function hideKeyboard(opts: DeviceOptions): Promise<boolean> {
 }
 
 export interface LocateTargetOptions extends DeviceOptions {
-  selector: LayoutSelector;
+  /** `--target` fields, or a parsed `--selector` expression (see {@link parseSelector}). */
+  selector: ElementQuery;
   /** Picks among several matching elements (see {@link pickTarget}). */
   index?: number;
+  /** Only look in this window (see {@link DumpLayoutOptions.windowId}). */
+  windowId?: number;
   /**
    * When the soft keyboard is up and the target is missing, covered, or matches
    * only a non-clickable label (the button may be hidden below the keyboard),
@@ -87,7 +95,13 @@ export interface LocatedTarget {
  */
 export async function locateTarget(opts: LocateTargetOptions): Promise<LocatedTarget> {
   assertLayoutSelector(opts.selector);
-  const dumpOpts = { config: opts.config, detectKeyboard: true, deviceSerial: opts.deviceSerial, logger: opts.logger };
+  const dumpOpts = {
+    config: opts.config,
+    detectKeyboard: true,
+    windowId: opts.windowId,
+    deviceSerial: opts.deviceSerial,
+    logger: opts.logger,
+  };
   let layout = await dumpLayout(dumpOpts);
   // Without the display size no node has a position, and every match would look missing.
   if (!layout.display) throw new OniroError('Could not read the display size to locate the element.');
@@ -95,7 +109,7 @@ export async function locateTarget(opts: LocateTargetOptions): Promise<LocatedTa
   let node: FlatLayoutNode | undefined;
   let failure: unknown;
   try {
-    node = pickTarget(targetTree(layout), opts.selector, opts.index);
+    node = pickTarget(selectableTree(layout, opts.windowId), opts.selector, opts.index);
   } catch (err) {
     if (!(err instanceof TargetNotFoundError) || err.reason === 'ambiguous') throw err;
     failure = err;
@@ -107,7 +121,7 @@ export async function locateTarget(opts: LocateTargetOptions): Promise<LocatedTa
     keyboardHidden = true;
     layout = await dumpLayout(dumpOpts);
     if (!layout.display) throw new OniroError('Could not read the display size to locate the element.');
-    node = pickTarget(targetTree(layout), opts.selector, opts.index);
+    node = pickTarget(selectableTree(layout, opts.windowId), opts.selector, opts.index);
   }
   if (!node) throw failure;
   if (!node.c) throw new OniroError('The element has no on-screen position.');
@@ -130,10 +144,12 @@ export interface PerformInputOptions extends DeviceOptions {
   /** End point as 0–1 fractions of the display. */
   fx2?: number;
   fy2?: number;
-  /** Start point: the center of the element matching this selector. */
-  target?: LayoutSelector;
+  /** Start point: the center of the element matching this selector (`--target` fields or a parsed `--selector`). */
+  target?: ElementQuery;
   /** Picks among several elements matching `target`. */
   targetIndex?: number;
+  /** Look for `target` only in this window. */
+  windowId?: number;
   /** Velocity for swipe/drag/fling. */
   speed?: number;
   /** Key for keyEvent (see `resolveKeyEvent`). */
@@ -195,7 +211,7 @@ export async function performInput(opts: PerformInputOptions): Promise<PerformIn
   const result: PerformInputResult = { keyboardHidden: false };
   let start = startPx;
   if (opts.target) {
-    const located = await locateTarget({ ...device, selector: opts.target, index: opts.targetIndex });
+    const located = await locateTarget({ ...device, selector: opts.target, index: opts.targetIndex, windowId: opts.windowId });
     display = located.display;
     start = [located.x, located.y];
     result.target = located.node;
@@ -252,7 +268,10 @@ export async function performInput(opts: PerformInputOptions): Promise<PerformIn
 }
 
 export interface WaitForTargetOptions extends DeviceOptions {
-  selector: LayoutSelector;
+  /** `--target` fields, or a parsed `--selector` expression. */
+  selector: ElementQuery;
+  /** Only look in this window; while it is not on screen nothing matches. */
+  windowId?: number;
   /** Wait until no uncovered element matches, instead of until one does. */
   gone?: boolean;
   timeoutMs: number;
@@ -264,7 +283,8 @@ export interface WaitForTargetOptions extends DeviceOptions {
 /**
  * Poll the layout until an uncovered element matches `selector` (resolving with
  * it), or with `gone`, until none does (resolving null). Keys on the soft
- * keyboard are ignored. Throws on timeout.
+ * keyboard are ignored. A DSL selector's `[n]` waits for that match. Throws on
+ * timeout.
  */
 export async function waitForTarget(opts: WaitForTargetOptions): Promise<FlatLayoutNode | null> {
   const { selector } = opts;
@@ -278,7 +298,10 @@ export async function waitForTarget(opts: WaitForTargetOptions): Promise<FlatLay
         deviceSerial: opts.deviceSerial,
         logger: opts.logger,
       });
-      found = findLayoutNodes(targetTree(layout), selector).find((n) => !n.covered) ?? null;
+      let tree: DumpLayoutResult['tree'] | null = layout.tree;
+      if (opts.windowId !== undefined) tree = windowSubtree(layout.tree, opts.windowId);
+      else tree = selectableTree(layout);
+      found = tree ? findVisibleMatch(tree, selector) : null;
       return opts.gone ? found === null : found !== null;
     },
     timeoutMs: opts.timeoutMs,

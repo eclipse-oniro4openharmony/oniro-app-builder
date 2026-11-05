@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { takeScreenshot, captureBurst, locateTarget, describeLayoutNode } from '@oniroproject/core';
+import { takeScreenshot, captureBurst, locateTarget, describeLayoutNode, dumpLayout, listLayoutWindows } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 import {
   renderWithGrid,
@@ -13,7 +13,7 @@ import {
   padCropRect,
   type CropRect,
 } from '../lib/screenshotImage.js';
-import { addTargetOptions, selectorFrom, targetIndexFrom, type TargetOpts } from '../lib/target.js';
+import { addTargetOptions, selectorFrom, targetIndexFrom, windowIdFrom, type TargetOpts } from '../lib/target.js';
 
 interface ScreenshotOpts extends TargetOpts {
   output: string;
@@ -44,7 +44,8 @@ export function registerScreenshotCommand(program: Command): void {
     .description(
       'Capture the screen. Default: full-resolution raw JPEG. ' +
         '--grid: downscaled JPEG with a 10x10 grid (axes 0.0-1.0) for picking tap coordinates. ' +
-        '--crop / --target: a full-resolution crop of one region or element, for checking detail cheaply. ' +
+        '--crop / --target / --selector / --window: a full-resolution crop of one region, element or window, ' +
+        'for checking detail cheaply. ' +
         '--contact-sheet: capture a burst and tile it into one image with per-frame change diffs. ' +
         '--diff: compare the screen with a baseline JPEG (perceptual-hash distance, pixel-change ratio).',
     )
@@ -70,11 +71,14 @@ export function registerScreenshotCommand(program: Command): void {
       const intervalMs = Number(opts.interval) || 50;
 
       const selector = selectorFrom(opts);
+      const windowId = windowIdFrom(opts);
 
       // --- Diff: the screen now against a baseline ---
       if (opts.diff !== undefined) {
-        if (opts.crop !== undefined || selector || opts.grid || opts.contactSheet || opts.burst) {
-          throw new Error('--diff cannot be combined with --crop, --target*, --grid, --contact-sheet, or --burst.');
+        if (opts.crop !== undefined || selector || windowId !== undefined || opts.grid || opts.contactSheet || opts.burst) {
+          throw new Error(
+            '--diff cannot be combined with --crop, --target* / --selector / --window, --grid, --contact-sheet, or --burst.',
+          );
         }
         let baseline: Buffer;
         try {
@@ -99,11 +103,13 @@ export function registerScreenshotCommand(program: Command): void {
         return;
       }
 
-      // --- Crop: one region (or element) at full resolution ---
-      if (opts.crop !== undefined || selector) {
-        if (opts.crop !== undefined && selector) throw new Error('Use either --crop or --target*, not both.');
+      // --- Crop: one region, element or window at full resolution ---
+      if (opts.crop !== undefined || selector || windowId !== undefined) {
+        if (opts.crop !== undefined && (selector || windowId !== undefined)) {
+          throw new Error('Use either --crop or --target* / --selector / --window, not both.');
+        }
         if (opts.grid || opts.contactSheet || opts.burst) {
-          throw new Error('--crop / --target cannot be combined with --grid, --contact-sheet, or --burst.');
+          throw new Error('--crop / --target / --selector / --window cannot be combined with --grid, --contact-sheet, or --burst.');
         }
         let rect: CropRect;
         let label: string;
@@ -113,6 +119,7 @@ export function registerScreenshotCommand(program: Command): void {
             config,
             selector,
             index: targetIndexFrom(opts),
+            windowId,
             hideKeyboard: false,
             deviceSerial: opts.device,
             logger,
@@ -120,6 +127,12 @@ export function registerScreenshotCommand(program: Command): void {
           if (!located.node.b) throw new Error(`${describeLayoutNode(located.node)} has no bounds to crop to.`);
           rect = padCropRect(located.node.b, TARGET_CROP_PAD);
           label = describeLayoutNode(located.node);
+        } else if (windowId !== undefined) {
+          const { tree } = await dumpLayout({ config, windowId, deviceSerial: opts.device, logger });
+          const win = listLayoutWindows(tree).find((w) => w.windowId === windowId);
+          if (!win?.b) throw new Error(`Window ${windowId} has no bounds to crop to.`);
+          rect = win.b;
+          label = `window ${windowId}${win.bundle ? ` (${win.bundle})` : ''}`;
         } else {
           rect = parseCropRect(opts.crop!);
           label = rect.map((n) => n.toFixed(3)).join(',');

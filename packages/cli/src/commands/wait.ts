@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { waitForLog, waitForBoot, waitForBundle, waitForTarget, describeLayoutNode } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
-import { addTargetOptions, selectorFrom, type TargetOpts } from '../lib/target.js';
+import { addTargetOptions, selectorFrom, windowIdFrom, type TargetOpts } from '../lib/target.js';
 import { parseSince } from '../lib/logSince.js';
 
 interface WaitOpts extends TargetOpts {
@@ -23,7 +23,7 @@ export function registerWaitCommand(program: Command): void {
     .command('wait')
     .description(
       'Wait for a device condition: a log line (--log), boot (--boot), a bundle to start (--bundle), ' +
-        'or an on-screen element (--target / --target-id / --target-type).',
+        'or an on-screen element (--target / --target-id / --target-type, or --selector).',
     )
     .option('--log <pattern>', 'Resolve when a hilog line (tag: message) logged after the command starts matches this regex.')
     .option(
@@ -37,16 +37,18 @@ export function registerWaitCommand(program: Command): void {
     .option('--domain <domain>', 'With --log: hilog domain filter (e.g. 0xD003900).');
   addTargetOptions(wait, 'Resolve when', { index: false });
   wait
-    .option('--gone', 'With --target*: resolve when no uncovered element matches any more.')
-    .option('--interval <ms>', 'With --target*: poll interval, ms (each poll is a layout dump).', '500')
+    .option('--gone', 'With --target* or --selector: resolve when no uncovered element matches any more.')
+    .option('--interval <ms>', 'With --target* or --selector: poll interval, ms (each poll is a layout dump).', '500')
     .option('--timeout <ms>', 'Max wait, ms.', '30000')
     .option('--device <serial>', 'Target device serial.')
-    .option('--json', 'With --log or --target*: emit the matched entry/element as JSON.')
+    .option('--json', 'With --log, --target* or --selector: emit the matched entry/element as JSON.')
     .action(async (opts: WaitOpts) => {
       const { config, logger } = getRuntime();
       const timeoutMs = Number(opts.timeout);
       const selector = selectorFrom(opts);
+      const windowId = windowIdFrom(opts);
       if (opts.since !== undefined && !opts.log) throw new Error('--since applies only to --log.');
+      if (windowId !== undefined && !selector) throw new Error('--window applies only to --target* and --selector.');
 
       if (opts.log) {
         const entry = await waitForLog({
@@ -73,6 +75,7 @@ export function registerWaitCommand(program: Command): void {
           config,
           selector,
           gone: opts.gone,
+          windowId,
           timeoutMs,
           pollMs: Number(opts.interval) || 500,
           deviceSerial: opts.device,
@@ -91,6 +94,8 @@ export function registerWaitCommand(program: Command): void {
         logger.info(`Bundle ${opts.bundle} is running.`);
         return;
       }
-      throw new Error('Specify one of --log <pattern>, --boot, --bundle <bundle>, or --target <text> (or --target-id / --target-type).');
+      throw new Error(
+        'Specify one of --log <pattern>, --boot, --bundle <bundle>, --target <text> (or --target-id / --target-type), or --selector <expr>.',
+      );
     });
 }
