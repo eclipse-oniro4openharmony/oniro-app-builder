@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import { OniroError } from '@oniroproject/core';
 import { registerSdkCommand } from '../commands/sdk.js';
 import { registerCmdToolsCommand } from '../commands/cmdtools.js';
@@ -45,7 +45,11 @@ function buildProgram(): Command {
     .version(CLI_VERSION)
     .showHelpAfterError()
     // Lets `hdc` pass its arguments through untouched; global options go before the command.
-    .enablePositionalOptions();
+    .enablePositionalOptions()
+    // Commander would process.exit() right after printing help, the version or a usage
+    // error. Writes to a pipe are asynchronous on macOS, so that cut `--help | …` at 8 KB.
+    // Throw instead (subcommands inherit this) and let main() set the exit code.
+    .exitOverride();
 
   registerSdkCommand(program);
   registerCmdToolsCommand(program);
@@ -85,12 +89,16 @@ async function main(): Promise<void> {
   try {
     await program.parseAsync(process.argv);
   } catch (err) {
-    const message = err instanceof OniroError ? err.message : err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[error] ${message}\n`);
-    if (process.env.ONIRO_DEBUG === '1' && err instanceof Error && err.stack) {
-      process.stderr.write(`${err.stack}\n`);
+    if (err instanceof CommanderError) {
+      // Commander has already printed the help, version or usage error; exit once stdout drains.
+      process.exitCode = err.exitCode;
+      return;
     }
-    process.exit(1);
+    const message = err instanceof OniroError ? err.message : err instanceof Error ? err.message : String(err);
+    const stack = process.env.ONIRO_DEBUG === '1' && err instanceof Error && err.stack ? `${err.stack}\n` : '';
+    // Exit only once stderr has drained (asynchronous for pipes on macOS), even if a
+    // device process or timer the failed command started is still holding the loop.
+    process.stderr.write(`[error] ${message}\n${stack}`, () => process.exit(1));
   }
 }
 
