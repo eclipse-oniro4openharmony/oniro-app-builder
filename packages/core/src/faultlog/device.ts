@@ -237,8 +237,16 @@ export interface LatestCrashOptions extends FaultLogDeviceOptions {
  */
 export async function latestCrash(opts: LatestCrashOptions): Promise<CrashVerdict | null> {
   const deadline = Date.now() + (opts.waitMs ?? 0);
+  // "N seconds ago" is fixed against the device's clock once, so the window does
+  // not slide forward while polling.
+  let since = opts.since;
+  if (typeof since === 'number') {
+    const clock = await deviceClock(opts);
+    if (!clock) throw new OniroError('Could not read the device clock to apply --since.');
+    since = new Date(clock.nowMs - since * 1000);
+  }
   for (;;) {
-    const [entry] = await listFaultLogs(opts);
+    const [entry] = await listFaultLogs({ ...opts, since });
     if (entry) {
       const text = await readFaultLog({ ...opts, entry });
       let rawPath: string | undefined;

@@ -112,13 +112,20 @@ describe('app launch / apply --smoke', () => {
     expect(typeof opts.decodeGreyscale).toBe('function');
     // The crash probe is the faultlog reader: it waits for a faultlog only when the app died.
     smokeMocks.latestCrash.mockResolvedValue(null);
-    const since = new Date(10_000);
+    // The launch is passed as "seconds ago" (plus 2 s slack), read on the device's clock.
+    const since = new Date(Date.now() - 10_000);
     await opts.crashProbe({ config: opts.config, bundle: 'com.x', since, alive: true, deviceSerial: 'S1' });
     await opts.crashProbe({ config: opts.config, bundle: 'com.x', since, alive: false, deviceSerial: 'S1' });
-    expect(smokeMocks.latestCrash.mock.calls.map((c) => [c[0].waitMs, c[0].since.getTime(), c[0].deviceSerial])).toEqual([
-      [0, 8_000, 'S1'],
-      [15_000, 8_000, 'S1'],
+    const calls = smokeMocks.latestCrash.mock.calls.map((c) => [c[0].waitMs, c[0].since, c[0].deviceSerial]);
+    expect(calls.map(([w, , d]) => [w, d])).toEqual([
+      [0, 'S1'],
+      [15_000, 'S1'],
     ]);
+    for (const [, ago] of calls) {
+      expect(typeof ago).toBe('number');
+      expect(ago).toBeGreaterThanOrEqual(12);
+      expect(ago).toBeLessThan(13);
+    }
     expect(opts.screenshotPath).toMatch(/oniro-smoke-com\.x-\d+\.jpeg$/);
     expect(JSON.parse(out)).toEqual({ bundle: 'com.x', smoke: smokeResult(true) });
     expect(process.exitCode).toBeUndefined();
