@@ -372,7 +372,8 @@ HarmonyOS support is additive: a project is HarmonyOS only when its product decl
 | `detectRuntimeOs(projectDir, productName?)` | `'HarmonyOS'` or `'OpenHarmony'`, from `build-profile.json5`. |
 | `findHarmonyOsSdk({ config, logger? })` / `requireHarmonyOsSdk(...)` | Locate a HarmonyOS SDK (`harmonyosSdkPath`, then DevEco Studio's default location, then `cmdToolsPath` when it is the HarmonyOS edition), with its release as `version`, e.g. `6.1.1(24)`; `null` or an actionable error when there is none. |
 | `harmonyOsSdkLabelForApi(api)`, `HARMONYOS_SDK_VERSIONS` | The `"<version>(<api>)"` label HarmonyOS products declare. |
-| `createHarmonyOsSession(opts)` | `login` / `logout` / `getUserInfo` / `listTeams` / `resolveAgcAuth` / `getDeveloperAgreement` for a Huawei developer account. The token is stored encrypted, with the account's region. |
+| `createHarmonyOsSession(opts)` | `login` / `logout` / `getUserInfo` / `listTeams` / `resolveAgcAuth` / `getDeveloperAgreement` for a Huawei developer account. The token is stored encrypted, with the account's region. `onLoginUrl(url, { port })` reports the sign-in URL and loopback port. |
+| `session.login(HarmonyOsLoginOptions)` | `timeoutMs`; `port` to listen on a fixed loopback port (for an `ssh -L` tunnel); `openBrowser: false` to leave opening the URL to the user; `pastedCallbacks`, an `AsyncIterable<string>` (e.g. a `readline` interface over stdin) of callback addresses pasted from a browser on another machine, checked like a request to the loopback port. |
 | `harmonyOsAutoSign(opts)` | Keystore + CSR → AGC debug certificate → device registration → debug profile → `build-profile.json5`, reusing still-valid material. |
 | `readProvisionProfile(path)` | Bundle name, team, expiry, devices and ACLs of a `.p7b`. |
 | `HUAWEI_SITES` | Each region's sign-in and AppGallery Connect hosts. |

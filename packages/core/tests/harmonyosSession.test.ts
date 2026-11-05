@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as net from 'node:net';
 import { createHarmonyOsSession } from '../src/harmonyos/auth/session.js';
 import { openBrowser } from '../src/harmonyos/auth/browser.js';
 import { HUAWEI_SITES } from '../src/harmonyos/auth/endpoints.js';
@@ -9,6 +10,7 @@ import type {
   HttpResponse,
 } from '../src/harmonyos/http.js';
 import { staticConfig } from '../src/ports/config.js';
+import type { Logger } from '../src/ports/logger.js';
 
 // Never launch a real browser from a test.
 vi.mock('../src/harmonyos/auth/browser.js', () => ({ openBrowser: vi.fn(async () => {}) }));
@@ -277,6 +279,79 @@ describe('HarmonyOS session login', () => {
     expect(openBrowser).toHaveBeenLastCalledWith(loginUrl);
     await callBack(loginUrl, 'quit=true');
     await settled;
+  });
+});
+
+describe('HarmonyOS session login, browser elsewhere', () => {
+  /** A session that reports its sign-in URL; `url()` resolves once it is known. */
+  function watched(logger?: Logger) {
+    let resolveUrl!: (u: string) => void;
+    const url = new Promise<string>((r) => (resolveUrl = r));
+    const ports: number[] = [];
+    const store = memoryStore();
+    const { http, calls } = fakeHttp(euLogin);
+    const session = createHarmonyOsSession({
+      config: staticConfig({}),
+      http,
+      tokenStore: store,
+      logger,
+      onLoginUrl: (u, { port }) => {
+        ports.push(port);
+        resolveUrl(u);
+      },
+    });
+    return { session, url: () => url, ports, store, calls };
+  }
+
+  it('completes from a pasted callback address, after reporting one that is not it', async () => {
+    vi.mocked(openBrowser).mockClear();
+    const warnings: string[] = [];
+    const w = watched({ debug() {}, info() {}, warn: (m) => warnings.push(m), error() {} });
+    async function* pasted() {
+      const { searchParams } = new URL(await w.url());
+      yield '';
+      yield 'https://example.com/not-it';
+      // As copied from the address bar of a browser on another machine.
+      yield `http://127.0.0.1:${searchParams.get('port')}/callback?code=${searchParams.get('code')}&tempToken=tmp&siteId=7`;
+      // Never read: the sign-in is already complete.
+      throw new Error('read past the callback');
+    }
+    await expect(w.session.login({ timeoutMs: 5_000, openBrowser: false, pastedCallbacks: pasted() })).resolves.toMatchObject({
+      siteCode: 'EU',
+    });
+    expect(openBrowser).not.toHaveBeenCalled();
+    expect(w.store.load()).toEqual({ jwtToken: JWT, siteId: '7' });
+    expect(warnings).toEqual([expect.stringMatching(/not this sign-in's callback: it has no `code` parameter/)]);
+    // The pasted temp token is what was redeemed, on the account's own region.
+    expect(w.calls[0]!.url).toBe(`${HUAWEI_SITES.EU.loginUrl}/authrouter/auth/api/temptoken/check`);
+    expect(w.calls[0]!.opts?.query).toMatchObject({ tempToken: 'tmp', site: 'DE' });
+  });
+
+  it('listens on a fixed port, still completing through it while waiting for a paste', async () => {
+    const probe = await new Promise<number>((resolve) => {
+      const s = net.createServer().listen(0, '127.0.0.1', () => {
+        const { port } = s.address() as net.AddressInfo;
+        s.close(() => resolve(port));
+      });
+    });
+    const w = watched();
+    // stdin that never yields anything, like an idle terminal.
+    const idle: AsyncIterable<string> = { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) };
+    const pending = w.session.login({ timeoutMs: 5_000, port: probe, openBrowser: false, pastedCallbacks: idle });
+    const url = new URL(await w.url());
+    expect(url.searchParams.get('port')).toBe(String(probe));
+    expect(w.ports).toEqual([probe]);
+    // What the far end of `ssh -L <port>:127.0.0.1:<port>` delivers.
+    await callBack(url.href, 'tempToken=tmp&siteId=7');
+    await expect(pending).resolves.toMatchObject({ userId: 'u1' });
+  });
+
+  it('times out when nothing comes back, having sent nothing anywhere', async () => {
+    const w = watched();
+    await expect(
+      w.session.login({ timeoutMs: 200, openBrowser: false, pastedCallbacks: (async function* () {})() }),
+    ).rejects.toThrow(/Timed out/);
+    expect(w.calls).toEqual([]);
   });
 });
 

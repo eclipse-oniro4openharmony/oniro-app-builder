@@ -31,12 +31,37 @@ export interface HarmonyOsSessionOptions {
   logger?: Logger;
   http?: HarmonyOsHttpClient;
   tokenStore?: TokenStore;
-  /** Called with the sign-in URL before the browser opens, so a CLI can print it. */
-  onLoginUrl?: (url: string) => void;
+  /**
+   * Called with the sign-in URL before the browser opens, so a CLI can print it,
+   * and the loopback port the sign-in page will redirect to.
+   */
+  onLoginUrl?: (url: string, info: { port: number }) => void;
+}
+
+export interface HarmonyOsLoginOptions {
+  /** How long to wait for the sign-in. Default {@link LOGIN_TIMEOUT_MS}. */
+  timeoutMs?: number;
+  /**
+   * Loopback port the sign-in page redirects to. Default: one the OS assigns. Fix
+   * it to forward the port from the machine with the browser beforehand, with
+   * `ssh -L <port>:127.0.0.1:<port>`.
+   */
+  port?: number;
+  /** Default true. False leaves opening the URL (from `onLoginUrl`) to the user. */
+  openBrowser?: boolean;
+  /**
+   * Callback addresses the user pastes, one per item — say, a `readline`
+   * interface over stdin. For a browser on another machine, whose redirect to
+   * this machine's loopback port cannot load: the address it was sent to,
+   * copied from its address bar, completes the sign-in instead. The loopback
+   * listener keeps running alongside, and whichever arrives first wins; a pasted
+   * line that is not this sign-in's callback is reported and the next one read.
+   */
+  pastedCallbacks?: AsyncIterable<string>;
 }
 
 export interface HarmonyOsSession {
-  login(opts?: { timeoutMs?: number }): Promise<HuaweiUserInfo>;
+  login(opts?: HarmonyOsLoginOptions): Promise<HuaweiUserInfo>;
   /** Resolves false when there was no session to end. */
   logout(): Promise<boolean>;
   /** The signed-in account, or null. `refresh` mints a fresh AGC access token. */
@@ -156,16 +181,36 @@ export function createHarmonyOsSession(opts: HarmonyOsSessionOptions): HarmonyOs
         baseUrl: start,
         successPath: AUTH_PATHS.LOGIN_SUCCESS,
         failedPath: AUTH_PATHS.LOGIN_FAILED,
+        port: o.port,
       });
 
+      let settled = false;
       try {
         const loginUrl = `${start}/${AUTH_PATHS.AUTH_APPLY}?port=${server.port}&appid=${HUAWEI_APP_ID}&code=${clientSecret}`;
-        opts.onLoginUrl?.(loginUrl);
-        // Not awaited: some launchers exit only when the browser does.
-        openBrowser(loginUrl).catch((err: Error) => {
-          // Headless hosts have no browser; the URL was surfaced via onLoginUrl.
-          logger.warn(`[harmonyos] Could not open a browser automatically: ${err.message}`);
-        });
+        opts.onLoginUrl?.(loginUrl, { port: server.port });
+        if (o.openBrowser ?? true) {
+          // Not awaited: some launchers exit only when the browser does.
+          openBrowser(loginUrl).catch((err: Error) => {
+            // Headless hosts have no browser; the URL was surfaced via onLoginUrl.
+            logger.warn(`[harmonyos] Could not open a browser automatically: ${err.message}`);
+          });
+        }
+        if (o.pastedCallbacks) {
+          const pasted = o.pastedCallbacks;
+          // Not awaited: the loopback listener may complete the sign-in first.
+          void (async () => {
+            for await (const line of pasted) {
+              if (settled) return;
+              if (!line.trim()) continue;
+              const verdict = server.submit(line);
+              if (verdict.accepted) return;
+              logger.warn(
+                `[harmonyos] That is not this sign-in's callback: ${verdict.reason}. Paste the whole address ` +
+                  `the browser was sent to (http://127.0.0.1:${server.port}/callback?...), from its address bar.`,
+              );
+            }
+          })().catch((err: Error) => logger.debug(`[harmonyos] Stopped reading pasted callbacks: ${err.message}`));
+        }
 
         const callback = await server.waitForCallback(o.timeoutMs ?? LOGIN_TIMEOUT_MS);
         const site = siteForId(callback.siteId);
@@ -180,6 +225,7 @@ export function createHarmonyOsSession(opts: HarmonyOsSessionOptions): HarmonyOs
         logger.info(`[harmonyos] Signed in as ${user.userName || user.userId} (${site.code}).`);
         return user;
       } finally {
+        settled = true;
         await server.stop();
       }
     },

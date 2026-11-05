@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { parseTeamList } from '../src/harmonyos/auth/session.js';
 import { HUAWEI_SITES, siteForId } from '../src/harmonyos/auth/endpoints.js';
 import { createTokenStore } from '../src/harmonyos/auth/tokenStore.js';
-import { startCallbackServer } from '../src/harmonyos/auth/callbackServer.js';
+import { parseCallbackInput, startCallbackServer } from '../src/harmonyos/auth/callbackServer.js';
 import { openBrowser } from '../src/harmonyos/auth/browser.js';
 import { staticConfig } from '../src/ports/config.js';
 import { OniroError } from '../src/ports/errors.js';
@@ -156,14 +156,58 @@ describe('Huawei regions', () => {
   });
 });
 
-describe('login callback server', () => {
-  const start = () =>
-    startCallbackServer({
-      clientSecret: 'secret123',
-      baseUrl: 'https://example.invalid',
-      successPath: 'ok',
-      failedPath: 'fail',
+describe('parseCallbackInput', () => {
+  const expected = { code: 'c0de', tempToken: 'tmp', siteId: '7' };
+  const read = (input: string) => Object.fromEntries(parseCallbackInput(input));
+
+  it('reads the whole address copied from the address bar', () => {
+    expect(read('http://127.0.0.1:43123/callback?code=c0de&tempToken=tmp&siteId=7')).toEqual(expected);
+    expect(read('http://localhost:43123/callback?code=c0de&tempToken=tmp&siteId=7#frag')).toEqual(expected);
+  });
+
+  it('reads the path and query, or the query alone, with or without its ?', () => {
+    expect(read('/callback?code=c0de&tempToken=tmp&siteId=7')).toEqual(expected);
+    expect(read('?code=c0de&tempToken=tmp&siteId=7')).toEqual(expected);
+    expect(read('code=c0de&tempToken=tmp&siteId=7')).toEqual(expected);
+  });
+
+  it('ignores surrounding whitespace and quotes', () => {
+    expect(read('  "http://127.0.0.1:1/callback?code=c0de&tempToken=tmp&siteId=7"\r\n')).toEqual(expected);
+    expect(read("'code=c0de&tempToken=tmp&siteId=7'")).toEqual(expected);
+    expect(read('<http://127.0.0.1:1/callback?code=c0de&tempToken=tmp&siteId=7>')).toEqual(expected);
+  });
+
+  it('decodes percent-encoding, as the loopback server would', () => {
+    expect(read('code=c0de&tempToken=a%2Bb%3D&siteId=7').tempToken).toBe('a+b=');
+  });
+
+  it('yields no parameters for text that is not a callback', () => {
+    expect(read('')).toEqual({});
+    expect(read('https://example.com/')).toEqual({});
+  });
+});
+
+/** A port nothing listens on right now. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = http.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as import('node:net').AddressInfo;
+      probe.close(() => resolve(port));
     });
+  });
+}
+
+const OPTS = {
+  clientSecret: 'secret123',
+  baseUrl: 'https://example.invalid',
+  successPath: 'ok',
+  failedPath: 'fail',
+};
+
+describe('login callback server', () => {
+  const start = () => startCallbackServer(OPTS);
 
   it('accepts a callback carrying the matching secret, and redirects to the success page', async () => {
     const server = await start();
@@ -272,6 +316,65 @@ describe('login callback server', () => {
       });
       expect(res.headers.get('location')).toBe('https://example.invalid/fail');
       await expect(server.waitForCallback(5_000)).rejects.toThrow(/cancelled/i);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('listens on the port it is given, so a tunnel can be set up first', async () => {
+    const port = await freePort();
+    const server = await startCallbackServer({ ...OPTS, port });
+    try {
+      expect(server.port).toBe(port);
+      const pending = server.waitForCallback(5_000);
+      const res = await fetch(`http://127.0.0.1:${port}/callback?code=secret123&tempToken=tok&siteId=1`, {
+        redirect: 'manual',
+      });
+      expect(res.status).toBe(302);
+      await expect(pending).resolves.toEqual({ tempToken: 'tok', siteId: '1' });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('says when the given port is taken, and refuses one out of range', async () => {
+    const first = await start();
+    try {
+      await expect(startCallbackServer({ ...OPTS, port: first.port })).rejects.toThrow(
+        new RegExp(`port ${first.port} is already in use on 127\\.0\\.0\\.1; pick another with --port`),
+      );
+    } finally {
+      await first.stop();
+    }
+    for (const port of [-1, 65_536, 1.5]) {
+      await expect(startCallbackServer({ ...OPTS, port })).rejects.toThrow(/Invalid login callback port/);
+    }
+  });
+
+  it('takes a pasted callback through the same checks, settling the same login', async () => {
+    const server = await start();
+    try {
+      const pending = server.waitForCallback(5_000);
+      expect(server.submit('nonsense')).toEqual({ accepted: false, reason: 'it has no `code` parameter' });
+      expect(server.submit('code=wrong&tempToken=tok&siteId=1')).toEqual({
+        accepted: false,
+        reason: 'its `code` belongs to another sign-in attempt',
+      });
+      expect(server.submit('code=secret123&siteId=1')).toMatchObject({ accepted: false });
+      expect(server.submit(`http://127.0.0.1:${server.port}/callback?code=secret123&tempToken=pasted&siteId=7`)).toEqual({
+        accepted: true,
+      });
+      await expect(pending).resolves.toEqual({ tempToken: 'pasted', siteId: '7' });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('cancels the login when the pasted callback is the browser quitting', async () => {
+    const server = await start();
+    try {
+      expect(server.submit('?code=secret123&quit=access_denied')).toEqual({ accepted: true });
+      await expect(server.waitForCallback(1_000)).rejects.toThrow(/cancelled/i);
     } finally {
       await server.stop();
     }
