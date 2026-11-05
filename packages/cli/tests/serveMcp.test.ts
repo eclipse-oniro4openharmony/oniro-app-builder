@@ -168,6 +168,7 @@ describe('JSON Schema subset', () => {
     expect(validateArgs(schema, { n: 1.5, list: [] })).toEqual(['n must be an integer', 'list needs at least 1 item']);
     expect(validateArgs(schema, { n: 0, list: ['a', 2] })).toEqual(['n must be >= 1', 'list[1] must be a string']);
     expect(validateArgs(schema, {})).toEqual(['list is required']);
+    expect(validateArgs(schema, { list: null })).toEqual(['list is required']);
   });
 
   it('fills defaults and treats null as not given', () => {
