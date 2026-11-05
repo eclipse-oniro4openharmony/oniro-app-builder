@@ -91,7 +91,9 @@ describe('smokeCheck', () => {
     const since = new Date('2026-11-05T10:00:00Z');
     const crashProbe = vi.fn(async () => ({ kind: 'js_crash', topFrame: 'Index.ets:5' }));
     const r = await smokeCheck({ config, bundle: 'com.x', since, delayMs: 0, deviceSerial: 'S1', crashProbe });
-    expect(crashProbe).toHaveBeenCalledWith(expect.objectContaining({ config, bundle: 'com.x', since, deviceSerial: 'S1' }));
+    expect(crashProbe).toHaveBeenCalledWith(
+      expect.objectContaining({ config, bundle: 'com.x', since, alive: expect.any(Boolean), deviceSerial: 'S1' }),
+    );
     expect(r).toMatchObject({ passed: false, crashChecked: true, crash: { kind: 'js_crash' } });
   });
 

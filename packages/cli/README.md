@@ -376,15 +376,15 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 | `--json` | Emit the result (`method`, pre/post-install pid, `cacheCleared`) as JSON; with `--smoke`, plus a `smoke` object. |
 | `--smoke` | After installing, launch the app and judge the launch (below). |
 
-**Launch smoke check** (`app launch --smoke`, `app apply --smoke`): wakes the screen and swipes away a lock screen without a credential, launches, waits for the app's process (up to 10 s), waits `--smoke-delay`, takes a screenshot, and checks the process is still the same pid. The verdict fails, and the command exits 1, when the process never started or died, or the screen is blank: the app area (status and navigation bars cropped off) is a flat frame by perceptual hash with little variance, or 99.8 % one colour — the deveco-cli smoke-inspector pattern. `--json` prints it (`app launch` as `{ bundle, smoke }`):
+**Launch smoke check** (`app launch --smoke`, `app apply --smoke`): wakes the screen and swipes away a lock screen without a credential, launches, waits for the app's process (up to 10 s), waits `--smoke-delay`, takes a screenshot, and checks the process is still the same pid. The verdict fails, and the command exits 1, when the process never started or died, a crash was recorded since the launch (read with `logs crash`'s faultlog reader, which waits up to 15 s for the faultlog of an app that died), or the screen is blank: the app area (status and navigation bars cropped off) is a flat frame by perceptual hash with little variance, or 99.8 % one colour — the deveco-cli smoke-inspector pattern. `--json` prints it (`app launch` as `{ bundle, smoke }`):
 
 ```json
 { "smoke": { "passed": false, "failures": ["the screen is blank"], "pid": 15446, "alive": true,
   "blankScreen": true, "blankScore": 1, "blank": { "phashDistance": 0, "stdDev": 0, "background": 255, … },
-  "screenshot": "/tmp/oniro-smoke-com.example.app-1762342512000.jpeg", "crash": null, "crashChecked": false, "delayMs": 2000 } }
+  "screenshot": "/tmp/oniro-smoke-com.example.app-1762342512000.jpeg", "crash": null, "crashChecked": true, "delayMs": 2000 } }
 ```
 
-`blankScore` is the share (0–1) of the app area in its dominant colour: a "Hello World" page scores about 0.977, an empty page 1. `crash` is reserved for crash detection (`crashChecked` is `false` until it is wired in).
+`blankScore` is the share (0–1) of the app area in its dominant colour: a "Hello World" page scores about 0.977, an empty page 1. `crash` is the `logs crash --json` verdict of the newest fault since the launch (`js_crash`, `cpp_crash`, `app_freeze`, with its reason and project frame), or `null`; the text line names it, e.g. `js_crash (RangeError) at entry/src/main/ets/pages/Index.ets:8`.
 
 | Flag | Description |
 | --- | --- |

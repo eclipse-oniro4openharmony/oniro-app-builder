@@ -29,6 +29,12 @@ export interface SmokeCrashProbeArgs {
   bundle: string;
   /** When the launch started; only crashes at or after it count. */
   since: Date;
+  /**
+   * Whether the launched process is still the one that started. A probe can
+   * wait for a faultlog when it is not (hiview writes it seconds after the
+   * death) and look only once when it is.
+   */
+  alive: boolean;
   deviceSerial?: string;
   logger?: Logger;
 }
@@ -36,9 +42,8 @@ export interface SmokeCrashProbeArgs {
 /**
  * Crash-detection hook. Resolve a description of the newest crash (cpp_crash,
  * js_crash, app_freeze, …) of the bundle since the launch, or null when there
- * was none. Meant for the faultlog reader (`latestCrash`), wired in as
- * `crashProbe: latestCrash`; smoke checks run without one until then. A probe
- * that throws is logged and counts as no crash.
+ * was none. The CLI passes the faultlog reader (`latestCrash`). A probe that
+ * throws is logged and counts as no crash.
  */
 export type SmokeCrashProbe<C = unknown> = (args: SmokeCrashProbeArgs) => Promise<C | null>;
 
@@ -147,7 +152,7 @@ export async function smokeCheck<C = unknown>(opts: SmokeCheckOptions<C>): Promi
   const now = pid === null ? null : await pidOf(opts);
   const alive = pid !== null && now === pid;
 
-  // Crash hook: wired to the faultlog reader once it lands; until then callers pass nothing.
+  // Crash hook: the CLI passes the faultlog reader (latestCrash).
   let crash: C | null = null;
   if (opts.crashProbe) {
     try {
@@ -155,6 +160,7 @@ export async function smokeCheck<C = unknown>(opts: SmokeCheckOptions<C>): Promi
         config: opts.config,
         bundle: opts.bundle,
         since,
+        alive,
         deviceSerial: opts.deviceSerial,
         logger: opts.logger,
       });
