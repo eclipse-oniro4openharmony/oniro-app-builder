@@ -89,17 +89,97 @@ export interface InstallCmdToolsOptions {
    * config key and the default location next to the install target.
    */
   tmpDir?: string;
+  /**
+   * Filesystem seams for tests: `move` stages each extracted entry inside the
+   * install directory (default {@link movePath}), `rename` swaps entries in and
+   * out of it (default `fs.renameSync`).
+   * @internal
+   */
+  fsOps?: Partial<CmdToolsFsOps>;
+}
+
+/** @internal */
+export interface CmdToolsFsOps {
+  move: (src: string, dest: string) => void;
+  rename: (src: string, dest: string) => void;
+}
+
+/**
+ * This module's own work directories inside the install target. A run killed
+ * outright can leave one behind; the next install removes it.
+ */
+const STAGING_PREFIX = '.oniro-staging-';
+const PREVIOUS_PREFIX = '.oniro-previous-';
+
+function isWorkDirName(name: string): boolean {
+  return name.startsWith(STAGING_PREFIX) || name.startsWith(PREVIOUS_PREFIX);
+}
+
+/**
+ * Replace the contents of `target` with those of `staging` (a directory inside
+ * `target`), leaving `target` as it was when any rename fails. Returns the
+ * directory now holding the previous contents, for the caller to delete.
+ *
+ * Every step is a rename within `target`, so nothing is copied here and the disk
+ * cannot fill up part-way. That holds even when `target` is a mount point (a
+ * Docker volume, a bind mount), which renaming `target` itself would not survive.
+ * `keep` names entries of `target` to leave alone (a scratch directory inside it).
+ */
+function swapInto(
+  target: string,
+  staging: string,
+  keep: ReadonlySet<string>,
+  rename: CmdToolsFsOps['rename'],
+): string {
+  const previous = path.join(target, PREVIOUS_PREFIX + path.basename(staging).slice(STAGING_PREFIX.length));
+  fs.mkdirSync(previous);
+  const parked: string[] = [];
+  const placed: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(target)) {
+      if (isWorkDirName(entry) || keep.has(entry)) continue;
+      rename(path.join(target, entry), path.join(previous, entry));
+      parked.push(entry);
+    }
+    for (const entry of fs.readdirSync(staging)) {
+      rename(path.join(staging, entry), path.join(target, entry));
+      placed.push(entry);
+    }
+  } catch (err) {
+    // Undo in reverse: the new entries out, the old ones back.
+    for (const entry of placed.reverse()) {
+      fs.rmSync(path.join(target, entry), { recursive: true, force: true });
+    }
+    for (const entry of parked.reverse()) {
+      fs.renameSync(path.join(previous, entry), path.join(target, entry));
+    }
+    fs.rmSync(previous, { recursive: true, force: true });
+    throw err;
+  }
+  return previous;
 }
 
 /**
  * Install the OpenHarmony command-line tools into `<cmdToolsPath>`.
  * Either downloads from the platform-specific URL or installs from a caller-supplied ZIP.
+ *
+ * The archive is extracted to scratch space and staged inside the install
+ * directory; only once the whole tree is staged are its entries swapped in for the
+ * old ones. A failure before that (a full disk mid-copy, say) leaves the install
+ * directory as it was, and one during the swap rolls it back (#16). A successful
+ * install replaces the directory's contents outright, so it holds exactly what a
+ * clean extraction of the archive holds, whatever an earlier failed attempt or an
+ * older version left there.
  */
 export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<void> {
   const { config, progress, abortSignal } = opts;
   const logger = opts.logger ?? noopLogger;
-  const CMD_PATH = getCmdToolsPath(config);
+  const move = opts.fsOps?.move ?? movePath;
+  const rename = opts.fsOps?.rename ?? fs.renameSync;
+  const CMD_PATH = path.resolve(getCmdToolsPath(config));
   const what = 'the command-line tools install';
+  const createdTarget = !fs.existsSync(CMD_PATH);
+  let staging: string | undefined;
 
   const { dir: tmpDir, root: tmpRoot } = createInstallTempDir({
     config,
@@ -120,22 +200,20 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
 
     progress?.report({ message: 'Extracting tools...', increment: 0 });
     await extractZipWithProgress({ zipPath, dest: extractPath, progress, start: 50, range: 45, logger });
-
-    fs.mkdirSync(CMD_PATH, { recursive: true });
     const srcDir = findCmdToolsSourceDir(extractPath);
 
+    fs.mkdirSync(CMD_PATH, { recursive: true });
+    for (const leftover of fs.readdirSync(CMD_PATH).filter(isWorkDirName)) {
+      logger.debug(`[cmdtools] Removing ${leftover}, left behind by an interrupted install.`);
+      fs.rmSync(path.join(CMD_PATH, leftover), { recursive: true, force: true });
+    }
+    // Staged inside the target, so the swap below is renames on one filesystem.
+    staging = fs.mkdtempSync(path.join(CMD_PATH, STAGING_PREFIX));
     for (const entry of fs.readdirSync(srcDir)) {
-      const src = path.join(srcDir, entry);
-      const dest = path.join(CMD_PATH, entry);
-      if (fs.statSync(src).isDirectory()) {
-        if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-        movePath(src, dest);
-      } else {
-        fs.copyFileSync(src, dest);
-      }
+      move(path.join(srcDir, entry), path.join(staging, entry));
     }
 
-    const binDir = path.join(CMD_PATH, 'bin');
+    const binDir = path.join(staging, 'bin');
     if (fs.existsSync(binDir) && os.platform() !== 'win32') {
       for (const file of fs.readdirSync(binDir)) {
         fs.chmodSync(path.join(binDir, file), 0o755);
@@ -143,10 +221,25 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
     }
 
     progress?.report({ message: 'Finalizing installation...', increment: 5 });
+    // A scratch directory the caller placed inside the install target stays put.
+    const tmpRel = path.relative(CMD_PATH, path.resolve(tmpRoot));
+    const keep = new Set<string>(
+      tmpRel && !tmpRel.startsWith('..') && !path.isAbsolute(tmpRel) ? [tmpRel.split(path.sep)[0]!] : [],
+    );
+    const previous = swapInto(CMD_PATH, staging, keep, rename);
     progress?.report({ message: 'Cleaning up...', increment: 0 });
+    try {
+      fs.rmSync(previous, { recursive: true, force: true });
+    } catch (err) {
+      // The new tools are in place; the next install removes what is left.
+      logger.warn(`Could not remove the previous tools at ${previous}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   } catch (err) {
+    // Nothing of the user's was there before this run.
+    if (createdTarget) fs.rmSync(CMD_PATH, { recursive: true, force: true });
     throw toSpaceError(err, tmpRoot, what);
   } finally {
+    if (staging) fs.rmSync(staging, { recursive: true, force: true });
     removeTempWorkDir(tmpDir, tmpRoot);
   }
 }

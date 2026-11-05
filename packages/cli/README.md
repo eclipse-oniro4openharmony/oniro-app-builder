@@ -79,7 +79,7 @@ It lands in `<ONIRO_SDK_ROOT_DIR>/<os>/<api>` like a downloaded release, so proj
 
 | Command | Description |
 | --- | --- |
-| `cmdtools install [--from-zip <path>] [--force] [--tmp-dir <path>]` | Install the tools. `--from-zip` installs from a local archive instead of downloading (required on Windows/macOS — see [Configuration](#configuration)); `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). |
+| `cmdtools install [--from-zip <path>] [--force] [--tmp-dir <path>]` | Install the tools. `--from-zip` installs from a local archive instead of downloading (required on Windows/macOS — see [Configuration](#configuration)); `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). The new tools are staged and swapped in only once complete: an install that fails (a full disk, say) leaves the existing tools as they were, and a successful one replaces the directory's contents outright. |
 | `cmdtools status [--json]` | Report whether the tools are installed, their version, their flavour (`HarmonyOS` when they bundle `sdk/default/hms`, as the Huawei developer-portal download does, else `OpenHarmony`), and the `hdc` binary every device command uses. Exits non-zero when not installed. |
 | `cmdtools remove` | Delete the configured command-line-tools directory. |
 
@@ -733,6 +733,10 @@ created if it does not exist; the per-run folder inside it is removed afterwards
 so. When space runs short, the install fails with a message naming the directory, how much room
 it needed, whether that directory is RAM-backed, and this flag — rather than crashing part-way
 through.
+
+`cmdtools install` stages the new tools inside the install directory and swaps them in only once
+they are complete, so a failure leaves the existing tools as they were. The old tools are deleted
+only after the swap, so the install directory's filesystem needs room for both versions at once.
 
 **Command-line tools on Windows / macOS.** The Huawei mirror only publishes a Linux build of the command-line tools. On Windows and macOS you must either download the ZIP manually from the Huawei developer portal and install it with `oniro-app cmdtools install --from-zip path/to/commandline-tools-<platform>.zip`, or host the archive yourself and set `ONIRO_CMD_TOOLS_URL_WINDOWS` / `ONIRO_CMD_TOOLS_URL_MAC` so `cmdtools install` can fetch it.
 
