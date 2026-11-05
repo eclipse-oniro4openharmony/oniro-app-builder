@@ -10,6 +10,7 @@ const smokeMocks = vi.hoisted(() => ({
   smokeCheck: vi.fn(),
   wakeAndUnlock: vi.fn(),
   applyChanges: vi.fn(),
+  latestCrash: vi.fn(),
 }));
 
 vi.mock('@oniroproject/core', async () => {
@@ -98,7 +99,7 @@ describe('app launch / apply --smoke', () => {
     await program.parseAsync(args, { from: 'user' });
   };
 
-  it('wakes the screen, launches, smoke-checks with a decoder and no crash probe, and prints JSON', async () => {
+  it('wakes the screen, launches, smoke-checks with a decoder and the faultlog reader, and prints JSON', async () => {
     smokeMocks.smokeCheck.mockResolvedValue(smokeResult(true));
     await run(['app', 'launch', '--bundle', 'com.x', '--smoke', '--smoke-delay', '500', '--json', '--device', 'S1']);
     expect(smokeMocks.wakeAndUnlock).toHaveBeenCalledWith(expect.objectContaining({ deviceSerial: 'S1' }));
@@ -109,10 +110,32 @@ describe('app launch / apply --smoke', () => {
     expect(opts).toMatchObject({ bundle: 'com.x', delayMs: 500, deviceSerial: 'S1' });
     expect(opts.since).toBeInstanceOf(Date);
     expect(typeof opts.decodeGreyscale).toBe('function');
-    expect(opts.crashProbe).toBeUndefined();
+    // The crash probe is the faultlog reader: it waits for a faultlog only when the app died.
+    smokeMocks.latestCrash.mockResolvedValue(null);
+    const since = new Date(10_000);
+    await opts.crashProbe({ config: opts.config, bundle: 'com.x', since, alive: true, deviceSerial: 'S1' });
+    await opts.crashProbe({ config: opts.config, bundle: 'com.x', since, alive: false, deviceSerial: 'S1' });
+    expect(smokeMocks.latestCrash.mock.calls.map((c) => [c[0].waitMs, c[0].since.getTime(), c[0].deviceSerial])).toEqual([
+      [0, 8_000, 'S1'],
+      [15_000, 8_000, 'S1'],
+    ]);
     expect(opts.screenshotPath).toMatch(/oniro-smoke-com\.x-\d+\.jpeg$/);
     expect(JSON.parse(out)).toEqual({ bundle: 'com.x', smoke: smokeResult(true) });
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it('names the crash in the smoke line', async () => {
+    smokeMocks.smokeCheck.mockResolvedValue({
+      ...smokeResult(false),
+      failures: ['js_crash: RangeError'],
+      alive: false,
+      blankScreen: null,
+      crash: { kind: 'js_crash', reason: 'RangeError', file: 'entry/src/main/ets/pages/Index.ets', line: 8 },
+      crashChecked: true,
+    });
+    await run(['app', 'launch', '--bundle', 'com.x', '--smoke']);
+    expect(out).toContain('js_crash (RangeError) at entry/src/main/ets/pages/Index.ets:8');
+    expect(process.exitCode).toBe(1);
   });
 
   it('exits 1 when the smoke check fails', async () => {

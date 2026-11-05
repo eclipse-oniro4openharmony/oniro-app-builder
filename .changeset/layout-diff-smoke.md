@@ -14,7 +14,8 @@ Features:
 - `app launch --smoke` and `app apply --smoke` (`--smoke-delay <ms>`, `--smoke-screenshot <file>`): wake the
   screen, launch, wait for the process, screenshot after the delay, and report
   `{ smoke: { passed, failures, pid, alive, blankScreen, blankScore, screenshot, crash } }`. Exits 1 when the
-  process did not start or died, or the screen is blank (the deveco-cli smoke-inspector pattern).
+  process did not start or died, a crash was recorded since the launch (`crash` holds the `logs crash` verdict),
+  or the screen is blank (the deveco-cli smoke-inspector pattern).
 - Core exports `summarizeLayout`, `diffLayouts`, `parseLayoutBaseline`, `boxIoU`, `smokeCheck` (with an optional
   `crashProbe` hook for crash detection) and `smokeVerdict`, and an image module: `pHash`, `dHash`,
   `hammingDistance`, `compareImages`, `analyzeBlank` and their helpers, over greyscale pixels the caller decodes.

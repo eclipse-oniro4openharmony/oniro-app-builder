@@ -11,11 +11,13 @@ import {
   getBundleName,
   readHapBundleName,
   smokeCheck,
+  latestCrash,
   wakeAndUnlock,
   DEFAULT_SMOKE_DELAY_MS,
   OniroError,
   type ConfigProvider,
   type Logger,
+  type CrashVerdict,
   type SmokeResult,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
@@ -56,14 +58,19 @@ async function wakeForSmoke(config: ConfigProvider, logger: Logger, device?: str
   if (screen?.locked) logger.warn('The lock screen asks for a credential; the smoke screenshot will show it.');
 }
 
-/** The launch smoke check, with sharp decoding the screenshot. */
+/** How far behind the host the device clock may run before a launch's crash is missed. */
+const CRASH_CLOCK_SLACK_MS = 2_000;
+/** How long to wait for the faultlog of an app that died after launch. */
+const CRASH_WAIT_MS = 15_000;
+
+/** The launch smoke check, with sharp decoding the screenshot and the faultlog reader for crashes. */
 function runSmoke(
   config: ConfigProvider,
   logger: Logger,
   bundle: string,
   since: Date,
   opts: SmokeOpts & { device?: string },
-): Promise<SmokeResult> {
+): Promise<SmokeResult<CrashVerdict>> {
   const screenshotPath = opts.smokeScreenshot
     ? path.resolve(opts.smokeScreenshot)
     : path.join(os.tmpdir(), `oniro-smoke-${bundle}-${since.getTime()}.jpeg`);
@@ -74,18 +81,32 @@ function runSmoke(
     delayMs: smokeDelayFrom(opts.smokeDelay),
     screenshotPath,
     decodeGreyscale: (jpeg) => decodeGreyscale(jpeg),
-    // Crash detection: pass the faultlog reader here (crashProbe: latestCrash) once core has it.
+    crashProbe: (probe) =>
+      latestCrash({
+        config: probe.config,
+        bundle: probe.bundle,
+        // Faultlog times are the device's clock: allow it to run a little behind.
+        since: new Date(probe.since.getTime() - CRASH_CLOCK_SLACK_MS),
+        // hiview writes the faultlog seconds after a death; a live app is looked up once.
+        waitMs: probe.alive ? 0 : CRASH_WAIT_MS,
+        deviceSerial: probe.deviceSerial,
+        logger: probe.logger,
+      }),
     deviceSerial: opts.device,
     logger,
   });
 }
 
 /** One line for the smoke verdict. */
-export function formatSmoke(s: SmokeResult): string {
+export function formatSmoke(s: SmokeResult<CrashVerdict>): string {
   const parts = [
     s.pid === null ? 'no process' : `pid ${s.pid} ${s.alive ? 'alive' : 'died'}`,
     s.blankScreen === null ? 'blank check skipped' : `${s.blankScreen ? 'blank' : 'not blank'} (score ${s.blankScore})`,
   ];
+  if (s.crash) {
+    const where = s.crash.file ? ` at ${s.crash.file}:${s.crash.line ?? '?'}` : '';
+    parts.push(`${s.crash.kind ?? 'crash'}${s.crash.reason ? ` (${s.crash.reason})` : ''}${where}`);
+  }
   if (s.screenshot) parts.push(`screenshot ${s.screenshot}`);
   return `smoke: ${s.passed ? 'passed' : `FAILED (${s.failures.join('; ')})`}: ${parts.join(', ')}`;
 }
@@ -217,7 +238,7 @@ export function registerAppCommand(program: Command): void {
         deviceSerial: opts.device,
         logger,
       });
-      let smoke: SmokeResult | undefined;
+      let smoke: SmokeResult<CrashVerdict> | undefined;
       if (opts.smoke) {
         // A replace install stops the app, so launch it again before judging it.
         await wakeForSmoke(config, logger, opts.device);
