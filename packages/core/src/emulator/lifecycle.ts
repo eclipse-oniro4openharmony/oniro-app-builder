@@ -121,20 +121,14 @@ export async function startEmulator(opts: StartEmulatorOptions): Promise<void> {
 
   // Detect a still-running emulator from a previous run (POSIX only — Windows
   // PID semantics with process groups make this unreliable to check by hand).
+  let runningPid: number | undefined;
   if (os.platform() !== 'win32' && fs.existsSync(PID_FILE)) {
     try {
       const pid = Number(fs.readFileSync(PID_FILE, 'utf8').trim());
       if (Number.isFinite(pid) && pid > 0) {
         try {
           process.kill(pid, 0);
-          logger.info(`Emulator already running (PID ${pid}); not starting another.`);
-          if (opts.waitForHdcSeconds && opts.waitForHdcSeconds > 0) {
-            await waitForHdc(config, opts.waitForHdcSeconds, opts.hdcPollIntervalMs ?? 5000, logger, opts.abortSignal);
-          }
-          if (opts.waitReadySeconds && opts.waitReadySeconds > 0) {
-            await waitForBootCompleted(config, opts, logger);
-          }
-          return;
+          runningPid = pid;
         } catch {
           // Stale PID file — fall through and launch a fresh one.
         }
@@ -142,6 +136,19 @@ export async function startEmulator(opts: StartEmulatorOptions): Promise<void> {
     } catch (err) {
       logger.warn(`Could not read PID file: ${(err as Error).message}`);
     }
+  }
+  if (runningPid !== undefined) {
+    // Outside the PID probe on purpose: a wait timeout or cancellation on a running
+    // emulator must reach the caller, not be read as a stale PID file (which would
+    // launch a second emulator on the same read-write images).
+    logger.info(`Emulator already running (PID ${runningPid}); not starting another.`);
+    if (opts.waitForHdcSeconds && opts.waitForHdcSeconds > 0) {
+      await waitForHdc(config, opts.waitForHdcSeconds, opts.hdcPollIntervalMs ?? 5000, logger, opts.abortSignal);
+    }
+    if (opts.waitReadySeconds && opts.waitReadySeconds > 0) {
+      await waitForBootCompleted(config, opts, logger);
+    }
+    return;
   }
 
   const imagesPath = path.join(getEmulatorDir(config), 'images');
