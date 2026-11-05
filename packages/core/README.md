@@ -295,6 +295,20 @@ The flow file format of `oniro-app record` / `replay` (see the CLI README, "Flow
 | `parseUiRecordLines` / `alignTouches` / `elementAt` / `fieldSelector` / `expectFor` / `keystrokeChar` / `keystrokeName` | — | Pure helpers: `record.csv` (JSON Lines) → `UiRecordEvent[]`; pointer events → touch-down times; the topmost uncovered element under a point; a field selector that ignores its text; a selector for an element new in `after`; KeyCode ids → a typed character or a key name. |
 | `parseDeviceTime` / `parseTouchDowns` / `parseRecorderForeground` / `UI_RECORD_CSV` | — | Pure: `date` / `stat %y` timestamps → epoch ms; `ServerMsgHandler: [P:D:…]` hilog lines → touch-down times; the recorder's `Current ForAbility` line; `/data/local/tmp/record.csv`. |
 
+### Performance — hitrace capture and summary
+
+`oniro-app perf trace` / `perf summary`: a hitrace capture while the app cold-launches or a flow is replayed, and its summary for one bundle. Pure parsing and summary; `perfTrace` drives the device.
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `perfTrace` | `(PerfTraceOptions) => Promise<PerfTraceReport>` | `hitrace --trace_begin -b <bufferKb> <categories>` (taking over a capture left running), then `launch` (force-stopped before tracing, `aa start` after), a `flow` through `replayFlow`, or a wait of `forMs`; `hitrace --trace_finish -o`, `file recv` to `out`, remove the device copy, and summarise with `summarizeTrace` (pid from `pidof`, refresh rate from `hidumper` as fallbacks). `hiperf` samples the app's process with `hiperf record -p` (stopped with SIGINT) and adds `hiperf report --sort dso,func`'s top functions. Returns `{ ok, bundle, durationMs, trace, refreshRateHz, frames, startup, flow, pid, mainThread, scenes, hiperf?, categories, notes, error? }`; never throws for a failed capture, and always stops tracing. |
+| `evaluatePerfGate` | `(report, PerfThresholds) => PerfGateResult` | `maxJankRate` / `maxStartupMs` → `{ passed, failures }`; a threshold whose metric was not measured fails, and so does a flow that did not pass. |
+| `DEFAULT_TRACE_CATEGORIES` / `DEFAULT_TRACE_BUFFER_KB` / `DEFAULT_PERF_FOR_MS` / `DEFAULT_PERF_FLOW_TAIL_MS` | — | `ace, app, graphic, ability, window`; 65536 KB; 5000 ms; 1000 ms. |
+| `parseTraceText` / `parseTraceFile` / `TraceParser` | `(text, ParseTraceOptions?) => TraceModel` / `(file, opts?) => Promise<TraceModel>` | ftrace text (with or without the tgid column) → `TraceModel`: closed and open B/E slices per thread (`tid`, `pid`, `name`, `ts`, `dur`, `depth`; the level/tag suffix `\|I39` and the `H:` / HiTraceChain prefixes stripped), async S/F slices, counters, thread names, main-thread CPU time from `sched_switch`, RenderService surface owners, the buffer-overflow header. `keepSlice` (e.g. `perfSliceFilter`) keeps memory flat on long captures; the file is streamed. |
+| `summarizeTrace` | `(TraceModel, SummarizeTraceOptions) => TraceSummary` | For `bundle`: the app's pid (thread name, `##<bundle>` launch markers, `pid`, else its RenderService surface), frames from the `ReceiveVsync` slices on its main thread timed from their vsync (`total`, `janky` over one refresh interval, `jankRate`, `p50Ms`, `p95Ms`, `maxMs`, `missedVsyncs`, `longest`), `refreshRateHz` from `VSyncReceiver:period`, `startup` with `launched` (`coldMs` from `aa`'s `StartAbility` to `RSJankStats::ReportEventFirstFrame`, `firstFrameMs`, `processMs`, `from`, `to`), `mainThread` (`busyMs`, `cpuMs`), RenderService `scenes`, and `notes`. |
+| `perfSliceFilter` / `findAppPids` / `findAppPidsBySurface` / `commMatchesBundle` / `cleanMarkerName` / `quantile` | — | Pure helpers behind the above. |
+| `parseHiperfReport` / `parseActiveRefreshRate` | `(text, limit?) => HiperfReport` / `(hidumper) => number \| null` | `hiperf report` rows → `{ event, samples, top: [{ percent, dso, func }] }`; `activeMode: …, refreshRate=59` → 59. |
+
 ### hdc — logging (hilog)
 
 | Export | Signature | Description |

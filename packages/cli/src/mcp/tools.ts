@@ -25,6 +25,11 @@ import {
   waitForLog,
   waitForTarget,
   DEFAULT_SMOKE_DELAY_MS,
+  DEFAULT_TRACE_BUFFER_KB,
+  DEFAULT_TRACE_CATEGORIES,
+  evaluatePerfGate,
+  perfTrace,
+  readFlowFile,
   type CrashVerdict,
   type DumpLayoutResult,
   type UiInputType,
@@ -37,6 +42,7 @@ import { applyWithSmoke, launchWithSmoke } from '../commands/app.js';
 import { runApiSearch, runApiShow } from '../commands/api.js';
 import { doctorExitCode } from '../commands/doctor.js';
 import { devicesJson, queryDevices } from '../commands/devices.js';
+import { perfExitCode } from '../commands/perf.js';
 import { formatFlatLayout } from '../lib/layoutText.js';
 import { parseCrashSince, projectBundle } from '../lib/crashReport.js';
 import { parseSince } from '../lib/logSince.js';
@@ -741,6 +747,64 @@ const logsCrash: Tool = {
   },
 };
 
+const perfTraceTool: Tool = {
+  name: 'perf_trace',
+  title: 'Measure frames, jank and startup',
+  description:
+    'Capture a hitrace trace while the app cold-launches (`launch`), a flow file is replayed (`flow`), or for a fixed ' +
+    'time (`for`), and summarise it (`oniro-app perf trace --json`). Returns ok, bundle, durationMs, trace (local ' +
+    'path), refreshRateHz, frames (total, janky, jankRate, p50Ms, p95Ms, maxMs, missedVsyncs, longest), startup ' +
+    '(coldMs, firstFrameMs, processMs, from, to) or null, flow (the replay report) or null, pid, mainThread, scenes ' +
+    "(RenderService's own jank reports), hiperf, notes, gate (passed, failures), error. isError when the capture failed " +
+    'or a threshold (maxJankRate, maxStartupMs) or the flow failed. Launching force-stops the app first.',
+  inputSchema: object({
+    bundle: str("The app to measure (default: the flow's bundle, else the bundleName of the project)."),
+    launch: bool('Force-stop the app, start tracing, then cold-launch it and report its startup time.', false),
+    flow: str('A flow file (as for `replay`) to replay while tracing; relative to the project.'),
+    for: int('Without flow: how long to capture (after the launch with launch), ms. With flow: how long to keep capturing after it.', {
+      minimum: 1,
+    }),
+    ability: str('Ability `launch` starts (default: the main ability).'),
+    out: str('Where to save the trace (default: a file in the system temp dir).'),
+    categories: { type: 'array', items: { type: 'string' }, description: `hitrace categories (default ${DEFAULT_TRACE_CATEGORIES.join(', ')}).` },
+    bufferKb: int('hitrace buffer size, KB.', { minimum: 1, default: DEFAULT_TRACE_BUFFER_KB }),
+    hiperf: bool("Also sample the app's process with hiperf and list its top functions.", false),
+    maxJankRate: num('Fail (isError) when the share of janky frames is above this.', { minimum: 0, maximum: 1 }),
+    maxStartupMs: int('Fail (isError) when the cold start takes longer than this, ms (needs launch).', { minimum: 1 }),
+    stepTimeout: int("With flow: how long to wait for a step's selector and expect, ms.", { minimum: 1 }),
+    fallback: bool("With flow: act on a step's fallback point when its selector is not found.", false),
+    wake: bool('With launch or flow: wake the screen and swipe a credential-less lock screen away (false = --no-wake).', true),
+    ...PROJECT,
+    ...DEVICE,
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  // It force-stops and launches the app, and a flow taps and swipes.
+  changesDevice: true,
+  async call(a, ctx) {
+    const { config, logger } = rt();
+    const flowFile = pathArg(a, 'flow', ctx);
+    const flow = flowFile ? readFlowFile(flowFile) : undefined;
+    const report = await perfTrace({
+      config,
+      logger,
+      deviceSerial: deviceOf(a, ctx),
+      bundle: (a.bundle as string | undefined) ?? flow?.bundle ?? projectBundle(projectOf(a, ctx)),
+      ability: a.ability as string | undefined,
+      launch: a.launch as boolean,
+      flow,
+      replay: { stepTimeoutMs: a.stepTimeout as number | undefined, fallback: a.fallback as boolean },
+      forMs: a.for as number | undefined,
+      out: pathArg(a, 'out', ctx),
+      categories: a.categories as string[] | undefined,
+      bufferKb: a.bufferKb as number,
+      hiperf: a.hiperf as boolean,
+      wake: a.wake as boolean,
+    });
+    const gate = evaluatePerfGate(report, { maxJankRate: a.maxJankRate as number | undefined, maxStartupMs: a.maxStartupMs as number | undefined });
+    return jsonResult({ ...report, gate } as unknown as Args, perfExitCode(report, gate) !== 0);
+  },
+};
+
 const screens: Tool = {
   name: 'screens',
   title: 'Inventory pages and routes',
@@ -937,6 +1001,7 @@ export const ALL_TOOLS: readonly Tool[] = [
   screenshot,
   wait,
   logsCrash,
+  perfTraceTool,
   screens,
   apiSearch,
   apiShow,
