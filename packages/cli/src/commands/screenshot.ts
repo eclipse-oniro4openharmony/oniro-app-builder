@@ -8,6 +8,7 @@ import {
   buildContactSheet,
   frameDiffs,
   cropImage,
+  diffScreenshots,
   parseCropRect,
   padCropRect,
   type CropRect,
@@ -23,6 +24,7 @@ interface ScreenshotOpts extends TargetOpts {
   burst?: string;
   interval: string;
   json?: boolean;
+  diff?: string;
   device?: string;
 }
 
@@ -43,7 +45,8 @@ export function registerScreenshotCommand(program: Command): void {
       'Capture the screen. Default: full-resolution raw JPEG. ' +
         '--grid: downscaled JPEG with a 10x10 grid (axes 0.0-1.0) for picking tap coordinates. ' +
         '--crop / --target: a full-resolution crop of one region or element, for checking detail cheaply. ' +
-        '--contact-sheet: capture a burst and tile it into one image with per-frame change diffs.',
+        '--contact-sheet: capture a burst and tile it into one image with per-frame change diffs. ' +
+        '--diff: compare the screen with a baseline JPEG (perceptual-hash distance, pixel-change ratio).',
     )
     .option('-o, --output <file>', 'Output file path.', 'screenshot.jpeg')
     .option('--grid', 'Downscale (to --max-dim) and overlay a 10x10 coordinate grid.')
@@ -54,15 +57,49 @@ export function registerScreenshotCommand(program: Command): void {
     .option('--contact-sheet', 'Capture a burst and composite it into one tiled contact sheet.')
     .option('--burst <count>', 'Capture N frames; writes <base>-<i><ext> (or feeds --contact-sheet).')
     .option('--interval <ms>', 'Delay between burst frames, ms.', '50')
-    .option('--json', 'Emit the full result object as JSON on stdout (with --contact-sheet).')
+    .option(
+      '--diff <baseline.jpeg>',
+      'Capture the screen (written to --output) and compare it with this baseline: pHash and dHash distance, ' +
+        'pixel-change ratio, mean change.',
+    )
+    .option('--json', 'Emit the full result object as JSON on stdout (with --contact-sheet or --diff).')
     .option('--device <serial>', 'Target device serial.')
     .action(async (opts: ScreenshotOpts, command: Command) => {
       const { config, logger } = getRuntime();
       const maxDim = clampMaxDim(opts.maxDim);
       const intervalMs = Number(opts.interval) || 50;
 
-      // --- Crop: one region (or element) at full resolution ---
       const selector = selectorFrom(opts);
+
+      // --- Diff: the screen now against a baseline ---
+      if (opts.diff !== undefined) {
+        if (opts.crop !== undefined || selector || opts.grid || opts.contactSheet || opts.burst) {
+          throw new Error('--diff cannot be combined with --crop, --target*, --grid, --contact-sheet, or --burst.');
+        }
+        let baseline: Buffer;
+        try {
+          baseline = fs.readFileSync(opts.diff);
+        } catch (err) {
+          throw new Error(`Cannot read the baseline ${opts.diff}: ${(err as Error).message}`);
+        }
+        const shot = await takeScreenshot({ config, deviceSerial: opts.device, logger });
+        fs.writeFileSync(opts.output, shot.pixels);
+        const diff = await diffScreenshots(baseline, shot.pixels);
+        const result = { baseline: opts.diff, current: opts.output, ...diff };
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        } else {
+          process.stdout.write(
+            `${diff.same ? 'same' : 'different'}: pHash ${diff.phashDistance}/64, dHash ${diff.dhashDistance}/64, ` +
+              `${(diff.pixelChangeRatio * 100).toFixed(2)}% of pixels changed, mean change ${diff.meanDiff.toFixed(4)}` +
+              `${diff.sizeMismatch ? ' (sizes differ)' : ''}\n`,
+          );
+        }
+        logger.info(`Wrote ${opts.output} (${shot.width}x${shot.height}).`);
+        return;
+      }
+
+      // --- Crop: one region (or element) at full resolution ---
       if (opts.crop !== undefined || selector) {
         if (opts.crop !== undefined && selector) throw new Error('Use either --crop or --target*, not both.');
         if (opts.grid || opts.contactSheet || opts.burst) {

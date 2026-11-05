@@ -182,6 +182,27 @@ describe('oniro-app device-loop command validation (no device)', () => {
     expect(r.stderr).toMatch(/Unknown dump target/);
   });
 
+  it('dump rejects --summary with --diff, and a missing baseline before touching the device', () => {
+    let r = runCli(['dump', 'layout', '--summary', '--diff', 'x.json']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--summary and --diff cannot be combined');
+    r = runCli(['dump', 'layout', '--diff', path.join(os.tmpdir(), 'no-such-baseline.json')]);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('Cannot read the layout baseline');
+  });
+
+  it('screenshot --diff rejects other capture modes', () => {
+    const r = runCli(['screenshot', '--diff', 'base.jpeg', '--grid']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--diff cannot be combined');
+  });
+
+  it('app launch rejects a bad --smoke-delay before launching', () => {
+    const r = runCli(['app', 'launch', '--bundle', 'com.example.a', '--smoke', '--smoke-delay', 'soon']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--smoke-delay expects');
+  });
+
   it('app apply errors when no bundle can be resolved', () => {
     // --bundle is optional; it defaults to the bundleName in the project's
     // AppScope/app.json5. With neither --bundle nor a project, apply must fail loudly.

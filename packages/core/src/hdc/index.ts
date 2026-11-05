@@ -15,3 +15,5 @@ export * from './project.js';
 export * from './app.js';
 export * from './hilog.js';
 export * from './power.js';
+export * from './layoutDiff.js';
+export * from './smoke.js';

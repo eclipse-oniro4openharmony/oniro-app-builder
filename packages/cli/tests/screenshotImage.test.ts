@@ -8,6 +8,8 @@ import {
   parseCropRect,
   padCropRect,
   cropImage,
+  decodeGreyscale,
+  diffScreenshots,
 } from '../src/lib/screenshotImage.js';
 
 // sharp's first SVG composite pays a librsvg/native cold-start that can exceed
@@ -143,5 +145,47 @@ describe('cropImage', () => {
     expect(out.cropWidth).toBe(1000);
     expect(out.cropHeight).toBe(1000);
     expect([out.width, out.height]).toEqual([256, 256]);
+  });
+});
+
+/** A white "screen" with a dark bar between the given x fractions. */
+const screenWithBar = (x1: number, x2: number): Promise<Buffer> => {
+  const w = 540;
+  const h = 1200;
+  const bar = Buffer.from(
+    `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg"><rect width="${w}" height="${h}" fill="#fff"/>` +
+      `<rect x="${x1 * w}" y="${0.47 * h}" width="${(x2 - x1) * w}" height="${0.07 * h}" fill="#333"/></svg>`,
+  );
+  return sharp(bar).jpeg().toBuffer();
+};
+
+describe('decodeGreyscale', () => {
+  it('decodes to one byte per pixel, downscaled to fit maxDim', async () => {
+    const img = await decodeGreyscale(await solidJpeg(1080, 2400, 200, 200, 200), 256);
+    expect(img.height).toBe(256);
+    expect(img.width).toBe(115);
+    expect(img.data.length).toBe(img.width * img.height);
+    expect(Math.abs(img.data[0]! - 200)).toBeLessThan(3);
+  });
+
+  it('never upscales', async () => {
+    const img = await decodeGreyscale(await solidJpeg(100, 50, 0, 0, 0), 512);
+    expect([img.width, img.height]).toEqual([100, 50]);
+  });
+});
+
+describe('diffScreenshots', () => {
+  it('finds two captures of the same screen the same', async () => {
+    const a = await screenWithBar(0.11, 0.89);
+    const d = await diffScreenshots(a, Buffer.from(a));
+    expect(d).toMatchObject({ phashDistance: 0, dhashDistance: 0, pixelChangeRatio: 0, meanDiff: 0, same: true });
+  });
+
+  it('measures a changed element', async () => {
+    const d = await diffScreenshots(await screenWithBar(0.11, 0.89), await screenWithBar(0.2, 0.8));
+    expect(d.same).toBe(false);
+    expect(d.pixelChangeRatio).toBeGreaterThan(0.005);
+    expect(d.pixelChangeRatio).toBeLessThan(0.05);
+    expect(d.meanDiff).toBeGreaterThan(0);
   });
 });

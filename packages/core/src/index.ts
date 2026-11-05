@@ -10,6 +10,7 @@ export * from './hdc/index.js';
 export * from './build/index.js';
 export * from './project/index.js';
 export * from './device/index.js';
+export * from './image/index.js';
 export * from './install/index.js';
 export * from './harmonyos/index.js';
 export * from './testing/index.js';
