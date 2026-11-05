@@ -32,11 +32,24 @@ function localPropertiesSdkDir(projectRoot: string): string | undefined {
 export function findMissingProjectSdk(config: ConfigProvider, projectRoot: string): SdkNotInstalledError | null {
   const api = detectProjectSdkVersion(projectRoot);
   if (api === undefined) return null;
+  if (resolveProjectSdkDir(config, projectRoot)) return null;
   const expected = path.join(getOhosBaseSdkHome(config), String(api));
-  if (fs.existsSync(expected)) return null;
-  const localSdkDir = localPropertiesSdkDir(projectRoot);
-  if (localSdkDir && fs.existsSync(path.join(localSdkDir, String(api)))) return null;
   return new SdkNotInstalledError(String(api), expected, ALL_SDKS.find((s) => s.api === String(api))?.version);
+}
+
+/**
+ * The SDK API directory an OpenHarmony project builds against, as hvigor finds it:
+ * `<sdk home>/<compileSdkVersion>`, else under the project's `local.properties`
+ * `sdk.dir`. Undefined when neither holds it or the project names no numeric API.
+ */
+export function resolveProjectSdkDir(config: ConfigProvider, projectRoot: string): string | undefined {
+  const api = detectProjectSdkVersion(projectRoot);
+  if (api === undefined) return undefined;
+  const expected = path.join(getOhosBaseSdkHome(config), String(api));
+  if (fs.existsSync(expected)) return expected;
+  const localSdkDir = localPropertiesSdkDir(projectRoot);
+  const local = localSdkDir ? path.join(localSdkDir, String(api)) : undefined;
+  return local && fs.existsSync(local) ? local : undefined;
 }
 
 /**

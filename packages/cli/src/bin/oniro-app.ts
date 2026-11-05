@@ -19,6 +19,7 @@ import { registerFileCommand } from '../commands/file.js';
 import { registerLintCommand } from '../commands/lint.js';
 import { registerTestCommand } from '../commands/test.js';
 import { registerCheckCommand } from '../commands/check.js';
+import { registerDoctorCommand } from '../commands/doctor.js';
 import { registerInputCommand } from '../commands/input.js';
 import { registerLogsCommand } from '../commands/logs.js';
 import { registerHdcCommand } from '../commands/hdc.js';
@@ -58,6 +59,7 @@ function buildProgram(): Command {
   registerFileCommand(program);
   registerLintCommand(program);
   registerCheckCommand(program);
+  registerDoctorCommand(program);
   registerTestCommand(program);
   registerInputCommand(program);
   registerLogsCommand(program);
