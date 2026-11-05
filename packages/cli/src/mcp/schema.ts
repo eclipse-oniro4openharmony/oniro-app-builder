@@ -56,7 +56,8 @@ export function validateArgs(schema: JsonSchema, value: unknown, at = ''): strin
     const obj = value as Record<string, unknown>;
     const props = schema.properties ?? {};
     for (const key of schema.required ?? []) {
-      if (obj[key] === undefined) out.push(`${at ? `${at}.` : ''}${key} is required`);
+      // null means "not given" (below), so it does not satisfy a required property either.
+      if (obj[key] === undefined || obj[key] === null) out.push(`${at ? `${at}.` : ''}${key} is required`);
     }
     for (const [key, v] of Object.entries(obj)) {
       const prop = props[key];
