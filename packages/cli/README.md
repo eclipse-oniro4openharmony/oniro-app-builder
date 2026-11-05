@@ -103,6 +103,29 @@ It lands in `<ONIRO_SDK_ROOT_DIR>/<os>/<api>` like a downloaded release, so proj
 | `--wait-for-hdc <seconds>` | Block until `hdc` connects, up to N seconds. `0` (default) returns as soon as the launcher spawns. |
 | `--connect <host:port>` | Override the launcher's hdc port-forward bind address. Pass `0.0.0.0:55555` on hosts where QEMU refuses to bind `127.0.0.1` (some CI runners). |
 
+#### `doctor` — check the machine can build, check, sign and test
+
+`doctor [project-dir]` (defaults to the project in the current directory, if any). One line per check, `ok`, `warn`, `fail` or `skip`, with the fix under anything that is not ok; exits 1 when a check fails.
+
+| Check | Fails when |
+| --- | --- |
+| `node`, `java` | Node.js is older than 20; no Java on `JAVA_HOME` or `PATH` (its `-version` is recorded). |
+| `sdk` | The SDK the project's `compileSdkVersion` names is not installed (the HarmonyOS SDK for a HarmonyOS project, and its release must match). `--fix` installs it. |
+| `cmdtools` | The command-line tools are missing, or a partial install (`bin/ohpm`, `bin/hvigorw`, `bin/codelinter`, `hvigor/`, `ohpm/`, `codelinter/`, `tool/node`, the SDK toolchains or `version.txt` missing). The version is recorded. |
+| `cmdtools-flavour` | The tools are the other flavour than the project's `runtimeOS`, so `lint` skips its checks. |
+| `arkts-check` | `check arkts` does not run, or runs but misses an error planted in a generated one-file project. |
+| `hdc`, `device` | hdc does not run; no device or emulator is reachable; the device's API is below the project's `compatibleSdkVersion`. A device of the other OS family is a warning. |
+| `signing` | The signingConfig names material that is missing (no signingConfig at all is a warning). |
+| `disk` | Under 1 GB free where SDKs install or the project builds (under 5 GB is a warning). |
+
+| Flag | Description |
+| --- | --- |
+| `--json` | Print the report: `ok`, `checks` (`id`, `status`, `detail`, `fix`, `fixed`), `project` (`runtimeOS`, `compileSdkVersion`, `compatibleSdkVersion`, `minApi`), `versions` (`node`, `java`, `cmdTools`, `cmdToolsFlavour`, `sdk`, `hdc`, `deviceApi`), for comparing two machines or two runs. |
+| `--fix` | Install the project's missing OpenHarmony SDK. |
+| `--no-device` | Skip the device check, on a machine that only builds. |
+| `--serial <serial>` | The device to check when several are connected. |
+| `--no-arkts-check` | Skip the `check arkts` self-test. |
+
 ### Project lifecycle
 
 #### `create` — scaffold a new app from a template

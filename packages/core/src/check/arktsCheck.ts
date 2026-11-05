@@ -6,8 +6,7 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError, SdkNotInstalledError } from '../ports/errors.js';
 import { runProcess } from '../hdc/exec.js';
-import { detectProjectSdkVersion, findMissingProjectSdk } from '../sdk/detectProjectSdk.js';
-import { getOhosBaseSdkHome } from '../sdk/paths.js';
+import { detectProjectSdkVersion, findMissingProjectSdk, resolveProjectSdkDir } from '../sdk/detectProjectSdk.js';
 import { detectRuntimeOs, type RuntimeOs } from '../harmonyos/target.js';
 import { findHarmonyOsSdk } from '../harmonyos/sdk.js';
 import type { BuildDiagnostic } from '../build/diagnostics.js';
@@ -72,6 +71,8 @@ export interface ArktsCheckOptions {
   fix?: boolean;
   /** Override the SDK directory (holding `ets/`); by default the one the project compiles with. */
   sdkDir?: string;
+  /** With `sdkDir`: HarmonyOS's `hms/ets` API directory to add. */
+  hmsEtsDir?: string;
   /** Kill the checker after this long. Default 300 000 ms. */
   timeoutMs?: number;
   abortSignal?: AbortSignal;
@@ -143,24 +144,9 @@ export function resolveArktsCheckSdk(config: ConfigProvider, projectDir: string,
       `Cannot tell which SDK ${projectDir} compiles with: build-profile.json5 declares no numeric compileSdkVersion.`,
     );
   }
-  const missing = findMissingProjectSdk(config, projectDir);
-  if (missing) throw missing;
-  const home = getOhosBaseSdkHome(config);
-  let dir = path.join(home, String(api));
-  if (!fs.existsSync(dir)) {
-    // findMissingProjectSdk accepted it, so local.properties names the home.
-    const m = /^\s*sdk\.dir\s*[=:]\s*(.+?)\s*$/m.exec(readOr(path.join(projectDir, 'local.properties')));
-    if (m) dir = path.join(m[1]!.replace(/\\(.)/g, '$1'), String(api));
-  }
+  const dir = resolveProjectSdkDir(config, projectDir);
+  if (!dir) throw findMissingProjectSdk(config, projectDir)!;
   return { dir, runtimeOS, api };
-}
-
-function readOr(file: string): string {
-  try {
-    return fs.readFileSync(file, 'utf-8');
-  } catch {
-    return '';
-  }
 }
 
 function toDiagnostic(d: CheckerDiagnostic): BuildDiagnostic {
@@ -241,7 +227,11 @@ export async function checkArkts(opts: ArktsCheckOptions): Promise<ArktsCheckRep
   }
 
   const sdk: ArktsCheckSdk = opts.sdkDir
-    ? { dir: path.resolve(opts.sdkDir), runtimeOS: detectRuntimeOs(projectDir) }
+    ? {
+        dir: path.resolve(opts.sdkDir),
+        runtimeOS: detectRuntimeOs(projectDir),
+        ...(opts.hmsEtsDir ? { hmsEtsDir: path.resolve(opts.hmsEtsDir) } : {}),
+      }
     : resolveArktsCheckSdk(opts.config, projectDir, logger);
 
   const script = opts.scriptPath ?? arktsCheckerScript();

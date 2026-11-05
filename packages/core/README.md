@@ -265,6 +265,15 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `resolveArktsCheckSdk` | `(config, projectDir, logger?) => ArktsCheckSdk` | The SDK directory the check loads: `<sdk home>/<compileSdkVersion>` for OpenHarmony, `default/openharmony` plus `default/hms/ets` of the located HarmonyOS SDK for HarmonyOS. |
 | `parseArktsCheckOutput` / `arktsCheckerScript` | — | Read the checker's JSON; the path of the vendored `arkts-check.cjs`. |
 
+### Doctor
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `runDoctor` | `(DoctorOptions) => Promise<DoctorReport>` | Every `oniro-app doctor` check: `{ ok, checks: [{ id, status, detail, fix, fixed }], project, versions }`. Never throws for a failed check. `fix: true` installs the project's missing OpenHarmony SDK. |
+| `checkCmdTools` / `checkCmdToolsFlavour` / `checkSigning` / `checkDisk` / `checkNode` | — | The synchronous checks, for a caller that wants one. `CMD_TOOLS_REQUIRED` lists what a complete tools install holds. |
+| `describeProject` / `apiLevelOf` | — | A project's `runtimeOS`, SDK versions and minimum device API; the API level of `20` or `"6.0.0(20)"`. |
+| `resolveProjectSdkDir` | `(config, projectDir) => string \| undefined` | The SDK API directory an OpenHarmony project builds against, under the SDK home or `local.properties` `sdk.dir`. |
+
 ### Tests
 
 | Export | Signature | Description |
