@@ -1,15 +1,37 @@
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
+import * as readline from 'node:readline';
 import { HUAWEI_SITES, createHarmonyOsSession, type HarmonyOsSession } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 
-/** A session bound to the CLI runtime. The sign-in URL goes to stderr for headless hosts. */
+/** A session bound to the CLI runtime. */
 function session(): HarmonyOsSession {
   const { config, logger } = getRuntime();
-  return createHarmonyOsSession({
-    config,
-    logger,
-    onLoginUrl: (url) => process.stderr.write(`Opening the Huawei sign-in page. If no browser opens, visit:\n  ${url}\n`),
-  });
+  return createHarmonyOsSession({ config, logger });
+}
+
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!/^\d+$/.test(value) || port < 1 || port > 65_535) {
+    throw new InvalidArgumentError('expected a port number from 1 to 65535.');
+  }
+  return port;
+}
+
+/** Stderr text for a login that opens the browser here. The URL is repeated for headless hosts. */
+function browserInstructions(url: string): string {
+  return `Opening the Huawei sign-in page. If no browser opens, visit:\n  ${url}\n`;
+}
+
+/** Stderr text for a login whose browser may be on another machine. */
+function manualInstructions(url: string, callbackUrl: string, port: number): string {
+  return [
+    'Open this address in a browser, on this machine or any other, and sign in:',
+    `  ${url}`,
+    `The browser is then sent to ${callbackUrl}?... If that page does not load (the browser is not on`,
+    'this machine), copy the whole address from its address bar, paste it here and press Enter.',
+    `(Or forward the port first, from the machine with the browser: ssh -L ${port}:127.0.0.1:${port} <this-host>.)`,
+    '',
+  ].join('\n');
 }
 
 export function registerAuthCommand(program: Command): void {
@@ -23,12 +45,75 @@ export function registerAuthCommand(program: Command): void {
 
   auth
     .command('login')
-    .description('Sign in through the browser, which redirects back to a loopback port on this machine.')
+    .description(
+      'Sign in through the browser, which redirects back to a loopback port on this machine. ' +
+        'With the browser on another machine, either pass --manual and paste the address the browser ' +
+        'ends up on, or fix the port with --port and forward it with `ssh -L <port>:127.0.0.1:<port>`.',
+    )
     .option('--timeout <seconds>', 'How long to wait for the browser sign-in. Default 600.', (v) => Number(v))
-    .action(async (opts: { timeout?: number }) => {
-      const user = await session().login(opts.timeout ? { timeoutMs: Math.max(1, opts.timeout) * 1000 } : undefined);
-      process.stdout.write(`${user.userName || user.userId}\n`);
-    });
+    .option(
+      '--port <n>',
+      'Loopback port the sign-in page redirects to, instead of a random one, so an ssh tunnel can be set up ' +
+        'beforehand: `ssh -L <n>:127.0.0.1:<n> <this-host>` from the machine with the browser (same port both ends).',
+      parsePort,
+    )
+    .option(
+      '--no-browser',
+      'Do not open a browser. Print the sign-in URL, then finish the sign-in from the callback address ' +
+        '(`http://127.0.0.1:<port>/callback?...`, or just its query) pasted on stdin, or from the loopback ' +
+        'port itself, whichever comes first.',
+    )
+    .option('--manual', 'Same as --no-browser.')
+    .option('--print-url', 'Also write the sign-in URL to stdout, alone on its line, before waiting.')
+    .option(
+      '--json',
+      'Write JSON lines to stdout: {"loginUrl","port","callbackUrl"} before waiting, then the account ' +
+        '({"userId","userName","site","tokenPath"}) once signed in.',
+    )
+    .action(
+      async (opts: {
+        timeout?: number;
+        port?: number;
+        browser: boolean;
+        manual?: boolean;
+        printUrl?: boolean;
+        json?: boolean;
+      }) => {
+        const { config, logger } = getRuntime();
+        const manual = opts.manual || !opts.browser;
+        const s = createHarmonyOsSession({
+          config,
+          logger,
+          onLoginUrl: (url, { port }) => {
+            const callbackUrl = `http://127.0.0.1:${port}/callback`;
+            if (opts.json) process.stdout.write(`${JSON.stringify({ loginUrl: url, port, callbackUrl })}\n`);
+            else if (opts.printUrl) process.stdout.write(`${url}\n`);
+            process.stderr.write(manual ? manualInstructions(url, callbackUrl, port) : browserInstructions(url));
+          },
+        });
+        // Read pasted callbacks only when asked: a plain login must not hold stdin.
+        const stdin = manual ? readline.createInterface({ input: process.stdin, terminal: false }) : undefined;
+        let user;
+        try {
+          user = await s.login({
+            timeoutMs: opts.timeout ? Math.max(1, opts.timeout) * 1000 : undefined,
+            port: opts.port,
+            openBrowser: !manual,
+            pastedCallbacks: stdin,
+          });
+        } finally {
+          stdin?.close();
+          // A pending read keeps a TTY or pipe open, and with it the process.
+          if (stdin) process.stdin.destroy();
+        }
+        if (opts.json) {
+          const status = { userId: user.userId, userName: user.userName, site: user.siteCode, tokenPath: s.tokenPath };
+          process.stdout.write(`${JSON.stringify(status)}\n`);
+          return;
+        }
+        process.stdout.write(`${user.userName || user.userId}\n`);
+      },
+    );
 
   auth
     .command('logout')

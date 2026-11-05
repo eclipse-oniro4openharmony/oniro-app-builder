@@ -21,10 +21,12 @@ export interface CliResult {
  * Pre-test build is wired via the package's `pretest` script, so this assumes
  * `dist/oniro-app.js` exists.
  */
-export function runCli(args: readonly string[], env: NodeJS.ProcessEnv = {}): CliResult {
+export function runCli(args: readonly string[], env: NodeJS.ProcessEnv = {}, input?: string): CliResult {
   const result: SpawnSyncReturns<string> = spawnSync('node', [CLI_PATH, ...args], {
     encoding: 'utf8',
     env: { ...process.env, ...env },
+    // Written to the CLI's stdin, which is then closed. Without it stdin is inherited.
+    ...(input !== undefined ? { input } : {}),
   });
   return {
     stdout: result.stdout ?? '',

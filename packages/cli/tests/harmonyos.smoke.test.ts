@@ -56,10 +56,38 @@ describe('oniro-app auth / sign --harmonyos (signed out, no network)', () => {
     expect(r.stderr).toContain('Not signed in. Run `oniro-app auth login` first.');
   });
 
-  it('auth login documents its timeout', () => {
+  it('auth login documents its timeout, and the options for a browser on another machine', () => {
     const r = runCli(['auth', 'login', '--help'], env);
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('--timeout <seconds>');
+    for (const flag of ['--timeout <seconds>', '--port <n>', '--no-browser', '--manual', '--print-url', '--json']) {
+      expect(r.stdout).toContain(flag);
+    }
+  });
+
+  it('auth login --manual --json names the URL and fixed port on stdout, and refuses a paste that is not the callback', () => {
+    // Nothing valid is pasted, so the login times out before any request leaves this machine.
+    const r = runCli(['auth', 'login', '--manual', '--json', '--port', '47613', '--timeout', '1'], env, 'not-a-callback\n');
+    expect(r.status).toBe(1);
+    const first = JSON.parse(r.stdout.split('\n')[0]!) as { loginUrl: string; port: number; callbackUrl: string };
+    expect(first.port).toBe(47613);
+    expect(first.callbackUrl).toBe('http://127.0.0.1:47613/callback');
+    expect(new URL(first.loginUrl).searchParams.get('port')).toBe('47613');
+    expect(r.stdout.trim().split('\n')).toHaveLength(1);
+    expect(r.stderr).toContain('ssh -L 47613:127.0.0.1:47613');
+    expect(r.stderr).toContain("That is not this sign-in's callback: it has no `code` parameter");
+    expect(r.stderr).toContain('Timed out after 1s');
+    expect(r.stderr).not.toContain('Opening the Huawei sign-in page');
+    expect(fs.existsSync(path.join(tmp, 'auth', 'token.enc'))).toBe(false);
+  });
+
+  it('auth login --print-url writes the bare URL to stdout; --port refuses a non-port', () => {
+    let r = runCli(['auth', 'login', '--no-browser', '--print-url', '--timeout', '1'], env, '');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/^https:\/\/cn\.devecostudio\.huawei\.com\/console\/DevEcoIDE\/apply\?port=\d+&appid=1009&code=[0-9a-f]{32}\n$/);
+
+    r = runCli(['auth', 'login', '--port', '70000'], env);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('expected a port number from 1 to 65535');
   });
 
   it('sign refuses the offline OpenHarmony flow for a HarmonyOS project', () => {

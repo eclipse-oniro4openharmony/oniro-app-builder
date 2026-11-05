@@ -154,7 +154,7 @@ Only needed for HarmonyOS signing; see [HarmonyOS apps](#harmonyos-apps).
 
 | Command | Description |
 | --- | --- |
-| `auth login [--timeout <s>]` | Sign in via the browser (default timeout 600s). |
+| `auth login [--timeout <s>] [--port <n>] [--no-browser\|--manual] [--print-url] [--json]` | Sign in via the browser (default timeout 600s). With the browser on another machine: `--manual` and paste the address it ends up on, or `--port` and an `ssh -L` tunnel. See [Signing in from a headless host](#signing-in-from-a-headless-host). |
 | `auth logout` | Delete the locally stored token. |
 | `auth status [--json]` | Show the signed-in account; exits non-zero when signed out. |
 | `auth team list [--json]` | List AGC teams. |
@@ -735,13 +735,45 @@ installed SDK's release, e.g. `6.1.1(24)`, and warns when `--sdk` asks for anoth
 
 | Command | What it does |
 | --- | --- |
-| `auth login [--timeout <s>]` | Opens the Huawei sign-in page and waits for the browser to redirect back to a loopback port. The URL is also printed, so a headless host can be signed in from another machine. |
+| `auth login [--timeout <s>]` | Opens the Huawei sign-in page and waits for the browser to redirect back to a loopback port (`http://127.0.0.1:<port>/callback`). The URL is also printed to stderr. |
 | `auth logout` | Deletes the locally stored token. |
 | `auth status [--json]` | Prints the signed-in account, and warns when it is not allowed to sign. Exits non-zero when signed out. |
 | `auth team list [--json]` | Lists AGC teams; pass an id to `sign --harmonyos --team-id`. |
 
+| `auth login` flag | Meaning |
+| --- | --- |
+| `--timeout <s>` | How long to wait for the sign-in (default 600). |
+| `--port <n>` | Listen for the redirect on this port instead of a random one, so a tunnel can be set up before the login starts. |
+| `--no-browser`, `--manual` | Do not open a browser. Print the URL, then finish the sign-in from the callback address pasted on stdin — or from a request to the loopback port, whichever comes first. |
+| `--print-url` | Also write the sign-in URL to stdout, alone on its line, before waiting. |
+| `--json` | Write JSON lines to stdout: `{"loginUrl","port","callbackUrl"}` before waiting, then `{"userId","userName","site","tokenPath"}` once signed in. |
+
 The token is stored encrypted under `ONIRO_HARMONYOS_AUTH_DIR`. It is a credential: the
 directory is created `0700` and the files `0600`.
+
+#### Signing in from a headless host
+
+After the sign-in, Huawei sends the browser to `http://127.0.0.1:<port>/callback?...` — which,
+when the browser runs on another machine, is that machine, not the build host waiting for it.
+Either of these completes the sign-in:
+
+- **Paste the address.** Run `oniro-app auth login --manual`, open the printed URL anywhere and
+  sign in. The browser then fails to load the `127.0.0.1` page; copy the whole address from its
+  address bar (or just the part after `?`) and paste it into the waiting terminal. A paste that
+  is not this sign-in's callback (another attempt's, or a truncated one) is reported, and the
+  next line is read.
+- **Tunnel the port.** Pick a port, open the tunnel from the machine with the browser, then sign in:
+
+  ```bash
+  ssh -L 8765:127.0.0.1:8765 build-host          # on the machine with the browser
+  oniro-app auth login --no-browser --port 8765  # on the build host
+  ```
+
+  Use the same port on both ends: the page redirects to the port in its URL.
+
+Scripts can read the URL without scraping stderr: `--print-url` writes it alone to stdout, and
+`--json` writes `{"loginUrl","port","callbackUrl"}` as the first line, then the account once
+signed in.
 
 ### `oniro-app sign --harmonyos`
 
