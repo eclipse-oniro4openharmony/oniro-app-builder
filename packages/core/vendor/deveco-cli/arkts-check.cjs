@@ -7,8 +7,9 @@
 // the SDK is given with `--sdk <dir>` (an OpenHarmony SDK API directory, the
 // layout DevEco keeps under sdk/default/openharmony) instead of being found by
 // looking for a DevEco Studio install, and the HarmonyOS `hms/ets` API path is
-// given with `--hms <dir>` instead of being assumed beside it. Everything else
-// is upstream's.
+// given with `--hms <dir>` instead of being assumed beside it. `--fix` also
+// adds `export` for "File '...' is not a module" (an imported file that exports
+// nothing yet), which upstream leaves alone. Everything else is upstream's.
 
 const path = require('path');
 const fs = require('fs');
@@ -2715,6 +2716,33 @@ function extractMissingExport(message) {
   return { module: m[1], name: m[2] };
 }
 
+// The absolute path from a "File '...' is not a module" diagnostic (TS2306), or
+// null. It appears on the importer when the imported file exports nothing at
+// all, so the names to export are the ones the importer asks for.
+//   File '/p/entry/src/main/ets/components/Card.ets' is not a module.
+function extractNotAModule(message) {
+  const m = /^File '([^']+)' is not a module\./.exec(message || '');
+  return m ? m[1] : null;
+}
+
+// The names `importerSource` imports with `import { A, B as C } from '<spec>'`
+// from the file `declAbs` (C's original name, A and B). Default and namespace
+// imports name nothing that `export` on a declaration would provide.
+function namedImportsFrom(importerSource, importerAbs, declAbs) {
+  const names = [];
+  const re = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
+  let m;
+  while ((m = re.exec(importerSource)) !== null) {
+    const target = resolveModuleFile(importerAbs, m[2]);
+    if (!target || path.resolve(target) !== path.resolve(declAbs)) continue;
+    for (const part of m[1].split(',')) {
+      const name = part.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) names.push(name);
+    }
+  }
+  return names;
+}
+
 // Given the source of the module that owns `name`, return an edit that prefixes
 // its top-level declaration with `export `, or null if the declaration can't be
 // located unambiguously. Handles class/struct/interface/enum/function/const/
@@ -3381,10 +3409,22 @@ function applyAutoFixes(diagnostics, env) {
   const exportImporters = new Set(); // importer abs paths that reported a missing export
   for (const d of diagnostics) {
     if (d.severity !== 'error') continue;
-    const info = extractMissingExport(d.message);
-    if (!info) continue;
     const importerAbs = absOf(d.file);
-    const declAbs = resolveModuleFile(importerAbs, info.module);
+    let declAbs = null;
+    let names = [];
+    const info = extractMissingExport(d.message);
+    if (info) {
+      declAbs = resolveModuleFile(importerAbs, info.module);
+      names = [info.name];
+    } else {
+      const notModule = extractNotAModule(d.message);
+      if (!notModule) continue;
+      declAbs = path.isAbsolute(notModule) ? notModule : path.resolve(projectPath, notModule);
+      try {
+        names = namedImportsFrom(fs.readFileSync(importerAbs, 'utf-8'), importerAbs, declAbs);
+      } catch { continue; }
+      if (names.length === 0) continue;
+    }
     // Skip if unresolved, already edited, or the decl file resolves OUTSIDE the
     // project root — never write beyond the project we were asked to check.
     if (!declAbs || (touched && touched.some(t => t.abs === declAbs))) continue;
@@ -3394,7 +3434,7 @@ function applyAutoFixes(diagnostics, env) {
     exportImporters.add(importerAbs);
     if (!exportByDecl.has(declAbs)) exportByDecl.set(declAbs, { names: new Map(), keys: new Set() });
     const bucket = exportByDecl.get(declAbs);
-    bucket.names.set(info.name, true);
+    for (const name of names) bucket.names.set(name, true);
     bucket.keys.add(diagKey(d));
   }
   const exportDeclAbs = new Set(); // decl files edited by the export fix (cross-file propagation sources)
@@ -3797,7 +3837,7 @@ module.exports = {
   extractRename, buildFileEdits, buildImportHoist, applyEdits,
   extractDefaultImportBinding, buildComponentVersionEdits,
   computeLineStarts, offsetOf, GENERIC_SUGGESTION_BLACKLIST,
-  extractMissingExport, buildExportEdit, resolveModuleFile,
+  extractMissingExport, extractNotAModule, namedImportsFrom, buildExportEdit, resolveModuleFile,
   buildModuleIndex, toRelativeSpecifier,
   parseJson5Loose, loadStringResourceKeys, validatePermissionsConfig,
   mergeIncrementalDiagnostics, spliceRevertedDiagnostics, restoreDroppedDiagnostics, revertAllTouched,
