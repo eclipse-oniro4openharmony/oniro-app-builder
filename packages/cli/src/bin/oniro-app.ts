@@ -24,6 +24,7 @@ import { registerScreensCommand } from '../commands/screens.js';
 import { registerInputCommand } from '../commands/input.js';
 import { registerLogsCommand } from '../commands/logs.js';
 import { registerHdcCommand } from '../commands/hdc.js';
+import { registerApiCommand } from '../commands/api.js';
 
 declare const __CLI_VERSION__: string;
 const CLI_VERSION = __CLI_VERSION__;
@@ -62,6 +63,7 @@ function buildProgram(): Command {
   registerCheckCommand(program);
   registerDoctorCommand(program);
   registerScreensCommand(program);
+  registerApiCommand(program);
   registerTestCommand(program);
   registerInputCommand(program);
   registerLogsCommand(program);

@@ -21,6 +21,7 @@ const ENV_VAR_BY_KEY: Record<ConfigKey, string> = {
   harmonyosSdkPath: 'ONIRO_HARMONYOS_SDK_PATH',
   harmonyosAuthDir: 'ONIRO_HARMONYOS_AUTH_DIR',
   harmonyosSigningDir: 'ONIRO_HARMONYOS_SIGNING_DIR',
+  cacheDir: 'ONIRO_CACHE_DIR',
 };
 
 /**

@@ -77,7 +77,7 @@ The injection points every frontend implements, plus their defaults.
 
 | Export | Description |
 | --- | --- |
-| `interface ConfigProvider` / `type ConfigKey` | `get(key, fallback)`. Keys: `sdkRootDir`, `cmdToolsPath`, `emulatorDir`, `hapPath`, `cmdToolsUrlLinux/Windows/Mac`, `emulatorUrl`, `tmpDir`, `sdkUrlBase`, `applicationCertPath`. |
+| `interface ConfigProvider` / `type ConfigKey` | `get(key, fallback)`. Keys: `sdkRootDir`, `cmdToolsPath`, `emulatorDir`, `hapPath`, `cmdToolsUrlLinux/Windows/Mac`, `emulatorUrl`, `tmpDir`, `sdkUrlBase`, `applicationCertPath`, `cacheDir`. |
 | `staticConfig(values?)` | An in-memory `ConfigProvider` (expands `${userHome}`). For tests and as a base for frontend impls. |
 | `defaultPaths` | The fallback values core uses when a key is unset. |
 | `interface Logger` / `noopLogger` / `consoleLogger` | 4-level logger (`debug`/`info`/`warn`/`error`). Defaults to no-op. |
@@ -299,6 +299,18 @@ Pure functions over decoded greyscale pixels (`GreyImage`: `{ width, height, dat
 | `checkCmdTools` / `checkCmdToolsFlavour` / `checkSigning` / `checkDisk` / `checkNode` | — | The synchronous checks, for a caller that wants one. `CMD_TOOLS_REQUIRED` lists what a complete tools install holds. |
 | `describeProject` / `apiLevelOf` | — | A project's `runtimeOS`, SDK versions and minimum device API; the API level of `20` or `"6.0.0(20)"`. |
 | `resolveProjectSdkDir` | `(config, projectDir) => string \| undefined` | The SDK API directory an OpenHarmony project builds against, under the SDK home or `local.properties` `sdk.dir`. |
+
+### SDK declaration index
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `loadApiIndex` | `(sdkDir, LoadApiIndexOptions?) => LoadedApiIndex` | The declaration index of one SDK API directory (`oniro-app api`): the cached one under `cacheDir` when it is current, else a new build that is then cached. The cache is keyed by the SDK directory and the mtimes of its `ets/` and `native/` `oh-uni-package.json`; `rebuild: true` forces a build. |
+| `buildApiIndex` | `(sdkDir, BuildApiIndexOptions?) => ApiIndex` | Parse `ets/api/**`, `ets/arkts/**` and `ets/component/**` (`.d.ts`, `.d.ets`) with the SDK's bundled TypeScript (`ets/build-tools/ets-loader/node_modules/typescript`, else a resolvable `typescript`, or the one passed as `typescript`), map `ets/kits/@kit.*.d.ts` re-exports onto the symbols, and scan the Node-API headers (`native/sysroot/usr/include/{node_api*,js_native_api*}.h`, `napi/*.h`). Each `ApiEntry`: `name`, `qualifiedName`, `kind`, `language`, `module`, `kit`, `import`, `global`, `since`, `sinceText`, `deprecated`, `deprecatedSince`, `useInstead`, `syscap`, `systemApi`, `file`, `line`, `signature`, `doc`. |
+| `searchApi` | `(index, query, ApiSearchOptions?) => ApiSearchResult` | Ranked token search: every word must match the name (exact > prefix > camelCase/snake_case part > substring), the owning class or namespace, or the doc line; a dotted word matches qualified names. Overloads fold into one hit (`overloads`). Filters: `kit`, `kinds`, `language`, `noDeprecated`, `noSystemApi`, `limit`. |
+| `showApi` | `(index, symbol, opts?) => ApiShowResult` | Exact lookup by qualified name (`NavPathStack.pushPathByName`, `@Local`), else by dotted suffix; `found: false` when the SDK does not declare it. |
+| `suggestApiSymbols` / `findApiInOtherSdks` | — | For a miss: the declared names closest to it, and the other installed SDKs that declare it (`[{ api, since }]`). |
+| `resolveApiSdk` / `installedApiLevels` / `getApiIndexCacheDir` | — | The SDK to read (`sdkDir`, else `<sdk home>/<api>`, else the enclosing project's `compileSdkVersion`, else the newest installed); the installed API levels; the `cacheDir` config key (default `~/.oniro/cache`). |
+| `serializeApiIndex` / `deserializeApiIndex` / `apiIndexCachePath` / `parseDocBlock` / `mergeDocBlocks` | — | The compact stored form, the cache file of an SDK, and the doc-comment tag reader. |
 
 ### Tests
 
