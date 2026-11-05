@@ -61,7 +61,7 @@ async function wakeForSmoke(config: ConfigProvider, logger: Logger, device?: str
   if (screen?.locked) logger.warn('The lock screen asks for a credential; the smoke screenshot will show it.');
 }
 
-/** How far behind the host the device clock may run before a launch's crash is missed. */
+/** Extra seconds before the launch to look back for its crash (the device clock reads whole seconds). */
 const CRASH_CLOCK_SLACK_MS = 2_000;
 /** How long to wait for the faultlog of an app that died after launch. */
 const CRASH_WAIT_MS = 15_000;
@@ -88,8 +88,9 @@ function runSmoke(
       latestCrash({
         config: probe.config,
         bundle: probe.bundle,
-        // Faultlog times are the device's clock: allow it to run a little behind.
-        since: new Date(probe.since.getTime() - CRASH_CLOCK_SLACK_MS),
+        // Faultlog times are the device's clock, which need not agree with the host's:
+        // ask for "as long ago as the launch" on the device's clock, plus a little slack.
+        since: (Date.now() - probe.since.getTime() + CRASH_CLOCK_SLACK_MS) / 1000,
         // hiview writes the faultlog seconds after a death; a live app is looked up once.
         waitMs: probe.alive ? 0 : CRASH_WAIT_MS,
         deviceSerial: probe.deviceSerial,
