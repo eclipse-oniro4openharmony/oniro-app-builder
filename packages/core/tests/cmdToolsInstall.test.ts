@@ -90,9 +90,45 @@ describe('installCmdTools', () => {
 
   it('replaces an older install outright: nothing of it is left', async () => {
     await installCmdTools({ config, localZipPath: v1Zip });
-    fs.writeFileSync(path.join(target, 'stray.txt'), 'left by hand');
     await installCmdTools({ config, localZipPath: v2Zip });
     expect(snapshot(target)).toEqual(V2);
+  });
+
+  it('keeps entries of the target that are not the tools', async () => {
+    await installCmdTools({ config, localZipPath: v1Zip });
+    fs.writeFileSync(path.join(target, 'notes.txt'), 'mine');
+    fs.mkdirSync(path.join(target, 'jdk', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(target, 'jdk', 'bin', 'java'), 'java');
+    await installCmdTools({ config, localZipPath: v2Zip });
+    expect(snapshot(target)).toEqual({ ...V2, 'notes.txt': 'mine', 'jdk/bin/java': 'java' });
+  });
+
+  it('keeps the previous tools where the error says when the rollback itself fails', async () => {
+    await installCmdTools({ config, localZipPath: v1Zip });
+    const before = snapshot(target);
+    const parkedCount = fs.readdirSync(target).length;
+    let renames = 0;
+    const rename = (src: string, dest: string): void => {
+      renames++;
+      // The swap fails after parking the old entries; the first undo rename fails too.
+      if (renames === parkedCount + 1) throw Object.assign(new Error('EIO'), { code: 'EIO' });
+      if (renames === parkedCount + 2) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      fs.renameSync(src, dest);
+    };
+
+    const err = await installCmdTools({ config, localZipPath: v2Zip, fsOps: { rename } }).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/restoring the previous tools failed too/);
+    const kept = fs.readdirSync(target).find((n) => n.startsWith('oniro-previous-tools-'));
+    expect(kept).toBeDefined();
+    expect((err as Error).message).toContain(kept!);
+    const restored = { ...snapshot(target) };
+    const parked = snapshot(path.join(target, kept!));
+    for (const k of Object.keys(restored)) if (k.startsWith(`${kept}/`)) delete restored[k];
+    expect({ ...restored, ...parked }).toEqual(before);
+
+    // The next install does not delete them.
+    await installCmdTools({ config, localZipPath: v2Zip });
+    expect(fs.existsSync(path.join(target, kept!))).toBe(true);
   });
 
   it('leaves the existing install untouched when staging fails mid-copy, and a retry equals a clean install', async () => {

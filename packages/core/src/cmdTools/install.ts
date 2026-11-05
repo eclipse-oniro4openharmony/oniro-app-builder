@@ -167,6 +167,25 @@ function isWorkDirName(name: string): boolean {
 }
 
 /**
+ * Top-level entries a command-line tools release holds (OpenHarmony and HarmonyOS
+ * flavours). An install replaces these and whatever the new archive brings; any
+ * other entry of the target is not the tools' and stays, since `cmdToolsPath` may
+ * point at a directory that holds other things too.
+ */
+const TOOL_ENTRIES = new Set([
+  'bin',
+  'codelinter',
+  'hstack',
+  'hvigor',
+  'ohpm',
+  'sdk',
+  'tool',
+  'version.txt',
+  'LICENSE.txt',
+  'NOTICE.txt',
+]);
+
+/**
  * Replace the contents of `target` with those of `staging` (a directory inside
  * `target`), leaving `target` as it was when any rename fails. Returns the
  * directory now holding the previous contents, for the caller to delete.
@@ -182,17 +201,20 @@ function swapInto(
   keep: ReadonlySet<string>,
   rename: CmdToolsFsOps['rename'],
 ): string {
-  const previous = path.join(target, PREVIOUS_PREFIX + path.basename(staging).slice(STAGING_PREFIX.length));
+  const suffix = path.basename(staging).slice(STAGING_PREFIX.length);
+  const previous = path.join(target, PREVIOUS_PREFIX + suffix);
   fs.mkdirSync(previous);
+  const incoming = fs.readdirSync(staging);
+  const replaced = new Set([...incoming, ...TOOL_ENTRIES]);
   const parked: string[] = [];
   const placed: string[] = [];
   try {
     for (const entry of fs.readdirSync(target)) {
-      if (isWorkDirName(entry) || keep.has(entry)) continue;
+      if (isWorkDirName(entry) || keep.has(entry) || !replaced.has(entry)) continue;
       rename(path.join(target, entry), path.join(previous, entry));
       parked.push(entry);
     }
-    for (const entry of fs.readdirSync(staging)) {
+    for (const entry of incoming) {
       rename(path.join(staging, entry), path.join(target, entry));
       placed.push(entry);
     }
@@ -201,8 +223,26 @@ function swapInto(
     for (const entry of placed.reverse()) {
       fs.rmSync(path.join(target, entry), { recursive: true, force: true });
     }
-    for (const entry of parked.reverse()) {
-      fs.renameSync(path.join(previous, entry), path.join(target, entry));
+    try {
+      for (const entry of [...parked].reverse()) {
+        rename(path.join(previous, entry), path.join(target, entry));
+      }
+    } catch (undoErr) {
+      // The previous tools are still parked. Move them out of the work-directory
+      // namespace, which the next install empties, and say where they are.
+      const kept = path.join(target, `oniro-previous-tools-${suffix}`);
+      let where = previous;
+      try {
+        fs.renameSync(previous, kept);
+        where = kept;
+      } catch {
+        // Leave them where they are; the message names that directory.
+      }
+      throw new OniroError(
+        `Installing the command-line tools failed (${(err as Error).message}), and restoring the previous tools ` +
+          `failed too (${(undoErr as Error).message}). The previous tools are in ${where}: move its contents back ` +
+          `into ${target} by hand.`,
+      );
     }
     fs.rmSync(previous, { recursive: true, force: true });
     throw err;
@@ -220,7 +260,7 @@ function swapInto(
  * directory as it was, and one during the swap rolls it back (#16). A successful
  * install replaces the directory's contents outright, so it holds exactly what a
  * clean extraction of the archive holds, whatever an earlier failed attempt or an
- * older version left there.
+ * older version left there. Entries that are not the tools' (see `TOOL_ENTRIES`) stay.
  *
  * When it replaces an install, it logs which release replaces which before the
  * old one is deleted, and returns both (#25).
