@@ -62,23 +62,22 @@ describe('buildPoolQemuArgs', () => {
     expect(joined).toContain('-display vnc=127.0.0.1:3');
     expect(joined).toContain('-serial telnet:127.0.0.1:4447,server,nowait');
     expect(joined).toContain('-netdev user,id=net0,hostfwd=tcp:127.0.0.1:55558-:55555');
-    expect(args).toContain('/emu/images/bzImage');
-    expect(args).toContain('/emu/images/ramdisk.img');
+    expect(args).toContain(path.join('/emu/images', 'bzImage'));
+    expect(args).toContain(path.join('/emu/images', 'ramdisk.img'));
     expect(args[args.indexOf('-append') + 1]).toBe(EMULATOR_KERNEL_APPEND);
     // vda..vdd in run.sh's order: the kernel command line names vda/vdb/vdc by position.
     const drives = args.filter((a) => a.startsWith('if=none'));
-    expect(drives).toEqual([
-      'if=none,file=/state/3/updater.qcow2,format=qcow2,id=updater,index=0',
-      'if=none,file=/state/3/system.qcow2,format=qcow2,id=system,index=1',
-      'if=none,file=/state/3/vendor.qcow2,format=qcow2,id=vendor,index=2',
-      'if=none,file=/state/3/userdata.qcow2,format=qcow2,id=userdata,index=3',
-    ]);
+    expect(drives).toEqual(
+      ['updater', 'system', 'vendor', 'userdata'].map(
+        (d, i) => `if=none,file=${path.join('/state/3', `${d}.qcow2`)},format=qcow2,id=${d},index=${i}`,
+      ),
+    );
     expect(joined).not.toMatch(/\.img,format=raw/);
   });
 
   it('doubles commas in overlay paths and uses SDL when not headless', () => {
     const args = buildPoolQemuArgs({ ...spec, dir: '/a,b', headless: false });
-    expect(args).toContain('if=none,file=/a,,b/userdata.qcow2,format=qcow2,id=userdata,index=3');
+    expect(args).toContain(`if=none,file=${path.join('/a,,b', 'userdata.qcow2')},format=qcow2,id=userdata,index=3`);
     expect(args).toContain('sdl,gl=off');
   });
 });

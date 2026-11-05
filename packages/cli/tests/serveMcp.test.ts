@@ -260,7 +260,8 @@ describe('tools over mocked core', () => {
     expect(diff.structuredContent).toMatchObject({ baseline: path.join(tmp, 'base.jpeg'), current: path.join(tmp, 'now.jpeg'), same: true });
     expect(fs.readFileSync(path.join(tmp, 'now.jpeg'))).toEqual(full);
     fs.rmSync(tmp, { recursive: true, force: true });
-  });
+    // sharp on a full-size frame, twice: slow on the Windows runners.
+  }, 30_000);
 
   it('devices wraps the --json array in an object', async () => {
     core.listDevices.mockResolvedValue([{ serial: 'A', connection: 'USB', status: 'Connected' }]);
