@@ -97,6 +97,7 @@ The injection points every frontend implements, plus their defaults.
 | `downloadAndInstallSdk` | `(InstallSdkOptions) => Promise<void>` | Download + install an SDK release into `<sdkRootDir>/<os>/<api>`, reporting progress; `tmpDir` overrides the scratch directory (default: next to the install target). |
 | `installSdkFromArchive` | `(InstallSdkFromArchiveOptions) => Promise<InstalledSdk>` | Install an SDK from a local `.tar.gz` (e.g. the full SDK from `OHOS_DAILY_BUILDS_URL`) into `<sdkRootDir>/<os>/<api>`, unpacking only the current OS's components and reading `api`/`version` from their `oh-uni-package.json`. Throws when that API is already installed unless `force`. |
 | `getSupportedSdksForUi` | `(config) => SdkInfo[]` | Known SDKs annotated with `installed`, newest first. |
+| `getHarmonyOsSdkListing` | `(config) => HarmonyOsSdkListing \| null` | The HarmonyOS SDK a HarmonyOS build would use, which `sdk install` does not manage: `{ flavour: 'HarmonyOS', displayName, version, api, installed, path, source }`. |
 | `getInstalledSdks` | `(config) => string[]` | Versions with at least one OS-folder install. |
 | `removeSdk` | `(config, api) => boolean` | Remove an installed SDK by API level across OS folders. |
 | `detectProjectSdkVersion` | `(projectRoot, logger?) => number \| undefined` | Read `compileSdkVersion` from a project's `build-profile.json5`. |
@@ -125,7 +126,9 @@ are the pair the installers use; `resolveTmpRoot(config, override?, installRoot?
 | Export | Signature | Description |
 | --- | --- | --- |
 | `installCmdTools` | `(InstallCmdToolsOptions) => Promise<void>` | Install the tools by download or from a local zip (`localZipPath`); `tmpDir` overrides the scratch directory (default: next to the install target). The archive is staged inside the install directory and swapped in only once complete, so a failed install leaves the previous tools untouched (or rolls them back), and a successful one leaves exactly what a clean extraction holds. |
-| `getCmdToolsStatus` | `(config) => CmdToolsStatus` | `{ installed, status }` (version when present). |
+| `getCmdToolsStatus` | `(config) => CmdToolsStatus` | `{ installed, status, path, hdc }`, and when installed `flavour`, `version`, the bundled `sdk` (`CmdToolsSdk`: `path`, `displayName`, `platformVersion`, `apiVersion`, `build`) and `tools` (e.g. `{ hvigor, ohpm, codelinter, hstack }`). |
+| `readCmdToolsInfo` | `(cmdToolsPath) => CmdToolsInfo` | `{ version, flavour, sdk, tools }` from `version.txt` and `sdk/default/sdk-pkg.json`; unknown fields left out. |
+| `describeCmdTools` | `({ version?, sdk?, tools? }) => string` | One line, e.g. `6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2)`. |
 | `isCmdToolsInstalled` | `(config) => boolean` | — |
 | `removeCmdTools` | `(config) => void` | Delete the install. |
 | `getCmdToolsDownloadUrl` | `(config, platform?) => string` | Per-platform download URL (only Linux is public on the mirror). |
@@ -374,7 +377,8 @@ HarmonyOS support is additive: a project is HarmonyOS only when its product decl
 | Export | Description |
 | --- | --- |
 | `detectRuntimeOs(projectDir, productName?)` | `'HarmonyOS'` or `'OpenHarmony'`, from `build-profile.json5`. |
-| `findHarmonyOsSdk({ config, logger? })` / `requireHarmonyOsSdk(...)` | Locate a HarmonyOS SDK (`harmonyosSdkPath`, then DevEco Studio's default location, then `cmdToolsPath` when it is the HarmonyOS edition), with its release as `version`, e.g. `6.1.1(24)`; `null` or an actionable error when there is none. |
+| `findHarmonyOsSdk({ config, logger? })` / `requireHarmonyOsSdk(...)` | Locate a HarmonyOS SDK (`harmonyosSdkPath`, then DevEco Studio's default location, then `cmdToolsPath` when it is the HarmonyOS edition), with its release as `version`, e.g. `6.1.1(24)`, its `apiVersion` and its `source` (`configured`, `deveco-studio` or `cmdtools`); `null`, or an error naming `oniro-app cmdtools install`, when there is none. |
+| `readSdkPkg(sdkPath)` | `SdkPkgInfo` (`displayName`, `version`, `platformVersion`, `apiVersion`, `build`) from `<sdkPath>/default/sdk-pkg.json`. |
 | `harmonyOsSdkLabelForApi(api)`, `HARMONYOS_SDK_VERSIONS` | The `"<version>(<api>)"` label HarmonyOS products declare. |
 | `createHarmonyOsSession(opts)` | `login` / `logout` / `getUserInfo` / `listTeams` / `resolveAgcAuth` / `getDeveloperAgreement` for a Huawei developer account. The token is stored encrypted, with the account's region. `onLoginUrl(url, { port })` reports the sign-in URL and loopback port. |
 | `session.login(HarmonyOsLoginOptions)` | `timeoutMs`; `port` to listen on a fixed loopback port (for an `ssh -L` tunnel); `openBrowser: false` to leave opening the URL to the user; `pastedCallbacks`, an `AsyncIterable<string>` (e.g. a `readline` interface over stdin) of callback addresses pasted from a browser on another machine, checked like a request to the loopback port. |

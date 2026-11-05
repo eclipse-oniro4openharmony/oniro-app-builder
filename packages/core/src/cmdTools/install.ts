@@ -14,6 +14,7 @@ import { extractZipWithProgress } from '../sdk/extract.js';
 import { movePath } from '../sdk/move.js';
 import { buildCmdWrapper, needsCmdWrapper } from '../hdc/spawnCompat.js';
 import { createInstallTempDir, removeTempWorkDir, toSpaceError } from '../sdk/tmp.js';
+import { readSdkPkg } from '../harmonyos/sdk.js';
 
 /**
  * Resolve the per-platform download URL for the OpenHarmony command-line tools.
@@ -253,9 +254,91 @@ export interface CmdToolsStatus {
   flavour?: CmdToolsFlavour;
   /** The hdc binary commands use, and whether it exists. */
   hdc: { path: string; exists: boolean };
+  /** The bundle release, e.g. `6.1.1.280`, as in `status`. Set when known. */
+  version?: string;
+  /** The SDK the tools bundle (the HarmonyOS SDK, in the HarmonyOS edition). Set when installed and present. */
+  sdk?: CmdToolsSdk;
+  /** Versions of the tools inside, from `version.txt`, e.g. `{ hvigor: '6.24.2', ohpm: '6.1.2.268' }`. */
+  tools?: Record<string, string>;
 }
 
 export type CmdToolsFlavour = 'HarmonyOS' | 'OpenHarmony';
+
+/** The SDK a command-line tools install ships under `sdk/`. */
+export interface CmdToolsSdk {
+  /** The `sdk` directory, which HarmonyOS builds receive as `DEVECO_SDK_HOME`. */
+  path: string;
+  /** e.g. `HarmonyOS 6.1.1`. */
+  displayName?: string;
+  /** e.g. `6.1.1`. */
+  platformVersion?: string;
+  /** e.g. `24`. */
+  apiVersion?: string;
+  /** The SDK build, e.g. `6.1.1.125`. */
+  build?: string;
+}
+
+/** What a command-line tools install holds: its release, flavour, SDK and tool versions. */
+export interface CmdToolsInfo {
+  /** From `version.txt` (`# Version: 6.1.1.280`). */
+  version?: string;
+  flavour: CmdToolsFlavour;
+  sdk?: CmdToolsSdk;
+  /** Tool versions `version.txt` lists (`hvigor : 6.24.2`). */
+  tools: Record<string, string>;
+}
+
+/** version.txt keys that are not tools. */
+const NON_TOOL_KEYS = new Set(['apiVersion', 'releaseType']);
+
+/**
+ * Read what the command-line tools at `cmdToolsPath` are, from `version.txt` and
+ * `sdk/default/sdk-pkg.json`. Fields it cannot find are left out. Pure file reads.
+ */
+export function readCmdToolsInfo(cmdToolsPath: string): CmdToolsInfo {
+  const info: CmdToolsInfo = { flavour: detectCmdToolsFlavour(cmdToolsPath), tools: {} };
+  let apiFromVersionTxt: string | undefined;
+  try {
+    for (const line of fs.readFileSync(path.join(cmdToolsPath, 'version.txt'), 'utf8').split(/\r?\n/)) {
+      const release = /^\s*#\s*Version:\s*(.+)$/.exec(line);
+      if (release?.[1]) {
+        info.version ??= release[1].trim();
+        continue;
+      }
+      const kv = /^\s*([a-z][\w-]*)\s*:\s*(\S.*?)\s*$/.exec(line);
+      if (!kv) continue;
+      if (kv[1] === 'apiVersion') apiFromVersionTxt = kv[2];
+      else if (!NON_TOOL_KEYS.has(kv[1]!)) info.tools[kv[1]!] = kv[2]!;
+    }
+  } catch {
+    // No version.txt: an older or partial install.
+  }
+  const sdkPath = path.join(cmdToolsPath, 'sdk');
+  if (fs.existsSync(path.join(sdkPath, 'default'))) {
+    const { displayName, platformVersion, apiVersion, build } = readSdkPkg(sdkPath);
+    const sdk: CmdToolsSdk = { path: sdkPath };
+    if (displayName) sdk.displayName = displayName;
+    if (platformVersion) sdk.platformVersion = platformVersion;
+    if (apiVersion ?? apiFromVersionTxt) sdk.apiVersion = apiVersion ?? apiFromVersionTxt;
+    if (build) sdk.build = build;
+    info.sdk = sdk;
+  }
+  return info;
+}
+
+/**
+ * One line naming a tools install: `6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2)`,
+ * leaving out what is unknown.
+ */
+export function describeCmdTools(info: { version?: string; sdk?: CmdToolsSdk; tools?: Record<string, string> }): string {
+  const details = [
+    info.sdk?.displayName,
+    info.sdk?.apiVersion ? `API ${info.sdk.apiVersion}` : undefined,
+    info.tools?.hvigor ? `hvigor ${info.tools.hvigor}` : undefined,
+  ].filter(Boolean);
+  const version = info.version ?? 'unknown version';
+  return details.length ? `${version} (${details.join(', ')})` : version;
+}
 
 /**
  * The flavour of a command-line tools install: `HarmonyOS` when it bundles the
@@ -269,8 +352,9 @@ export function detectCmdToolsFlavour(cmdToolsPath: string): CmdToolsFlavour {
 
 /**
  * Reports whether ohpm is present at the configured path, and if so its version,
- * flavour, and the hdc binary in use. Prefers reading `version.txt`
- * (`# Version: x.y.z`) before falling back to executing the binary with `-v`.
+ * flavour, the SDK it bundles, its tools' versions (see {@link readCmdToolsInfo})
+ * and the hdc binary in use. The version comes from `version.txt`
+ * (`# Version: x.y.z`), else from running ohpm with `-v`.
  */
 export function getCmdToolsStatus(config: ConfigProvider): CmdToolsStatus {
   const cmdPath = getCmdToolsPath(config);
@@ -284,21 +368,16 @@ export function getCmdToolsStatus(config: ConfigProvider): CmdToolsStatus {
   if (!bin) {
     return { installed: false, status: 'Not installed', ...base };
   }
-  const installed = { installed: true, ...base, flavour: detectCmdToolsFlavour(cmdPath) };
-
-  // Prefer version.txt.
-  try {
-    const versionFile = path.join(cmdPath, 'version.txt');
-    if (fs.existsSync(versionFile)) {
-      const content = fs.readFileSync(versionFile, 'utf8');
-      for (const line of content.split(/\r?\n/)) {
-        const m = line.match(/^\s*#\s*Version:\s*(.+)$/);
-        if (m?.[1]) return { ...installed, status: `Installed (${m[1].trim()})` };
-      }
-    }
-  } catch {
-    // Fall through to exec.
-  }
+  const info = readCmdToolsInfo(cmdPath);
+  const installed: CmdToolsStatus = {
+    installed: true,
+    status: '',
+    ...base,
+    flavour: info.flavour,
+    ...(info.sdk ? { sdk: info.sdk } : {}),
+    ...(Object.keys(info.tools).length ? { tools: info.tools } : {}),
+  };
+  if (info.version) return { ...installed, status: `Installed (${info.version})`, version: info.version };
 
   try {
     // `ohpm` is a .bat wrapper on Windows, which cannot be spawned directly
@@ -311,7 +390,7 @@ export function getCmdToolsStatus(config: ConfigProvider): CmdToolsStatus {
     });
     if (res.error || res.status !== 0) throw res.error ?? new Error(`exit ${String(res.status)}`);
     const version = res.stdout.trim();
-    return { ...installed, status: `Installed (${version})` };
+    return { ...installed, status: `Installed (${version})`, version };
   } catch {
     return { ...installed, status: 'Installed (version unknown)' };
   }

@@ -58,11 +58,13 @@ Install commands are idempotent (they skip when already present); pass `--force`
 
 #### `sdk` — manage OpenHarmony SDK installs
 
+HarmonyOS SDKs are not managed here: they ship inside the HarmonyOS command-line tools (see `cmdtools` below) or DevEco Studio.
+
 | Command | Description |
 | --- | --- |
 | `sdk install <version> [--force] [--tmp-dir <path>]` | Download and install an OpenHarmony SDK (e.g. `6.1`). `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). |
 | `sdk install --from-archive <path> [--force] [--tmp-dir <path>]` | Install an SDK from a local `.tar.gz` instead, such as the [full SDK](#full-sdk). Only the current OS's components are unpacked, and the API level is read from them; an SDK already installed at that level is replaced only with `--force`. |
-| `sdk list [--json]` | List known SDK versions; an `*` marks installed ones. |
+| `sdk list [--json]` | List known OpenHarmony SDK versions; an `*` marks installed ones. Then it says HarmonyOS SDKs come with the command-line tools and lists the HarmonyOS SDK a HarmonyOS build would use and where it came from, or names `oniro-app cmdtools install` when there is none. `--json` adds `flavour: "OpenHarmony"` to each release and appends the HarmonyOS SDK as `{ flavour: "HarmonyOS", displayName, version, api, installed, path, source }`, `source` being `cmdtools`, `deveco-studio` or `configured` (ONIRO_HARMONYOS_SDK_PATH). |
 | `sdk remove <api>` | Remove an installed SDK by API level (e.g. `18`, `20`). |
 
 ##### Full SDK
@@ -75,12 +77,12 @@ oniro-app sdk install --from-archive ~/Downloads/version-Master_Version-OpenHarm
 
 It lands in `<ONIRO_SDK_ROOT_DIR>/<os>/<api>` like a downloaded release, so projects with that `compileSdkVersion` build against it. Pass `--force` to replace a public SDK of the same API level, or set `ONIRO_SDK_ROOT_DIR` to a separate root to keep both.
 
-#### `cmdtools` — manage the OpenHarmony command-line tools (provides `hvigorw`, `ohpm`, `hdc`, `codelinter`)
+#### `cmdtools` — manage the command-line tools (provides `hvigorw`, `ohpm`, `hdc`, `codelinter` and, in the HarmonyOS edition, the HarmonyOS SDK)
 
 | Command | Description |
 | --- | --- |
 | `cmdtools install [--from-zip <path>] [--force] [--tmp-dir <path>]` | Install the tools. `--from-zip` installs from a local archive instead of downloading (required on Windows/macOS — see [Configuration](#configuration)); `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). The new tools are staged and swapped in only once complete: an install that fails (a full disk, say) leaves the existing tools as they were, and a successful one replaces the directory's contents outright. |
-| `cmdtools status [--json]` | Report whether the tools are installed, their version, their flavour (`HarmonyOS` when they bundle `sdk/default/hms`, as the Huawei developer-portal download does, else `OpenHarmony`), and the `hdc` binary every device command uses. Exits non-zero when not installed. |
+| `cmdtools status [--json]` | Report whether the tools are installed and what they are, e.g. `Installed 6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2)`, then their path, their flavour (`HarmonyOS` when they bundle `sdk/default/hms`, as the Huawei developer-portal download does, else `OpenHarmony`), the SDK they bundle (name, API level, build and path; in the HarmonyOS edition, the SDK HarmonyOS builds use), the hvigor version, and the `hdc` binary every device command uses. `--json` carries the same as `version`, `flavour`, `sdk` (`path`, `displayName`, `platformVersion`, `apiVersion`, `build`) and `tools` (`hvigor`, `ohpm`, `codelinter`, `hstack`, as `version.txt` lists them), with `installed`, `status`, `path` and `hdc`. Exits non-zero when not installed. |
 | `cmdtools remove` | Delete the configured command-line-tools directory. |
 
 #### `emulator` — manage the Oniro emulator (QEMU-based)

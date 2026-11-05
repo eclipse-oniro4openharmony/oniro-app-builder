@@ -45,6 +45,8 @@ describe('findHarmonyOsSdk', () => {
         installRoot: tmp,
         displayName: 'HarmonyOS 5.1.0',
         version: '5.1.0(18)',
+        apiVersion: '18',
+        source: 'configured',
       });
     }
   });
