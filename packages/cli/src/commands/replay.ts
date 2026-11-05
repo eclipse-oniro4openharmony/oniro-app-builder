@@ -2,6 +2,7 @@ import { Command, InvalidArgumentError } from 'commander';
 import * as path from 'node:path';
 import { readFlowFile, replayFlow, type ReplayReport, type ReplayStepResult } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+import { withInterrupt } from '../lib/interrupt.js';
 
 interface ReplayOpts {
   json?: boolean;
@@ -80,9 +81,10 @@ export function registerReplayCommand(program: Command): void {
       let report: ReplayReport;
       try {
         const flow = readFlowFile(path.resolve(flowPath));
-        report = await replayFlow({
+        report = await withInterrupt(logger, 'stopping the replay', (abortSignal) => replayFlow({
           config,
           flow,
+          abortSignal,
           from: opts.from,
           to: opts.to,
           stepTimeoutMs: opts.stepTimeout,
@@ -93,7 +95,7 @@ export function registerReplayCommand(program: Command): void {
           deviceSerial: opts.device,
           logger,
           onStep: opts.json ? undefined : (s) => process.stdout.write(`${formatReplayStep(s)}\n`),
-        });
+        }));
       } catch (err) {
         report = { ok: false, outcome: 'error', range: [0, 0], steps: [], error: (err as Error).message, warnings: [] };
       }

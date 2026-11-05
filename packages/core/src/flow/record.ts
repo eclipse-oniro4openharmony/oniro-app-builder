@@ -155,6 +155,8 @@ export async function recordFlow(opts: RecordFlowOptions): Promise<RecordFlowRes
       touchText += chunk;
     });
     touchLog.on('error', () => undefined);
+    // An earlier session's record.csv must not be read back as this one's.
+    await run(`rm -f ${UI_RECORD_CSV} ${RECORD_CONSOLE}`);
     const started = await run(`uitest uiRecord record -l > ${RECORD_CONSOLE} 2>&1 & echo "ONIRO_PID=$!"`);
     const pidMatch = /ONIRO_PID=(\d+)/.exec(started.stdout);
     if (!pidMatch) throw new OniroError(`Could not start uitest uiRecord:\n${started.stdout}${started.stderr}`);
@@ -256,7 +258,7 @@ export async function recordFlow(opts: RecordFlowOptions): Promise<RecordFlowRes
     } finally {
       if (!opts.rawDir) fs.rmSync(tmp, { recursive: true, force: true });
       const names = files.filter((f) => /^\/data\/local\/tmp\/layout_[\w.-]+\.json$/.test(f));
-      await run(`rm -f ${[RECORD_CONSOLE, ...names].join(' ')}`).catch(() => undefined);
+      await run(`rm -f ${[RECORD_CONSOLE, UI_RECORD_CSV, ...names].join(' ')}`).catch(() => undefined);
     }
 
     const fg = parseRecorderForeground(consoleText);

@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { formatFlow, recordFlow } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+import { withInterrupt } from '../lib/interrupt.js';
 
 interface RecordOpts {
   out: string;
@@ -39,18 +40,11 @@ export function registerRecordCommand(program: Command): void {
     .option('--json', 'Print {out, steps, events, warnings} as JSON.')
     .action(async (opts: RecordOpts) => {
       const { config, logger } = getRuntime();
-      const controller = new AbortController();
-      const onSigint = (): void => {
-        if (controller.signal.aborted) process.exit(130);
-        logger.info('stopping the recorder…');
-        controller.abort();
-      };
-      process.on('SIGINT', onSigint);
-      try {
+      await withInterrupt(logger, 'stopping the recorder', async (abortSignal) => {
         const result = await recordFlow({
           config,
           durationMs: opts.for,
-          abortSignal: controller.signal,
+          abortSignal,
           bundle: opts.bundle,
           wake: opts.wake,
           rawDir: opts.raw,
@@ -69,8 +63,6 @@ export function registerRecordCommand(program: Command): void {
         } else {
           process.stdout.write(`Wrote ${result.flow.steps.length} step(s) to ${out}.\n`);
         }
-      } finally {
-        process.off('SIGINT', onSigint);
-      }
+      });
     });
 }
