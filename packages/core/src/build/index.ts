@@ -5,3 +5,4 @@ export * from './codelinter.js';
 export * from './diagnostics.js';
 export * from './buildHap.js';
 export * from './buildSdk.js';
+export * from './signingCheck.js';
