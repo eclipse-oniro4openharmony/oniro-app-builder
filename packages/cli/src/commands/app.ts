@@ -17,6 +17,7 @@ import {
   OniroError,
   type ConfigProvider,
   type Logger,
+  type ApplyChangesResult,
   type CrashVerdict,
   type SmokeResult,
 } from '@oniroproject/core';
@@ -24,9 +25,10 @@ import { getRuntime } from '../lib/runtime.js';
 import { decodeGreyscale } from '../lib/screenshotImage.js';
 import { registerAppVerifyCommand } from './appVerify.js';
 
-interface SmokeOpts {
+export interface SmokeOpts {
   smoke?: boolean;
-  smokeDelay: string;
+  /** Milliseconds, as the flag's string or a number. */
+  smokeDelay: string | number;
   smokeScreenshot?: string;
 }
 
@@ -41,7 +43,7 @@ function addSmokeOptions(cmd: Command): Command {
     .option('--smoke-screenshot <file>', 'With --smoke: where to write the screenshot (default: a file in the system temp dir).');
 }
 
-function smokeDelayFrom(raw: string): number {
+function smokeDelayFrom(raw: string | number): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) throw new OniroError(`--smoke-delay expects a number of milliseconds; got "${raw}".`);
   return Math.round(n);
@@ -131,6 +133,117 @@ interface ApplyOpts extends SmokeOpts {
   json?: boolean;
 }
 
+/** What `app launch` and `app apply` need from the runtime. */
+export interface AppRuntime {
+  config: ConfigProvider;
+  logger: Logger;
+}
+
+export interface LaunchParams extends Partial<SmokeOpts> {
+  /** Project mode: the project to launch (default: the current directory). */
+  projectDir?: string;
+  /** Bundle mode: launch this installed bundle instead. */
+  bundle?: string;
+  module?: string;
+  ability?: string;
+  device?: string;
+}
+
+/** The `app launch --smoke --json` object; `smoke` is absent without `smoke`. */
+export interface LaunchReport {
+  bundle: string;
+  smoke?: SmokeResult<CrashVerdict>;
+}
+
+/** `app launch`: start the app and, with `smoke`, judge it. Shared with `serve mcp`. */
+export async function launchWithSmoke(rt: AppRuntime, p: LaunchParams): Promise<LaunchReport> {
+  const { config, logger } = rt;
+  const smokeDelay = p.smokeDelay ?? DEFAULT_SMOKE_DELAY_MS;
+  if (p.smoke) {
+    smokeDelayFrom(smokeDelay); // validate before launching
+    await wakeForSmoke(config, logger, p.device);
+  }
+  const since = new Date();
+  let bundle: string;
+  if (p.bundle) {
+    bundle = p.bundle;
+    logger.info(`Launching installed bundle ${p.bundle}...`);
+    await launchApp({ config, bundleName: p.bundle, abilityName: p.ability, deviceSerial: p.device, logger });
+  } else {
+    const dir = path.resolve(p.projectDir ?? process.cwd());
+    bundle = getBundleName(dir);
+    logger.info(`Launching app from ${dir}...`);
+    await launchApp({
+      config,
+      projectDir: dir,
+      moduleName: p.module ?? 'entry',
+      abilityName: p.ability,
+      deviceSerial: p.device,
+      logger,
+    });
+  }
+  logger.info('App launched.');
+  if (!p.smoke) return { bundle };
+  const smoke = await runSmoke(config, logger, bundle, since, { ...p, smokeDelay });
+  return { bundle, smoke };
+}
+
+export interface ApplyParams extends Partial<SmokeOpts> {
+  /** A project directory or a .hap file (default: the current directory). */
+  target?: string;
+  bundle?: string;
+  module?: string;
+  hap?: string;
+  installedHap?: string;
+  system?: boolean;
+  allowUninstall?: boolean;
+  device?: string;
+}
+
+/** The `app apply --json` object: the install result, plus `smoke` with `smoke`. */
+export type ApplyReport = ApplyChangesResult & { smoke?: SmokeResult<CrashVerdict> };
+
+/** `app apply`: install, check the process took the change and, with `smoke`, relaunch and judge it. Shared with `serve mcp`. */
+export async function applyWithSmoke(rt: AppRuntime, p: ApplyParams): Promise<ApplyReport> {
+  const { config, logger } = rt;
+  const smokeDelay = p.smokeDelay ?? DEFAULT_SMOKE_DELAY_MS;
+  if (p.smoke) smokeDelayFrom(smokeDelay); // validate before installing
+  const target = p.target;
+  const isHap = target !== undefined && /\.hap$/i.test(target);
+  if (isHap && p.hap) throw new OniroError('Pass the HAP either as the argument or with --hap, not both.');
+  const dir = isHap ? process.cwd() : path.resolve(target ?? process.cwd());
+  const hapPath = isHap ? path.resolve(target) : p.hap;
+  let bundle = p.bundle;
+  if (!bundle && isHap) {
+    // The same signed-to-unsigned fallback applyChanges applies when it installs.
+    const hap = existingHapOrUnsigned(hapPath!);
+    if (!hap) throw new OniroError(`HAP not found at ${hapPath}.`);
+    bundle = (await readHapBundleName(hap.path).catch(() => null)) ?? undefined;
+    if (!bundle) throw new OniroError(`Could not read the bundle name from ${hap.path}. Pass --bundle.`);
+  }
+  bundle ??= getBundleName(dir);
+  const result = await applyChanges({
+    config,
+    bundle,
+    hapPath,
+    projectDir: dir,
+    module: p.module,
+    installedHapPath: p.installedHap,
+    isSystemBundle: p.system,
+    allowUninstall: p.allowUninstall,
+    deviceSerial: p.device,
+    logger,
+  });
+  if (!p.smoke) return result;
+  // A replace install stops the app, so launch it again before judging it.
+  await wakeForSmoke(config, logger, p.device);
+  const since = new Date();
+  logger.info(`Launching ${bundle} for the smoke check...`);
+  await launchApp({ config, bundleName: bundle, deviceSerial: p.device, logger });
+  const smoke = await runSmoke(config, logger, bundle, since, { ...p, smokeDelay });
+  return { ...result, smoke };
+}
+
 export function registerAppCommand(program: Command): void {
   const app = program.command('app').description('Install, launch, and manage built apps on a connected device/emulator.');
 
@@ -168,25 +281,8 @@ export function registerAppCommand(program: Command): void {
     .option('--json', 'With --smoke: emit `{ bundle, smoke }` as JSON.')
     .action(async (projectDir: string | undefined, opts: LaunchOpts) => {
       const { config, logger } = getRuntime();
-      if (opts.smoke) {
-        smokeDelayFrom(opts.smokeDelay); // validate before launching
-        await wakeForSmoke(config, logger, opts.device);
-      }
-      const since = new Date();
-      let bundle: string;
-      if (opts.bundle) {
-        bundle = opts.bundle;
-        logger.info(`Launching installed bundle ${opts.bundle}...`);
-        await launchApp({ config, bundleName: opts.bundle, abilityName: opts.ability, deviceSerial: opts.device, logger });
-      } else {
-        const dir = path.resolve(projectDir ?? process.cwd());
-        bundle = getBundleName(dir);
-        logger.info(`Launching app from ${dir}...`);
-        await launchApp({ config, projectDir: dir, moduleName: opts.module, abilityName: opts.ability, deviceSerial: opts.device, logger });
-      }
-      logger.info('App launched.');
-      if (!opts.smoke) return;
-      const smoke = await runSmoke(config, logger, bundle, since, opts);
+      const { bundle, smoke } = await launchWithSmoke({ config, logger }, { ...opts, projectDir });
+      if (!smoke) return;
       if (opts.json) process.stdout.write(`${JSON.stringify({ bundle, smoke }, null, 2)}\n`);
       else process.stdout.write(`${formatSmoke(smoke)}\n`);
       if (!smoke.passed) process.exitCode = 1;
@@ -213,43 +309,10 @@ export function registerAppCommand(program: Command): void {
   addSmokeOptions(apply)
     .action(async (target: string | undefined, opts: ApplyOpts) => {
       const { config, logger } = getRuntime();
-      if (opts.smoke) smokeDelayFrom(opts.smokeDelay); // validate before installing
-      const isHap = target !== undefined && /\.hap$/i.test(target);
-      if (isHap && opts.hap) throw new OniroError('Pass the HAP either as the argument or with --hap, not both.');
-      const dir = isHap ? process.cwd() : path.resolve(target ?? process.cwd());
-      const hapPath = isHap ? path.resolve(target) : opts.hap;
-      let bundle = opts.bundle;
-      if (!bundle && isHap) {
-        // The same signed-to-unsigned fallback applyChanges applies when it installs.
-        const hap = existingHapOrUnsigned(hapPath!);
-        if (!hap) throw new OniroError(`HAP not found at ${hapPath}.`);
-        bundle = (await readHapBundleName(hap.path).catch(() => null)) ?? undefined;
-        if (!bundle) throw new OniroError(`Could not read the bundle name from ${hap.path}. Pass --bundle.`);
-      }
-      bundle ??= getBundleName(dir);
-      const result = await applyChanges({
-        config,
-        bundle,
-        hapPath,
-        projectDir: dir,
-        module: opts.module,
-        installedHapPath: opts.installedHap,
-        isSystemBundle: opts.system,
-        allowUninstall: opts.allowUninstall,
-        deviceSerial: opts.device,
-        logger,
-      });
-      let smoke: SmokeResult<CrashVerdict> | undefined;
-      if (opts.smoke) {
-        // A replace install stops the app, so launch it again before judging it.
-        await wakeForSmoke(config, logger, opts.device);
-        const since = new Date();
-        logger.info(`Launching ${bundle} for the smoke check...`);
-        await launchApp({ config, bundleName: bundle, deviceSerial: opts.device, logger });
-        smoke = await runSmoke(config, logger, bundle, since, opts);
-      }
+      const report = await applyWithSmoke({ config, logger }, { ...opts, target });
+      const { smoke, ...result } = report;
       if (opts.json) {
-        process.stdout.write(`${JSON.stringify(smoke ? { ...result, smoke } : result, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
       } else {
         logger.info(
           `apply: method=${result.method} pid ${result.preInstallPid ?? '-'} -> ${result.postInstallPid ?? '-'}` +

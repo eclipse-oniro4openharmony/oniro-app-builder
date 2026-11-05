@@ -19,6 +19,34 @@ export function formatLongDevice(d: DeviceInfo, info: DeviceFullInfo | undefined
   return [head, ...rest].join('\t');
 }
 
+/** The hdc targets and, with `long`, what each connected one reports about itself. */
+export async function queryDevices(
+  long: boolean,
+): Promise<{ devices: DeviceInfo[]; infos: Map<string, DeviceFullInfo> }> {
+  const { config, logger } = getRuntime();
+  const devices = await listDevices(config);
+  const infos = new Map<string, DeviceFullInfo>();
+  if (long) {
+    for (const d of devices.filter((x) => x.status === 'Connected')) {
+      try {
+        infos.set(d.serial, await getDeviceInfo({ config, deviceSerial: d.serial, logger }));
+      } catch (err) {
+        logger.warn(`Could not query ${d.serial}: ${(err as Error).message}`);
+      }
+    }
+  }
+  return { devices, infos };
+}
+
+/** What `devices --json` prints (with `--long`, each device gains `info`). */
+export function devicesJson(
+  devices: DeviceInfo[],
+  infos: Map<string, DeviceFullInfo>,
+  long: boolean,
+): Array<DeviceInfo | (DeviceInfo & { info: DeviceFullInfo | null })> {
+  return long ? devices.map((d) => ({ ...d, info: infos.get(d.serial) ?? null })) : devices;
+}
+
 export function registerDevicesCommand(program: Command): void {
   program
     .command('devices')
@@ -30,21 +58,9 @@ export function registerDevicesCommand(program: Command): void {
     )
     .option('--json', 'Emit machine-readable JSON.')
     .action(async (opts: { long?: boolean; json?: boolean }) => {
-      const { config, logger } = getRuntime();
-      const devices = await listDevices(config);
-      const infos = new Map<string, DeviceFullInfo>();
-      if (opts.long) {
-        for (const d of devices.filter((x) => x.status === 'Connected')) {
-          try {
-            infos.set(d.serial, await getDeviceInfo({ config, deviceSerial: d.serial, logger }));
-          } catch (err) {
-            logger.warn(`Could not query ${d.serial}: ${(err as Error).message}`);
-          }
-        }
-      }
+      const { devices, infos } = await queryDevices(!!opts.long);
       if (opts.json) {
-        const out = opts.long ? devices.map((d) => ({ ...d, info: infos.get(d.serial) ?? null })) : devices;
-        process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(devicesJson(devices, infos, !!opts.long), null, 2)}\n`);
         return;
       }
       if (devices.length === 0) {

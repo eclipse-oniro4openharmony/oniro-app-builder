@@ -25,6 +25,7 @@ import { registerInputCommand } from '../commands/input.js';
 import { registerLogsCommand } from '../commands/logs.js';
 import { registerHdcCommand } from '../commands/hdc.js';
 import { registerApiCommand } from '../commands/api.js';
+import { registerServeCommand } from '../commands/serve.js';
 
 declare const __CLI_VERSION__: string;
 const CLI_VERSION = __CLI_VERSION__;
@@ -68,6 +69,7 @@ function buildProgram(): Command {
   registerInputCommand(program);
   registerLogsCommand(program);
   registerHdcCommand(program);
+  registerServeCommand(program);
 
   return program;
 }

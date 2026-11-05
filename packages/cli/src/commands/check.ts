@@ -24,21 +24,36 @@ export function arktsCheckSummaryLine(report: Pick<ArktsCheckReport, 'summary' |
   return `${s.errors} errors, ${s.warnings} warnings${fixed} in ${s.files} files (${(report.durationMs / 1000).toFixed(1)} s).`;
 }
 
-/** Run `check arkts` and print its report; returns the exit code. Shared with `lint --engine arkts`. */
-export async function runArktsCheckCommand(projectDir: string | undefined, opts: ArktsCheckCommandOpts): Promise<number> {
+/** What `check arkts --json` prints when the check could not start (not a project, SDK not installed). */
+export interface ArktsCheckNotStarted {
+  ok: false;
+  completed: false;
+  error: string;
+  diagnostics: [];
+}
+
+/** The check's report, or the could-not-start object instead of a throw. Shared with `serve mcp`. */
+export async function arktsCheckOrError(
+  projectDir: string | undefined,
+  opts: Omit<ArktsCheckCommandOpts, 'json'>,
+): Promise<ArktsCheckReport | ArktsCheckNotStarted> {
   const { config, logger } = getRuntime();
   const dir = path.resolve(projectDir ?? process.cwd());
-  let report: ArktsCheckReport;
   try {
-    report = await checkArkts({ config, projectDir: dir, files: opts.files, fix: opts.fix, sdkDir: opts.sdk, logger });
+    return await checkArkts({ config, projectDir: dir, files: opts.files, fix: opts.fix, sdkDir: opts.sdk, logger });
   } catch (err) {
-    // The check could not start (not a project, SDK not installed): still one
-    // object on stdout for a caller that parses it, and exit 2 since nothing was checked.
-    const error = err instanceof Error ? err.message : String(err);
-    if (opts.json) {
-      process.stdout.write(`${JSON.stringify({ ok: false, completed: false, error, diagnostics: [] }, null, 2)}\n`);
-    }
-    logger.error(error);
+    return { ok: false, completed: false, error: err instanceof Error ? err.message : String(err), diagnostics: [] };
+  }
+}
+
+/** Run `check arkts` and print its report; returns the exit code. Shared with `lint --engine arkts`. */
+export async function runArktsCheckCommand(projectDir: string | undefined, opts: ArktsCheckCommandOpts): Promise<number> {
+  const { logger } = getRuntime();
+  const report = await arktsCheckOrError(projectDir, opts);
+  if (!('summary' in report)) {
+    // Still one object on stdout for a caller that parses it, and exit 2 since nothing was checked.
+    if (opts.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    logger.error(report.error);
     return 2;
   }
 

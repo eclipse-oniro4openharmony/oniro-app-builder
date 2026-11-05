@@ -743,6 +743,63 @@ oniro-app input --type swipe --fx 0.5 --fy 0.8 --fx2 0.5 --fy2 0.3
 oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400}]'
 ```
 
+### Agents
+
+#### `serve mcp` — the gate commands as MCP tools
+
+A [Model Context Protocol](https://modelcontextprotocol.io) server on stdio (newline-delimited JSON-RPC 2.0, protocol versions 2024-11-05 to 2025-11-25) that exposes the gate commands as typed tools, so another agent (a Claude Code session, any MCP client) can build, check, deploy and inspect without shelling out and parsing text. Each tool calls the same `@oniroproject/core` function as its command and returns the JSON the command's `--json` prints, as `structuredContent` and as JSON text. stdout carries only the protocol; logs go to stderr.
+
+| Flag | Description |
+| --- | --- |
+| `--project <dir>` | Project the tools work on unless a call passes `project` (default: the current directory). Relative paths in tool arguments resolve against it. |
+| `--device <serial>` | Device the tools target unless a call passes `device` (default: `ONIRO_DEVICE_SERIAL`, else the only connected one). |
+| `--tools <list>` | Expose only these tools, comma-separated, e.g. `--tools check_arkts,screens,api_show`. |
+| `--read-only` | Leave out the tools that change the device: `apply`, `launch`, `input`, `test`. |
+
+Register it with Claude Code:
+
+```bash
+claude mcp add oniro-app -- oniro-app serve mcp --project /path/to/app
+claude mcp add oniro-app-ro -- oniro-app serve mcp --project /path/to/app --read-only   # look, don't touch
+```
+
+or in any client's `mcpServers` JSON (`.mcp.json`, Claude Desktop, ...):
+
+```json
+{
+  "mcpServers": {
+    "oniro-app": {
+      "command": "oniro-app",
+      "args": ["serve", "mcp", "--project", "/path/to/app"]
+    }
+  }
+}
+```
+
+Tools (the inputs are the command's flags in camelCase, with the same defaults; `project` and `device` default to the server's):
+
+| Tool | Command | Inputs |
+| --- | --- | --- |
+| `build` | `build --json` | `project`, `product`, `module`, `mode`, `task`, `deps`, `parallel`, `installSdk` |
+| `check_arkts` | `check arkts --json` | `project`, `files[]`, `fix`, `sdk` |
+| `test` | `test --json` | `project`, `module`, `product`, `class`, `timeout`, `runTimeout`, `build`, `wake`, `mode`, `deps`, `device` |
+| `apply` | `app apply --json` | `project`, `hap`, `bundle`, `module`, `installedHap`, `system`, `allowUninstall`, `smoke`, `smokeDelay`, `smokeScreenshot`, `device` |
+| `launch` | `app launch --smoke --json` | `project`, `bundle`, `module`, `ability`, `smoke`, `smokeDelay`, `smokeScreenshot`, `device` |
+| `dump_layout` | `dump layout` | `bundle`, `raw`, `flat`, `summary`, `diff`, `output`, `project`, `device` |
+| `input` | `input` | `type` (required), `target`, `targetId`, `targetType`, `targetIndex`, `fx`, `fy`, `fx2`, `fy2`, `x`, `y`, `x2`, `y2`, `speed`, `key`, `text`, `clear`, `hideKeyboard`, `device` |
+| `screenshot` | `screenshot --max-dim` | `output`, `grid`, `maxDim` (default 1024), `crop`, `target`, `targetId`, `targetType`, `targetIndex`, `contactSheet`, `burst`, `interval`, `diff`, `project`, `device` |
+| `wait` | `wait --json` | `log`, `since`, `boot`, `bundle`, `pidOf`, `domain`, `target`, `targetId`, `targetType`, `gone`, `interval`, `timeout`, `device` |
+| `logs_crash` | `logs crash --json` | `bundle`, `since`, `wait`, `path`, `output`, `project`, `device` |
+| `screens` | `screens --json` | `project` |
+| `api_search` | `api search --json` | `query` (required), `kit`, `kind[]`, `lang`, `limit`, `deprecated`, `systemapi`, `api`, `sdk`, `project`, `rebuild` |
+| `api_show` | `api show --json` | `symbol` (required), `kit`, `otherSdks`, `api`, `sdk`, `project`, `rebuild` |
+| `doctor` | `doctor --json` | `project`, `fix`, `device` (boolean, as `--no-device`), `serial`, `arktsCheck` |
+| `devices` | `devices --json` | `long`; the array comes wrapped as `{ "devices": [...] }` |
+
+- **Errors.** A tool result has `isError: true` when the command would exit non-zero: a failed build, `check_arkts` with an error or one that could not run, a failed or incomplete test run, a failed smoke check, an `api_show` miss or an `api_search` without hits, a failing `doctor` check, or a tool that threw (no device, a timeout, bad arguments). The JSON is still there to read. `logs_crash` is not an error when there was no crash; check `crashed`. JSON-RPC errors are kept for protocol problems (an unknown tool or method).
+- **Images.** `screenshot` returns the capture as an `image/jpeg` content block downscaled to `maxDim` (with `grid`, the 10x10 coordinate grid), plus its dimensions as JSON; `crop` and `target*` return a full-resolution crop, `contactSheet` the tiled burst, `diff` the comparison and the current screen. `output` also writes the image to a file (with `diff`, the full-resolution capture, usable as a later baseline).
+- **Layouts.** `dump_layout` without `flat` or `summary` returns the whole tree; `flat` (text) is the cheap way to read a screen. `output` saves what is returned, so `{ "output": "before.json" }` then `{ "diff": "before.json" }` compares two moments.
+
 ## Output & exit codes
 
 - **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target` / `--selector`, `dump windows`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `app verify`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
