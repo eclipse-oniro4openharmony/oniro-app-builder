@@ -1,0 +1,6 @@
+{
+  "routerMap": [
+    { "name": "Settings", "pageSourceFile": "src/main/ets/pages/Settings.ets", "buildFunction": "SettingsBuilder" },
+    { "name": "Ghost", "pageSourceFile": "src/main/ets/pages/Ghost.ets", "buildFunction": "GhostBuilder" }
+  ]
+}

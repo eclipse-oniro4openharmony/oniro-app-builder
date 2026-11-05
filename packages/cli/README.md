@@ -284,6 +284,21 @@ Prints each diagnostic as `file:line:col severity arkts-check: message (rule)`, 
 
 The checker is deveco-cli's `arkts-check.cjs` (MIT, see `NOTICE`), run in a child `node` process.
 
+#### `screens` — static page and route inventory
+
+`screens [project-dir]` (defaults to the current directory) lists the pages of a project, the routes between them and the placeholder content left in them, read from the sources of every module in `build-profile.json5`. It needs no build, no SDK and no device.
+
+- **Pages.** `@Entry` pages listed in `main_pages.json` (named `pages/Index`), `@Entry({ routeName })` named routes, `NavDestination` pages registered in a route map (`module.json5` `"routerMap": "$profile:route_map"`, named by the map's `name`) or in a `.navDestination(builder)` builder that dispatches on the route name (`if (name === 'Detail') { DetailPage() }`, with `==`, `||` and string constants such as `RouteNames.DETAIL`). An `@Entry` struct that `main_pages.json` does not list, and a struct whose `build()` root is `NavDestination` but that nothing registers, are listed as unregistered.
+- **Content nodes.** The component calls a page renders, following its custom components and `@Builder`s (in the same file or elsewhere in the project), counting each `if` branch and each `ForEach`/`LazyForEach`/`Repeat` item template once, and leaving out layout containers (`Column`, `Row`, `Stack`, `Flex`, `RelativeContainer`, `List`/`ListItem`, `Grid`/`GridItem`, `Scroll`, `Tabs`/`TabContent`, `Swiper`, `Navigation`, `NavDestination`, ...) and `Blank`/`Divider`. Builders passed as attributes (`.navDestination(...)`, `.bindSheet(...)`) are not part of the page.
+- **Routes.** Call sites of `pushUrl`, `replaceUrl`, `pushNamedRoute`, `replaceNamedRoute` (`router` or `getUIContext().getRouter()`), `pushPath`, `pushPathByName`, `replacePath`, `replacePathByName`, `pushDestination`, `pushDestinationByName` (`NavPathStack`), and the ability's `loadContent`. The target is read from a literal, a constant, a `{ url }`/`{ name }` object or `new NavPathInfo(...)`, also through a local `const options: RouterOptions = { url: ... }`; any other target is reported with its source text and marked dynamic. `from` is the page whose component holds the call site, else the enclosing struct, class or function; a page's routes out include those of the components it renders.
+- **Placeholders.** `TODO`/`FIXME` comments, string literals and `string.json` values that read like placeholders (`placeholder`, `lorem ipsum`, `coming soon`, `TBD`, `not implemented`, `under construction`, `Hello World`), an empty `build()`, and a page that renders no content node.
+
+Prints three tables (pages, routes, placeholders) and any warnings (a page `main_pages.json` lists whose file is missing, a route-map entry whose file or builder is not found, a builder whose route names cannot be read). Exits 0, since it is an inventory, not a gate, and 1 when the project cannot be read. The G2 gate ("every spec screen has a page with at least k content nodes and every spec route has a push call site") is `checkScreensAgainstSpec` in `@oniroproject/core`, a pure function of the `--json` output.
+
+| Flag | Description |
+| --- | --- |
+| `--json` | Print the inventory: `pages` (`name`, `module`, `file`, `line`, `component`, `entry`, `kind` (`entry` or `navDestination`), `registered`, `contentNodes`, `routesOut`), `routes` (`from`, `to`, `file`, `line`, `via`, `dynamic`), `placeholders` (`file`, `line`, `text`, `kind`: `comment`, `text`, `resource`, `empty-build`, `no-content`), `warnings`, `modules`, `projectDir`; `{ "error": ... }` when the project cannot be read. |
+
 #### `lint` — run the OpenHarmony codelinter
 
 `lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0, although codelinter itself exits 1 for them. When codelinter says its report is incomplete, for example because the command-line tools' flavour (see `cmdtools status`) does not match the project's `runtimeOS`, it exits 2: it skipped checks, so a clean report is not evidence of clean code. Its notices, and a hint when the flavour is the cause, go to stderr.
@@ -558,7 +573,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `screens`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.

@@ -16,3 +16,4 @@ export * from './harmonyos/index.js';
 export * from './testing/index.js';
 export * from './check/index.js';
 export * from './doctor/index.js';
+export * from './screens/index.js';

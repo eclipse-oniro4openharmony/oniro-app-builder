@@ -1,0 +1,3 @@
+{
+  module: { name: 'entry', type: 'entry', deviceTypes: ['default'], pages: '$profile:main_pages' },
+}
