@@ -194,8 +194,8 @@ export function checkCmdTools(config: ConfigProvider, versions: DoctorVersions):
       fix: partial ? 'oniro-app cmdtools install --force' : 'oniro-app cmdtools install',
     };
   }
-  const version = /\(([^)]+)\)/.exec(status.status)?.[1];
-  if (version && version !== 'version unknown') versions.cmdTools = version;
+  const version = status.version;
+  if (version) versions.cmdTools = version;
   if (status.flavour) versions.cmdToolsFlavour = status.flavour;
   const missing = CMD_TOOLS_REQUIRED.filter((rel) => !fs.existsSync(path.join(dir, rel)));
   if (missing.length) {

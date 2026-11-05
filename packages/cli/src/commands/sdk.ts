@@ -6,12 +6,31 @@ import {
   OHOS_DAILY_BUILDS_URL,
   downloadAndInstallSdk,
   getOsFolder,
+  getHarmonyOsSdkListing,
   getSdkRootDir,
   getSupportedSdksForUi,
   installSdkFromArchive,
   removeSdk,
+  type HarmonyOsSdkListing,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+
+const HARMONYOS_SOURCE: Record<NonNullable<HarmonyOsSdkListing['source']>, string> = {
+  cmdtools: 'from the command-line tools',
+  'deveco-studio': 'from DevEco Studio',
+  configured: 'from ONIRO_HARMONYOS_SDK_PATH',
+};
+
+/** What `sdk list` prints after the OpenHarmony table: the HarmonyOS SDK, which it does not manage. */
+export function formatHarmonyOsSdkNote(listing: HarmonyOsSdkListing | null): string {
+  const note =
+    'HarmonyOS SDKs are not managed by `sdk`: they ship inside the HarmonyOS command-line tools ' +
+    '(`oniro-app cmdtools`) or DevEco Studio.';
+  if (!listing) return `${note}\nNo HarmonyOS SDK found; \`oniro-app cmdtools install\` installs one.`;
+  const name = listing.displayName ?? `HarmonyOS ${listing.version ?? ''}`.trim();
+  const from = listing.source ? `, ${HARMONYOS_SOURCE[listing.source]}` : '';
+  return `${note}\n*  ${name.padEnd(17)} api ${listing.api ?? '?'}  ${listing.path}${from}`;
+}
 
 const FULL_SDK_TIP =
   'Tip: the full SDK (with system APIs) is not on the release mirror. Download an ohos-sdk-full archive ' +
@@ -19,7 +38,9 @@ const FULL_SDK_TIP =
   '`oniro-app sdk install --from-archive <archive>`.';
 
 export function registerSdkCommand(program: Command): void {
-  const sdk = program.command('sdk').description('Manage OpenHarmony SDK installs.');
+  const sdk = program
+    .command('sdk')
+    .description('Manage OpenHarmony SDK installs. HarmonyOS SDKs come with the command-line tools (`cmdtools`).');
 
   sdk
     .command('install [version]')
@@ -90,17 +111,22 @@ export function registerSdkCommand(program: Command): void {
 
   sdk
     .command('list')
-    .description('List known SDK versions and whether they are installed on this machine.')
+    .description(
+      'List known OpenHarmony SDK versions and whether they are installed on this machine, then the HarmonyOS ' +
+        'SDK, which comes with the command-line tools (`cmdtools`) or DevEco Studio, if one is found.',
+    )
     .option('--json', 'Emit machine-readable JSON instead of a table.')
     .action((opts: { json?: boolean }) => {
       const { config } = getRuntime();
       const sdks = getSupportedSdksForUi(config);
+      const harmonyOs = getHarmonyOsSdkListing(config);
       if (opts.json) {
-        process.stdout.write(`${JSON.stringify(sdks, null, 2)}\n`);
+        const rows = [...sdks.map((s) => ({ ...s, flavour: 'OpenHarmony' })), ...(harmonyOs ? [harmonyOs] : [])];
+        process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
         return;
       }
       const rows = sdks.map((s) => `${s.installed ? '*' : ' '}  ${s.version.padEnd(8)} api ${s.api}`);
-      process.stdout.write(`${rows.join('\n')}\n`);
+      process.stdout.write(`${rows.join('\n')}\n\n${formatHarmonyOsSdkNote(harmonyOs)}\n`);
     });
 
   sdk
