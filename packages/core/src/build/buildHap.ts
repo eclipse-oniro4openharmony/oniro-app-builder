@@ -18,6 +18,7 @@ import {
   type BuildDiagnostic,
 } from './diagnostics.js';
 import { describeBuildSdk, resolveBuildSdk, type BuildSdk } from './buildSdk.js';
+import { signingMismatch } from './signingCheck.js';
 
 /** How to build against a newer SDK, for the dependency hint. */
 const NEWER_SDK_REMEDY: Record<BuildSdk['runtimeOS'], string> = {
@@ -253,14 +254,23 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
   }
 
   const parsed = parseBuildOutput(output, { projectDir });
-  const sdk = resolveBuildSdk({ config: opts.config, projectDir, runtimeOS: isHarmonyOs ? 'HarmonyOS' : 'OpenHarmony' });
+  const diagnostics = [...parsed.diagnostics];
+  const runtimeOS = isHarmonyOs ? 'HarmonyOS' : 'OpenHarmony';
+  // A HAP signed with the other runtime's material still comes out `-signed`;
+  // only the install on a device would tell (#19). Warn, do not refuse.
+  const mismatch = anySigned ? signingMismatch(projectDir, runtimeOS, opts.product) : undefined;
+  if (mismatch) {
+    warnings.push(mismatch);
+    diagnostics.push({ severity: 'warning', source: 'signing', message: mismatch, file: 'build-profile.json5' });
+  }
+  const sdk = resolveBuildSdk({ config: opts.config, projectDir, runtimeOS });
   return {
     exitCode,
     durationMs: Date.now() - start,
     discoveredHaps,
     warnings,
-    diagnostics: parsed.diagnostics,
-    summary: summarise(parsed.diagnostics, parsed),
+    diagnostics,
+    summary: summarise(diagnostics, parsed),
     ...(sdk ? { sdk } : {}),
   };
 }

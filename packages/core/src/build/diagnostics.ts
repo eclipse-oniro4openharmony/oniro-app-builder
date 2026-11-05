@@ -4,9 +4,10 @@ import * as path from 'node:path';
 /**
  * Where a diagnostic comes from: the ArkTS compiler, hvigor itself (configuration
  * and task errors), the native toolchain (clang, lld), ohpm, the SDK the project
- * compiles against, or `check arkts`.
+ * compiles against, the signing material (a signingConfig for the other runtime),
+ * or `check arkts`.
  */
-export type DiagnosticSource = 'arkts' | 'hvigor' | 'native' | 'ohpm' | 'sdk' | 'arkts-check';
+export type DiagnosticSource = 'arkts' | 'hvigor' | 'native' | 'ohpm' | 'sdk' | 'signing' | 'arkts-check';
 
 /** One error or warning, in a shape shared by `build --json` and `check arkts --json`. */
 export interface BuildDiagnostic {
