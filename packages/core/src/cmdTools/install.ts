@@ -99,6 +99,56 @@ export interface InstallCmdToolsOptions {
   fsOps?: Partial<CmdToolsFsOps>;
 }
 
+export interface InstallCmdToolsResult {
+  /** The install directory. */
+  path: string;
+  /** What is installed now. */
+  installed: CmdToolsInfo;
+  /** What the install replaced; absent when the directory was missing or empty. */
+  previous?: CmdToolsInfo;
+}
+
+/** Compare dotted numeric versions; NaN parts count as 0. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * What `installCmdTools` says when it replaces an install: which release replaces
+ * which, and when hvigor changes major version or the new release is older, that
+ * too. Pure.
+ */
+export function describeReplacement(previous: CmdToolsInfo, next: CmdToolsInfo): string[] {
+  const before = describeCmdTools(previous);
+  const after = describeCmdTools(next);
+  if (before === after) return [`Reinstalling command-line tools ${after}.`];
+  const lines = [`Replacing command-line tools ${before} with ${after}.`];
+  const oldHvigor = previous.tools.hvigor;
+  const newHvigor = next.tools.hvigor;
+  if (oldHvigor && newHvigor && oldHvigor.split('.')[0] !== newHvigor.split('.')[0]) {
+    lines.push(
+      `hvigor changes major version (${oldHvigor} -> ${newHvigor}): every project built with these tools, ` +
+        'or with their bin/ on PATH, gets the new one.',
+    );
+  }
+  if (previous.version && next.version && compareVersions(next.version, previous.version) < 0) {
+    lines.push(`${next.version} is older than the ${previous.version} it replaces.`);
+  }
+  if (previous.version && previous.version !== next.version) {
+    lines.push(
+      `The ${previous.version} tools are deleted; to go back, reinstall them from their ZIP with ` +
+        '`oniro-app cmdtools install --from-zip <zip> --force`.',
+    );
+  }
+  return lines;
+}
+
 /** @internal */
 export interface CmdToolsFsOps {
   move: (src: string, dest: string) => void;
@@ -171,8 +221,11 @@ function swapInto(
  * install replaces the directory's contents outright, so it holds exactly what a
  * clean extraction of the archive holds, whatever an earlier failed attempt or an
  * older version left there.
+ *
+ * When it replaces an install, it logs which release replaces which before the
+ * old one is deleted, and returns both (#25).
  */
-export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<void> {
+export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<InstallCmdToolsResult> {
   const { config, progress, abortSignal } = opts;
   const logger = opts.logger ?? noopLogger;
   const move = opts.fsOps?.move ?? movePath;
@@ -180,6 +233,8 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
   const CMD_PATH = path.resolve(getCmdToolsPath(config));
   const what = 'the command-line tools install';
   const createdTarget = !fs.existsSync(CMD_PATH);
+  const previous =
+    !createdTarget && fs.readdirSync(CMD_PATH).some((n) => !isWorkDirName(n)) ? readCmdToolsInfo(CMD_PATH) : undefined;
   let staging: string | undefined;
 
   const { dir: tmpDir, root: tmpRoot } = createInstallTempDir({
@@ -227,14 +282,20 @@ export async function installCmdTools(opts: InstallCmdToolsOptions): Promise<voi
     const keep = new Set<string>(
       tmpRel && !tmpRel.startsWith('..') && !path.isAbsolute(tmpRel) ? [tmpRel.split(path.sep)[0]!] : [],
     );
-    const previous = swapInto(CMD_PATH, staging, keep, rename);
+    // Say what is replaced by what before the old tools go: they serve every
+    // project on the machine, and a newer bundle may not be downloadable again (#25).
+    if (previous) {
+      for (const line of describeReplacement(previous, readCmdToolsInfo(staging))) logger.info(line);
+    }
+    const parked = swapInto(CMD_PATH, staging, keep, rename);
     progress?.report({ message: 'Cleaning up...', increment: 0 });
     try {
-      fs.rmSync(previous, { recursive: true, force: true });
+      fs.rmSync(parked, { recursive: true, force: true });
     } catch (err) {
       // The new tools are in place; the next install removes what is left.
-      logger.warn(`Could not remove the previous tools at ${previous}: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(`Could not remove the previous tools at ${parked}: ${err instanceof Error ? err.message : String(err)}`);
     }
+    return { path: CMD_PATH, installed: readCmdToolsInfo(CMD_PATH), ...(previous ? { previous } : {}) };
   } catch (err) {
     // Nothing of the user's was there before this run.
     if (createdTarget) fs.rmSync(CMD_PATH, { recursive: true, force: true });
