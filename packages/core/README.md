@@ -257,6 +257,14 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `runOhpm` / `ensureOhModules` | — | Run `ohpm`; install `--all` only when `oh_modules/` is missing. |
 | `runCodelinter` / `parseCodelinterReport` / `parseCodelinterFindings` | — | Run the codelinter → `CodelinterResult { code, findings, summary, notices, incomplete, raw }`; the parsers read its per-file table and `-Defects:` totals. |
 
+### ArkTS check
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `checkArkts` | `(ArktsCheckOptions) => Promise<ArktsCheckReport>` | Run the SDK's ArkTS checker and the project rules on a project or a list of files, without a build (`oniro-app check arkts`). `completed: false` with `error` when the checker could not run or crashed; throws only when the SDK cannot be resolved (`SdkNotInstalledError` for an API that is not installed). `fix: true` applies the verified fixes. Diagnostics use `BuildDiagnostic` with `source: 'arkts-check'`. |
+| `resolveArktsCheckSdk` | `(config, projectDir, logger?) => ArktsCheckSdk` | The SDK directory the check loads: `<sdk home>/<compileSdkVersion>` for OpenHarmony, `default/openharmony` plus `default/hms/ets` of the located HarmonyOS SDK for HarmonyOS. |
+| `parseArktsCheckOutput` / `arktsCheckerScript` | — | Read the checker's JSON; the path of the vendored `arkts-check.cjs`. |
+
 ### Tests
 
 | Export | Signature | Description |

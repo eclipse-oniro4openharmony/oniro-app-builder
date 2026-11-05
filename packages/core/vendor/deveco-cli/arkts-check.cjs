@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 'use strict';
 
+// Adapted for oniro-app from deveco-cli 1.3.10 (commit 99e3725fc2c5,
+// packages/cli/src/resources/arkts-check.cjs), Copyright (c) 2026 Huawei Device
+// Co., Ltd., MIT licence (see LICENSE beside this file). Changes from upstream:
+// the SDK is given with `--sdk <dir>` (an OpenHarmony SDK API directory, the
+// layout DevEco keeps under sdk/default/openharmony) instead of being found by
+// looking for a DevEco Studio install, and the HarmonyOS `hms/ets` API path is
+// given with `--hms <dir>` instead of being assumed beside it. Everything else
+// is upstream's.
+
 const path = require('path');
 const fs = require('fs');
 
@@ -8,11 +17,15 @@ const fs = require('fs');
 
 function parseArgs(argv) {
   // 默认只读检查；--fix 才改写源文件，避免直跑脚本时静默修改代码。
-  const args = { project: '', files: [], fix: false, serve: false };
+  const args = { project: '', files: [], fix: false, serve: false, sdk: '', hms: '' };
   let i = 2;
   while (i < argv.length) {
     if (argv[i] === '--project' && argv[i + 1]) {
       args.project = path.resolve(argv[++i]);
+    } else if (argv[i] === '--sdk' && argv[i + 1]) {
+      args.sdk = path.resolve(argv[++i]);
+    } else if (argv[i] === '--hms' && argv[i + 1]) {
+      args.hms = path.resolve(argv[++i]);
     } else if (argv[i] === '--serve') {
       args.serve = true;
     } else if (argv[i] === '--no-fix') {
@@ -33,39 +46,29 @@ function parseArgs(argv) {
   return args;
 }
 
-// --- DevEco SDK detection ---
-
-function findDevecoHome() {
+// --- SDK location ---
+//
+// `sdkDir` is the directory holding ets/, previewer/ and toolchains/: an
+// OpenHarmony SDK API directory (<sdk-root>/20) or DevEco's
+// sdk/default/openharmony. `hmsEtsDir` is HarmonyOS's sdk/default/hms/ets, added
+// to the checker's external API paths when the project targets HarmonyOS.
+// Without --sdk, DEVECO_HOME is honoured the way upstream reads it.
+function resolveSdk(args) {
+  if (args.sdk) return { sdkDir: args.sdk, hmsEtsDir: args.hms || '' };
   const envHome = (process.env.DEVECO_HOME || '').trim();
-  if (envHome && fs.existsSync(envHome)) return envHome;
-
-  const candidates = [];
-  if (process.platform === 'win32') {
-    const userHome = (process.env.USERPROFILE || '').trim();
-    candidates.push(
-      'C:\\Program Files\\Huawei\\DevEco Studio',
-      'C:\\Program Files\\DevEco Studio',
-      'C:\\Program Files (x86)\\DevEco Studio',
-      userHome ? path.join(userHome, 'DevEco Studio') : '',
-    );
-  } else if (process.platform === 'darwin') {
-    candidates.push('/Applications/DevEco-Studio.app/Contents');
-  } else {
-    const home = (process.env.HOME || '').trim();
-    if (home) {
-      candidates.push(path.join(home, 'devecostudio/Contents'));
-      candidates.push(path.join(home, 'DevEco-Studio/Contents'));
-    }
+  if (envHome && fs.existsSync(envHome)) {
+    const hms = path.join(envHome, 'sdk', 'default', 'hms', 'ets');
+    return {
+      sdkDir: path.join(envHome, 'sdk', 'default', 'openharmony'),
+      hmsEtsDir: args.hms || (fs.existsSync(hms) ? hms : ''),
+    };
   }
-  for (const c of candidates.filter(Boolean)) {
-    if (fs.existsSync(c)) return c;
-  }
-  return null;
+  return { sdkDir: '', hmsEtsDir: '' };
 }
-function findEtsLoader(devecoHome) {
+
+function findEtsLoader(sdkDir) {
   const candidates = [
-    path.join(devecoHome, 'sdk', 'default', 'openharmony', 'ets', 'build-tools', 'ets-loader'),
-    path.join(devecoHome, 'sdk', 'openharmony', 'ets', 'build-tools', 'ets-loader'),
+    path.join(sdkDir, 'ets', 'build-tools', 'ets-loader'),
   ];
   for (const c of candidates) {
     if (fs.existsSync(path.join(c, 'lib', 'ets_checker.js'))) return c;
@@ -190,8 +193,8 @@ function fileHash(abs) {
   }
 }
 
-function computeEpoch(projectPath, devecoHome) {
-  const parts = [devecoHome];
+function computeEpoch(projectPath, sdkDir) {
+  const parts = [sdkDir];
   for (const rel of ['oh-package.json5', 'oh-package-lock.json5', 'build-profile.json5']) {
     parts.push(rel, fileHash(path.join(projectPath, rel)));
   }
@@ -287,10 +290,9 @@ function parseMessageLine(line) {
 
 // --- Project-level validation (A-class checks) ---
 
-function loadSystemResourceNames(devecoHome) {
+function loadSystemResourceNames(sdkDir) {
   const candidates = [
-    path.join(devecoHome, 'sdk', 'default', 'openharmony', 'previewer', 'common', 'resources', 'entry', 'resources.txt'),
-    path.join(devecoHome, 'sdk', 'openharmony', 'previewer', 'common', 'resources', 'entry', 'resources.txt'),
+    path.join(sdkDir, 'previewer', 'common', 'resources', 'entry', 'resources.txt'),
   ];
   let resFile = '';
   for (const c of candidates) {
@@ -308,8 +310,8 @@ function loadSystemResourceNames(devecoHome) {
   return names;
 }
 
-function validateSystemResources(files, devecoHome, projectPath) {
-  const validNames = loadSystemResourceNames(devecoHome);
+function validateSystemResources(files, sdkDir, projectPath) {
+  const validNames = loadSystemResourceNames(sdkDir);
   if (!validNames) return [];
 
   const diagnostics = [];
@@ -1384,11 +1386,10 @@ function parseCompatibleSdkVersion(raw) {
 // `oh-uni-package.json`. This is the API level the installed SDK targets, and
 // is the correct fallback when a project's build-profile.json5 doesn't declare
 // `compatibleSdkVersion`.
-function readSdkApiLevel(devecoHome) {
-  if (!devecoHome) return undefined;
+function readSdkApiLevel(sdkDir) {
+  if (!sdkDir) return undefined;
   const candidates = [
-    path.join(devecoHome, 'sdk', 'default', 'openharmony', 'ets', 'oh-uni-package.json'),
-    path.join(devecoHome, 'sdk', 'openharmony', 'ets', 'oh-uni-package.json'),
+    path.join(sdkDir, 'ets', 'oh-uni-package.json'),
   ];
   for (const p of candidates) {
     try {
@@ -1401,7 +1402,7 @@ function readSdkApiLevel(devecoHome) {
   return undefined;
 }
 
-function readProjectSdkConfig(projectPath, devecoHome) {
+function readProjectSdkConfig(projectPath, sdkDir) {
   const profilePath = path.join(projectPath, 'build-profile.json5');
   let parsed = null;
   try {
@@ -1426,7 +1427,7 @@ function readProjectSdkConfig(projectPath, devecoHome) {
   // checker defaults to a low hardcoded API level.
   let resolvedApiLevel = apiLevel;
   if (resolvedApiLevel === undefined) {
-    resolvedApiLevel = readSdkApiLevel(devecoHome);
+    resolvedApiLevel = readSdkApiLevel(sdkDir);
   }
 
   return {
@@ -2192,10 +2193,9 @@ function validatePermissionsConfig(moduleJson5Text, userGrantSet, stringKeys, re
 // name set across every grantMode (system_grant + user_grant), used by the
 // "unknown permission name" check below. Returns { userGrant, all } or null if
 // the SDK file cannot be found/parsed.
-function loadSdkPermissionSets(devecoHome) {
+function loadSdkPermissionSets(sdkDir) {
   const candidates = [
-    path.join(devecoHome, 'sdk', 'default', 'openharmony', 'toolchains', 'lib', 'PermissionDefinitions.json'),
-    path.join(devecoHome, 'sdk', 'openharmony', 'toolchains', 'lib', 'PermissionDefinitions.json'),
+    path.join(sdkDir, 'toolchains', 'lib', 'PermissionDefinitions.json'),
   ];
   let file = '';
   for (const c of candidates) {
@@ -2271,8 +2271,8 @@ function validatePermissionNamesExist(moduleJson5Text, allPermissionNames, relFi
 }
 
 // Project-level entry: locate module.json5 + string.json, run the pure checkers.
-function validatePermissions(projectPath, devecoHome) {
-  const sdkSets = loadSdkPermissionSets(devecoHome);
+function validatePermissions(projectPath, sdkDir) {
+  const sdkSets = loadSdkPermissionSets(sdkDir);
   if (!sdkSets) return [];
 
   const moduleCandidates = [
@@ -2893,7 +2893,7 @@ function buildProfileNotBuiltHint(projectPath) {
     fs.existsSync(path.resolve(projectPath, m.srcPath, 'build', productName, 'generated', 'profile')));
   if (built) return null;
   return `No module has build output for product '${productName}' yet, so generated modules such as BuildProfile do not exist. ` +
-    `Run a build first (devecocli build, or Build Hap(s)/APP in DevEco Studio), then re-run the check.`;
+    `Run a build first (oniro-app build), then re-run the check.`;
 }
 
 const resolveModulePathsCache = new Map();
@@ -2993,9 +2993,9 @@ function findModuleSrcMainOnDisk(projectPath, push) {
 // decorator these checks read — so applyAutoFixes recomputes this after applying
 // edits rather than trusting the cache.
 function computeProjectDiagnostics(files, env, hasExplicitFiles) {
-  const { devecoHome, projectPath } = env;
+  const { sdkDir, projectPath } = env;
   const fileScoped = [
-    ...validateSystemResources(files, devecoHome, projectPath),
+    ...validateSystemResources(files, sdkDir, projectPath),
     ...validateAppResources(files, projectPath),
     ...validateComponentDecorators(files, projectPath),
     ...validateObservedV2PropertyTypes(files, projectPath),
@@ -3018,7 +3018,7 @@ function computeProjectDiagnostics(files, env, hasExplicitFiles) {
     ...validateRouteMapProfile(projectPath),
     ...validateResourceDirNames(projectPath),
     ...validateModelVersion(projectPath),
-    ...validatePermissions(projectPath, devecoHome),
+    ...validatePermissions(projectPath, sdkDir),
   ];
 }
 
@@ -3036,10 +3036,10 @@ function cleanupCheckerCache(projectPath) {
 }
 
 function runChecker(files, env) {
-  const { devecoHome, etsLoaderPath, projectPath, aceModuleJsonPath } = env;
+  const { sdkDir, etsLoaderPath, projectPath, aceModuleJsonPath } = env;
   // Carried on env when runCheck computed it (one profile read per request);
   // read here so runChecker stays usable standalone, as in tests.
-  const sdkConfig = env.sdkConfig || readProjectSdkConfig(projectPath, env.devecoHome);
+  const sdkConfig = env.sdkConfig || readProjectSdkConfig(projectPath, env.sdkDir);
 
   const fileMap = {};
   files.forEach((f, i) => { fileMap[`file_${i}`] = f; });
@@ -3054,8 +3054,8 @@ function runChecker(files, env) {
   console.error = capture;
   console.warn = capture;
 
-  const hmsSdkEts = path.join(devecoHome, 'sdk', 'default', 'hms', 'ets');
-  if (fs.existsSync(hmsSdkEts) && !(process.env.externalApiPaths || '').includes(hmsSdkEts)) {
+  const hmsSdkEts = env.hmsEtsDir || '';
+  if (hmsSdkEts && fs.existsSync(hmsSdkEts) && !(process.env.externalApiPaths || '').includes(hmsSdkEts)) {
     const existing = process.env.externalApiPaths || '';
     process.env.externalApiPaths = existing ? existing + path.delimiter + hmsSdkEts : hmsSdkEts;
   }
@@ -3088,7 +3088,7 @@ function runChecker(files, env) {
     // Set it directly on the module's projectConfig — NOT in the projectConfig
     // object below — so `Object.assign` in `initEtsStandaloneCheckerConfig`
     // does not overwrite it.
-    mainModule.projectConfig.projectRootPath = path.join(devecoHome, 'sdk', 'default', 'openharmony', 'ets');
+    mainModule.projectConfig.projectRootPath = path.join(sdkDir, 'ets');
 
     // Standalone checker must mirror the rollup ets-checker path: only
     // with compileTool='rollup' does setCompilerOptions map
@@ -3237,7 +3237,7 @@ function dropFalsePositives(diagnostics, projectPath, aceModuleJsonPath) {
 // of a warm check, but it is what makes re-sending an unchanged 47-file list
 // cheap, which is the pattern the prompt asks the model to follow.
 function cachedCheckerDiagnostics(files, env) {
-  const epoch = computeEpoch(env.projectPath, env.devecoHome);
+  const epoch = computeEpoch(env.projectPath, env.sdkDir);
   if (epoch !== cacheEpoch) {
     fileDiagCache.clear();
     cacheEpoch = epoch;
@@ -3588,14 +3588,14 @@ function runCheck(args) {
     };
   }
 
-  const devecoHome = findDevecoHome();
-  if (!devecoHome) {
-    return { success: false, error: 'Cannot find DevEco Studio. Set DEVECO_HOME environment variable.', errors: [], summary: { errorCount: 0, warnCount: 0 } };
+  const { sdkDir, hmsEtsDir } = resolveSdk(args);
+  if (!sdkDir) {
+    return { success: false, error: 'No SDK given. Pass --sdk <dir> (an OpenHarmony SDK API directory such as <sdk-root>/20, or DevEco\'s sdk/default/openharmony), or set DEVECO_HOME.', errors: [], summary: { errorCount: 0, warnCount: 0 } };
   }
 
-  const etsLoaderPath = findEtsLoader(devecoHome);
+  const etsLoaderPath = findEtsLoader(sdkDir);
   if (!etsLoaderPath) {
-    return { success: false, error: `Cannot find ets-loader in DevEco SDK at: ${devecoHome}`, errors: [], summary: { errorCount: 0, warnCount: 0 } };
+    return { success: false, error: `Cannot find ets/build-tools/ets-loader/lib/ets_checker.js in the SDK at: ${sdkDir}`, errors: [], summary: { errorCount: 0, warnCount: 0 } };
   }
   let files = args.files.map(f => path.isAbsolute(f) ? f : path.resolve(args.project, f));
   // Filter out directories and non-.ets files from the explicit file list.
@@ -3631,9 +3631,9 @@ function runCheck(args) {
 
   // Read once per request rather than per runChecker call: auto-fix never edits
   // build-profile.json5, so its SDK values cannot change mid-request.
-  const sdkConfig = readProjectSdkConfig(args.project, devecoHome);
+  const sdkConfig = readProjectSdkConfig(args.project, sdkDir);
 
-  const env = { devecoHome, etsLoaderPath, projectPath: args.project, aceModuleJsonPath, files, sdkConfig, hasExplicitFiles };
+  const env = { sdkDir, hmsEtsDir, etsLoaderPath, projectPath: args.project, aceModuleJsonPath, files, sdkConfig, hasExplicitFiles };
 
   // Compute project-level diagnostics once and carry them on env: auto-fix never
   // edits the config files they read, so the (potentially large) SDK JSON reads
@@ -3709,7 +3709,7 @@ function runCheck(args) {
 // file. Re-entering `runCheck` in an already-warm process costs ~2s instead of
 // ~6s. Protocol: one `{"ready":true}` line on startup, then one response line
 // per request line, tagged with the request's `id`.
-function serve() {
+function serve(args) {
   process.stdout.write(JSON.stringify({ ready: true, pid: process.pid }) + '\n');
 
   let buffer = '';
@@ -3722,13 +3722,13 @@ function serve() {
       const line = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
       if (!line) continue;
-      handleRequest(line);
+      handleRequest(line, args);
     }
   });
   process.stdin.on('end', () => { process.exitCode = 0; });
 }
 
-function handleRequest(line) {
+function handleRequest(line, args) {
   let req;
   try {
     req = JSON.parse(line);
@@ -3760,6 +3760,8 @@ function handleRequest(line) {
         files: Array.isArray(req.files) ? req.files : [],
         fix: req.fix !== false,
         cache: true,
+        sdk: req.sdk ? path.resolve(req.sdk) : args.sdk,
+        hms: req.hms ? path.resolve(req.hms) : args.hms,
       });
     } catch (e) {
       return { success: false, error: `Internal error: ${e && e.message}`, errors: [], summary: { errorCount: 0, warnCount: 0 } };
@@ -3779,7 +3781,7 @@ function handleRequest(line) {
 function main() {
   const args = parseArgs(process.argv);
   if (args.serve) {
-    serve();
+    serve(args);
     return;
   }
   const result = runCheck(args);
@@ -3817,7 +3819,7 @@ module.exports = {
   validateRouteMapProfile, ROUTE_MAP_ALLOWED_KEYS, ROUTE_MAP_REQUIRED_KEYS,
   validateRouteMapBuildFunction,
   validateResourceDirNames, QUALIFIER_RESOURCE_DIRS, TOP_LEVEL_RESOURCE_DIRS,
-  parseArgs, runCheck,
+  parseArgs, runCheck, resolveSdk,
   readProjectSdkConfig, parseCompatibleSdkVersion, readSdkApiLevel,
   DEFAULT_SDK_INFO, DEFAULT_RUNTIME_OS,
   collectResolveModulePaths, readProjectModules, pickTargetNameForProduct,

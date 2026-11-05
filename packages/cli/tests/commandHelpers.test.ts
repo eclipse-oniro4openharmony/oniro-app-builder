@@ -8,16 +8,24 @@ const error = { ...warning, severity: 'error', message: 'e' };
 
 describe('lintExitCode', () => {
   it('exits 0 for warnings, although codelinter itself exits 1 for them', () => {
-    expect(lintExitCode({ code: 1, findings: [warning], summary: { defects: 1, errors: 0, warnings: 1, suggestions: 0 } })).toBe(0);
+    expect(lintExitCode({ code: 1, incomplete: false, findings: [warning], summary: { defects: 1, errors: 0, warnings: 1, suggestions: 0 } })).toBe(0);
   });
 
   it('exits 1 on an error-severity finding', () => {
-    expect(lintExitCode({ code: 1, findings: [error], summary: null })).toBe(1);
+    expect(lintExitCode({ code: 1, incomplete: false, findings: [error], summary: null })).toBe(1);
   });
 
   it('passes the code through when codelinter printed no report at all', () => {
-    expect(lintExitCode({ code: 2, findings: [], summary: null })).toBe(2);
-    expect(lintExitCode({ code: 1, findings: [], summary: { defects: 0, errors: 0, warnings: 0, suggestions: 0 } })).toBe(0);
+    expect(lintExitCode({ code: 2, incomplete: false, findings: [], summary: null })).toBe(2);
+    expect(lintExitCode({ code: 1, incomplete: false, findings: [], summary: { defects: 0, errors: 0, warnings: 0, suggestions: 0 } })).toBe(0);
+  });
+
+  it('exits 2 on an incomplete report, unless that is allowed', () => {
+    const clean = { defects: 0, errors: 0, warnings: 0, suggestions: 0 };
+    expect(lintExitCode({ code: 0, incomplete: true, findings: [], summary: clean })).toBe(2);
+    expect(lintExitCode({ code: 0, incomplete: true, findings: [], summary: clean }, true)).toBe(0);
+    // Findings it did make are still findings.
+    expect(lintExitCode({ code: 1, incomplete: true, findings: [error], summary: null })).toBe(1);
   });
 
   it('treats a non-zero exit without a report as a failed run, not a clean one', () => {
