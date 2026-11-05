@@ -18,6 +18,7 @@ const core = vi.hoisted(() => ({
   wakeAndUnlock: vi.fn(),
   latestCrash: vi.fn(),
   performInput: vi.fn(),
+  perfTrace: vi.fn(),
 }));
 
 vi.mock('@oniroproject/core', async () => {
@@ -118,7 +119,7 @@ describe('MCP protocol', () => {
     const tools = r.result?.tools as Array<{ name: string; inputSchema: { type: string }; annotations: object; description: string }>;
     expect(tools.map((t) => t.name)).toEqual([
       'build', 'check_arkts', 'test', 'apply', 'launch', 'dump_layout', 'input', 'screenshot', 'wait',
-      'logs_crash', 'screens', 'api_search', 'api_show', 'doctor', 'devices',
+      'logs_crash', 'perf_trace', 'screens', 'api_search', 'api_show', 'doctor', 'devices',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');
@@ -177,9 +178,9 @@ describe('JSON Schema subset', () => {
 describe('tool selection', () => {
   it('--read-only drops the tools that change the device', () => {
     const names = selectTools(undefined, true).map((t) => t.name);
-    for (const t of ['apply', 'launch', 'input', 'test']) expect(names).not.toContain(t);
+    for (const t of ['apply', 'launch', 'input', 'test', 'perf_trace']) expect(names).not.toContain(t);
     expect(names).toContain('screenshot');
-    expect(names).toHaveLength(TOOL_NAMES.length - 4);
+    expect(names).toHaveLength(TOOL_NAMES.length - 5);
   });
 
   it('--tools restricts the set and rejects unknown names', () => {
@@ -310,6 +311,21 @@ describe('tools over mocked core', () => {
     await call(await initialized(), 'input', { type: 'click', selector: 'xpath=//Button[@text="OK"]', window: 97 });
     const opts = core.performInput.mock.calls.at(-1)![0];
     expect(opts).toMatchObject({ type: 'click', windowId: 97, target: { raw: 'xpath=//Button[@text="OK"]' } });
+  });
+
+  it('perf_trace passes the capture options and is an error when a threshold fails', async () => {
+    core.perfTrace.mockResolvedValue({
+      ok: true, bundle: 'com.example.app', durationMs: 5000, trace: '/tmp/t.ftrace', refreshRateHz: 60, pid: 1,
+      frames: { total: 100, janky: 10, jankRate: 0.1, p50Ms: 5, p95Ms: 20, maxMs: 40, missedVsyncs: 12, longest: [] },
+      startup: null, flow: null, mainThread: { busyMs: 1, cpuMs: null }, scenes: [], categories: [], notes: [],
+    });
+    let r = await call(await initialized(), 'perf_trace', { bundle: 'com.example.app', launch: true, for: 3000, maxJankRate: 0.05 });
+    expect(r).toMatchObject({ isError: true, structuredContent: { ok: true, gate: { passed: false } } });
+    expect(core.perfTrace).toHaveBeenCalledWith(
+      expect.objectContaining({ bundle: 'com.example.app', launch: true, forMs: 3000, bufferKb: 65536, hiperf: false, wake: true }),
+    );
+    r = await call(await initialized(), 'perf_trace', { bundle: 'com.example.app', maxJankRate: 0.2 });
+    expect(r.isError).toBeUndefined();
   });
 
   it('logs_crash reports no crash as a result, not an error', async () => {

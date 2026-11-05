@@ -898,6 +898,62 @@ A flow is JSON, meant to be written and edited by hand:
 
 Unknown fields are errors (so a typo such as `selecter` does not silently drop a selector), and every selector is parsed when the file is loaded; `replay` lists every problem with its path (`steps[2].selector: …`) and exits 2. Step indices are 0-based everywhere. Prefer `id` selectors where the app sets ids (a recorded flow uses them): they survive text changes that `text=` selectors flag as divergences.
 
+#### `perf trace` — frames, jank and startup from a hitrace capture
+
+`perf trace` captures a `hitrace` trace on the device while the app cold-launches (`--launch`), a [flow](#flow-files) is replayed (`--flow`), or for a fixed time (`--for`), pulls it, and summarises it for the app. It is the measurement behind a performance gate: `--max-jank-rate` and `--max-startup-ms` turn it into a pass/fail check.
+
+What it reads from the trace (the markers an OpenHarmony API 26 device writes with the default categories `ace,app,graphic,ability,window`):
+
+| Measure | How |
+| --- | --- |
+| Frames | Each UI frame of the app is one `ReceiveVsync … now:<vsync>` slice on its main thread (ArkUI asks for a vsync only when something changed, so an idle app has no frames). A frame's time runs from its vsync to the end of that slice, so a frame held up by other work on the main thread counts the wait. |
+| Janky frames | Frames longer than one refresh interval (they missed the next vsync). `jankRate` = janky / total; `missedVsyncs` adds up the intervals missed. |
+| Refresh rate | The vsync period ArkUI logs (`VSyncReceiver:period:<ns>`), else `hidumper -s RenderService -a screen`, else 60 Hz (with a note). |
+| Cold start | With `--launch`: from the launch request (`AbilityManagerClient::StartAbility` in `aa`) to RenderService compositing the app's first frame (`RSJankStats::ReportEventFirstFrame app pid <pid>`); `processMs` is when the process was forked, `firstFrameMs` the main-thread time of the first frame. That first frame is left out of the frame stats. |
+| Main thread | `busyMs`: time in top-level traced slices; `cpuMs`: CPU time, with the `sched` category only. |
+| Scenes | RenderService's own reports for the app (`APP_LIST_FLING`, `ABILITY_OR_PAGE_SWITCH`, …): max frame and hitch time, hitch ratio (ms/s), response latency. |
+
+The app's process is found by its main thread's name, by launch markers that name the bundle, by `pidof` after the capture, or by its RenderService surface (`<last part of the bundle><n>`) when the kernel did not keep thread names. `trace_streamer` is not needed (and not in the SDKs).
+
+| Flag | Description |
+| --- | --- |
+| `--launch` | Force-stop the app, start tracing, cold-launch it (its `--ability`, else the main ability) and report `startup`. |
+| `--flow <file>` | Replay this flow while tracing (after the launch with `--launch`), through the same engine as `replay`; `--step-timeout` and `--fallback` as there. Its `bundle` is the default `--bundle`. |
+| `--for <ms>` | Without `--flow`: how long to capture (after the launch with `--launch`), default `5000`. With `--flow`: how long to keep capturing after it, default `1000`. |
+| `--bundle <bundle>` | The app to measure (default: the flow's bundle, else the project in the current directory). |
+| `--out <file>` | Where to save the trace (default: a new file under the system temp dir). It is ftrace text; `perf summary` reads it again. |
+| `--categories <list>` | hitrace categories (`hitrace -l` on the device lists them). Add `sched` for the main thread's CPU time, at a large cost in buffer. |
+| `--buffer-kb <kb>` | hitrace buffer (default `65536`). When it overflows the oldest events are lost, and a note says so. |
+| `--hiperf` | Also sample the app's process with `hiperf record -p <pid>` during the capture and list its top functions (`hiperf report --sort dso,func`); the `perf.data` is pulled next to the trace. The app must be running when sampling starts (right after the launch with `--launch`). |
+| `--max-jank-rate <r>` | Exit 1 when `frames.jankRate` is above `r` (0..1), or when there were no frames to judge. |
+| `--max-startup-ms <ms>` | Exit 1 when `startup.coldMs` is above it, or when no startup was measured. |
+| `--no-wake` | Leave the screen as it is. By default, with `--launch` or `--flow`, it is woken, a lock screen without a credential is swiped away, and it is kept on. |
+| `--device <serial>` | Target device serial. |
+| `--json` | Print the report: `ok`, `bundle`, `durationMs`, `trace`, `refreshRateHz`, `frames` (`total`, `janky`, `jankRate`, `p50Ms`, `p95Ms`, `maxMs`, `missedVsyncs`, `longest`), `startup` (`coldMs`, `firstFrameMs`, `processMs`, `from`, `to`) or `null`, `flow` (the `replay` report) or `null`, `pid`, `mainThread`, `scenes`, `hiperf`, `categories`, `notes`, `gate` (`passed`, `failures`), `error`. |
+
+Exit codes: `0` the capture completed (and every threshold held), `1` a threshold was exceeded or the flow diverged (the trace does not cover it), `2` it could not capture (no device, no bundle, hitrace refused the categories, the flow file is invalid or could not run, the lock screen needs a credential).
+
+`perf summary <trace>` summarises a trace taken earlier (`--bundle`, `--launched` when it holds a cold launch, `--pid`, `--refresh-rate`, the same thresholds and `--json`), with the same exit codes.
+
+```bash
+oniro-app perf trace --launch --bundle com.example.app --max-startup-ms 1500
+oniro-app perf trace --flow scroll.json --max-jank-rate 0.05 --out scroll.ftrace --json
+oniro-app perf summary scroll.ftrace --bundle com.example.app --max-jank-rate 0.02
+```
+
+```text
+com.example.perfprobe (pid 22334): 11.8 s captured, display 60.6 Hz (16.5 ms per frame)
+  frames: 200, janky 28 (14.0%), p50 4.7 ms, p95 20.5 ms, max 592.6 ms, 68 vsync(s) missed
+  longest: 592.6 ms at +6.50 s, 121.5 ms at +0.77 s, 27.6 ms at +0.98 s, 27.2 ms at +8.80 s, 24.8 ms at +0.90 s
+  startup: cold 778 ms (aa StartAbility → first frame composited (RSJankStats::ReportEventFirstFrame)), process up after 30.5 ms, first frame 151.4 ms
+  main thread: 2651.5 ms in traced work
+  RenderService APP_LIST_FLING /ets/pages/Index: max frame 14 ms, max hitch 15 ms, hitch 12 ms/s, response 62 ms
+  flow: passed (3 step(s))
+  trace: /tmp/oniro-perf-x1Y2z3/com.example.perfprobe.ftrace
+  note: The first frame after launch is reported under startup, not in the frame stats.
+GATE FAILED: Jank rate 0.14 (28/200 frames) is above 0.02.
+```
+
 ### Agents
 
 #### `serve mcp` — the gate commands as MCP tools
@@ -909,7 +965,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server on stdio (new
 | `--project <dir>` | Project the tools work on unless a call passes `project` (default: the current directory). Relative paths in tool arguments resolve against it. |
 | `--device <serial>` | Device the tools target unless a call passes `device` (default: `ONIRO_DEVICE_SERIAL`, else the only connected one). |
 | `--tools <list>` | Expose only these tools, comma-separated, e.g. `--tools check_arkts,screens,api_show`. |
-| `--read-only` | Leave out the tools that change the device: `apply`, `launch`, `input`, `test`. |
+| `--read-only` | Leave out the tools that change the device: `apply`, `launch`, `input`, `test`, `perf_trace` (it force-stops and launches the app, and a flow taps and swipes). |
 
 Register it with Claude Code:
 
@@ -945,21 +1001,22 @@ Tools (the inputs are the command's flags in camelCase, with the same defaults; 
 | `screenshot` | `screenshot --max-dim` | `output`, `grid`, `maxDim` (default 1024), `crop`, `target`, `targetId`, `targetType`, `targetIndex`, `selector`, `window`, `contactSheet`, `burst`, `interval`, `diff`, `project`, `device` |
 | `wait` | `wait --json` | `log`, `since`, `boot`, `bundle`, `pidOf`, `domain`, `target`, `targetId`, `targetType`, `selector`, `window`, `gone`, `interval`, `timeout`, `device` |
 | `logs_crash` | `logs crash --json` | `bundle`, `since`, `wait`, `path`, `output`, `project`, `device` |
+| `perf_trace` | `perf trace --json` | `bundle`, `launch`, `flow`, `for`, `ability`, `out`, `categories[]`, `bufferKb`, `hiperf`, `maxJankRate`, `maxStartupMs`, `stepTimeout`, `fallback`, `wake`, `project`, `device` |
 | `screens` | `screens --json` | `project` |
 | `api_search` | `api search --json` | `query` (required), `kit`, `kind[]`, `lang`, `limit`, `deprecated`, `systemapi`, `api`, `sdk`, `project`, `rebuild` |
 | `api_show` | `api show --json` | `symbol` (required), `kit`, `otherSdks`, `api`, `sdk`, `project`, `rebuild` |
 | `doctor` | `doctor --json` | `project`, `fix`, `device` (boolean, as `--no-device`), `serial`, `arktsCheck` |
 | `devices` | `devices --json` | `long`; the array comes wrapped as `{ "devices": [...] }` |
 
-- **Errors.** A tool result has `isError: true` when the command would exit non-zero: a failed build, `check_arkts` with an error or one that could not run, a failed or incomplete test run, a failed smoke check, an `api_show` miss or an `api_search` without hits, a failing `doctor` check, or a tool that threw (no device, a timeout, bad arguments). The JSON is still there to read. `logs_crash` is not an error when there was no crash; check `crashed`. JSON-RPC errors are kept for protocol problems (an unknown tool or method).
+- **Errors.** A tool result has `isError: true` when the command would exit non-zero: a failed build, `check_arkts` with an error or one that could not run, a failed or incomplete test run, a failed smoke check, a `perf_trace` threshold exceeded or capture failed, an `api_show` miss or an `api_search` without hits, a failing `doctor` check, or a tool that threw (no device, a timeout, bad arguments). The JSON is still there to read. `logs_crash` is not an error when there was no crash; check `crashed`. JSON-RPC errors are kept for protocol problems (an unknown tool or method).
 - **Images.** `screenshot` returns the capture as an `image/jpeg` content block downscaled to `maxDim` (with `grid`, the 10x10 coordinate grid), plus its dimensions as JSON; `crop` and `target*` return a full-resolution crop, `contactSheet` the tiled burst, `diff` the comparison and the current screen. `output` also writes the image to a file (with `diff`, the full-resolution capture, usable as a later baseline).
 - **Layouts.** `dump_layout` without `flat` or `summary` returns the whole tree; `flat` (text) is the cheap way to read a screen. `output` saves what is returned, so `{ "output": "before.json" }` then `{ "diff": "before.json" }` compares two moments.
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target` / `--selector`, `dump windows`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `app verify`, `build`, `test`, `record`, `replay`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target` / `--selector`, `dump windows`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `app verify`, `build`, `test`, `record`, `replay`, `perf trace`, `perf summary`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
-- **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. `test` and `replay` exit 1 when a case fails or the flow diverges, and 2 when they could not run. Set `ONIRO_DEBUG=1` to also print full stack traces.
+- **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. `test` and `replay` exit 1 when a case fails or the flow diverges, and 2 when they could not run; `perf trace` exits 1 when a threshold is exceeded and 2 when it could not capture. Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.
 
 ## Configuration
