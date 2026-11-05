@@ -9,8 +9,8 @@ import { CancelledError, OniroError } from '../ports/errors.js';
 import { getEmulatorDir } from '../sdk/paths.js';
 import { hdcExec, runProcess } from '../hdc/exec.js';
 import { isEmulatorInstalled } from './install.js';
-
-const PID_FILE = path.join(os.tmpdir(), 'oniro_emulator.pid');
+import { DEFAULT_EMULATOR_PID_FILE as PID_FILE, livePoolPids } from './state.js';
+import { getDefaultInstanceStatus, listPoolInstanceStatuses, probeEmulatorBoot, type EmulatorInstanceStatus } from './pool.js';
 
 /**
  * Try to connect hdc to the emulator. Resolves true on success, false otherwise.
@@ -99,6 +99,12 @@ export interface StartEmulatorOptions {
   waitForHdcSeconds?: number;
   /** Poll interval for the hdc wait, ms. Default 5000. */
   hdcPollIntervalMs?: number;
+  /**
+   * If > 0, block until the guest reports `bootevent.boot.completed=true` over hdc, up
+   * to this many seconds. Connects with `hdc tconn` only: unlike `waitForHdcSeconds`,
+   * it never restarts the hdc server, so other connected devices are not disturbed.
+   */
+  waitReadySeconds?: number;
   abortSignal?: AbortSignal;
 }
 
@@ -125,6 +131,9 @@ export async function startEmulator(opts: StartEmulatorOptions): Promise<void> {
           if (opts.waitForHdcSeconds && opts.waitForHdcSeconds > 0) {
             await waitForHdc(config, opts.waitForHdcSeconds, opts.hdcPollIntervalMs ?? 5000, logger, opts.abortSignal);
           }
+          if (opts.waitReadySeconds && opts.waitReadySeconds > 0) {
+            await waitForBootCompleted(config, opts, logger);
+          }
           return;
         } catch {
           // Stale PID file — fall through and launch a fresh one.
@@ -138,6 +147,17 @@ export async function startEmulator(opts: StartEmulatorOptions): Promise<void> {
   const imagesPath = path.join(getEmulatorDir(config), 'images');
   if (!fs.existsSync(imagesPath)) {
     throw new OniroError(`Emulator images directory not found at ${imagesPath}. Run \`oniro-app emulator install\` first.`);
+  }
+  // Pool instances (`startPoolInstance`) keep the base images open as read-only
+  // backing files; run.sh opens them read-write, which QEMU refuses and which would
+  // corrupt the instances' overlays.
+  const pool = livePoolPids(config);
+  if (pool.size > 0) {
+    const ns = [...pool.keys()];
+    throw new OniroError(
+      `Emulator pool instance(s) ${ns.join(', ')} are running on the same base images, which the default emulator ` +
+        `opens read-write. Stop them first: ${ns.map((n) => `oniro-app emulator stop --instance ${n}`).join('; ')}.`,
+    );
   }
   const launcher = resolveLauncher(imagesPath, opts.headless === true, opts.connect);
 
@@ -188,6 +208,34 @@ export async function startEmulator(opts: StartEmulatorOptions): Promise<void> {
   if (opts.waitForHdcSeconds && opts.waitForHdcSeconds > 0) {
     await waitForHdc(config, opts.waitForHdcSeconds, opts.hdcPollIntervalMs ?? 5000, logger, opts.abortSignal, logPath);
   }
+  if (opts.waitReadySeconds && opts.waitReadySeconds > 0) {
+    await waitForBootCompleted(config, opts, logger, logPath);
+  }
+}
+
+/** Poll the default emulator's guest until `bootevent.boot.completed` is true (tconn only). */
+async function waitForBootCompleted(
+  config: ConfigProvider,
+  opts: StartEmulatorOptions,
+  logger: Logger,
+  logPathForDiagnostics?: string,
+): Promise<void> {
+  const address = opts.connect ?? '127.0.0.1:55555';
+  const timeoutSeconds = opts.waitReadySeconds!;
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  const started = Date.now();
+  for (;;) {
+    if (opts.abortSignal?.aborted) throw new CancelledError('Wait for the emulator cancelled.');
+    const probe = await probeEmulatorBoot(config, address, { logger: noopLogger });
+    if (probe.bootCompleted) {
+      logger.info(`Emulator ready at ${address} after ${Math.round((Date.now() - started) / 1000)}s.`);
+      return;
+    }
+    if (Date.now() >= deadline) break;
+    await new Promise((r) => setTimeout(r, Math.min(opts.hdcPollIntervalMs ?? 5000, Math.max(0, deadline - Date.now()))));
+  }
+  const tail = logPathForDiagnostics ? readTail(logPathForDiagnostics, 4000) : '';
+  throw new OniroError(`Emulator at ${address} did not finish booting within ${timeoutSeconds}s.${tail ? `\nTail of emulator log:\n${tail}` : ''}`);
 }
 
 async function waitForHdc(
@@ -277,19 +325,24 @@ export interface EmulatorStatus {
   installed: boolean;
   /** The configured emulator directory. */
   dir: string;
-  /** Whether an emulator QEMU process is alive. */
+  /** Whether the default emulator's QEMU is alive (pool instances do not count). */
   running: boolean;
   /** The hdc address checked for `connected`. */
   address: string;
   /** hdc lists `address` as a Connected target. */
   connected: boolean;
+  /**
+   * Every instance: the default emulator (instance 0, `address`) first, then each pool
+   * instance that has a state directory, with its health code.
+   */
+  instances: EmulatorInstanceStatus[];
 }
 
 /**
  * Whether a `qemu-system-x86_64` process is alive: the PID file from `startEmulator`
  * (POSIX only, as there), else a process-table scan.
  */
-async function isQemuRunning(logger: Logger): Promise<boolean> {
+async function isQemuRunning(config: ConfigProvider, logger: Logger): Promise<boolean> {
   if (os.platform() !== 'win32') {
     try {
       const pid = Number(fs.readFileSync(PID_FILE, 'utf8').trim());
@@ -304,9 +357,14 @@ async function isQemuRunning(logger: Logger): Promise<boolean> {
   const [cmd, ...args] = os.platform() === 'win32'
     ? ['tasklist', '/FI', 'IMAGENAME eq qemu-system-x86_64.exe', '/NH']
     : ['pgrep', '-f', 'qemu-system-x86_64'];
+  // Pool instances are QEMU processes too; they are not the default emulator.
+  const poolPids = new Set(livePoolPids(config).values());
   try {
     const res = await runProcess({ command: cmd!, args, timeoutMs: 10_000, logger });
-    return os.platform() === 'win32' ? /qemu-system-x86_64/i.test(res.stdout) : res.code === 0;
+    const pids = os.platform() === 'win32'
+      ? res.stdout.split(/\r?\n/).filter((l) => /qemu-system-x86_64/i.test(l)).map((l) => Number(l.trim().split(/\s+/)[1]))
+      : res.code === 0 ? res.stdout.split(/\s+/).filter(Boolean).map(Number) : [];
+    return pids.some((pid) => !poolPids.has(pid));
   } catch {
     return false;
   }
@@ -324,6 +382,13 @@ export async function getEmulatorStatus(
   const logger = opts.logger ?? noopLogger;
   const address = opts.address ?? '127.0.0.1:55555';
   const dir = getEmulatorDir(config);
+  const running = await isQemuRunning(config, logger);
+  // Probing a live instance `hdc tconn`s it (never restarting the hdc server), so
+  // hdc's target list is read afterwards.
+  const [instance0, pool] = await Promise.all([
+    getDefaultInstanceStatus(config, { running, address, logger }),
+    listPoolInstanceStatuses(config, { logger }),
+  ]);
   let connected = false;
   try {
     const targets = await hdcExec({ config, args: ['list', 'targets', '-v'], timeoutMs: 10_000, logger });
@@ -334,8 +399,9 @@ export async function getEmulatorStatus(
   return {
     installed: isEmulatorInstalled(config),
     dir,
-    running: await isQemuRunning(logger),
+    running,
     address,
     connected,
+    instances: [instance0, ...pool],
   };
 }

@@ -90,20 +90,67 @@ It lands in `<ONIRO_SDK_ROOT_DIR>/<os>/<api>` like a downloaded release, so proj
 | Command | Description |
 | --- | --- |
 | `emulator install [--force] [--tmp-dir <path>]` | Download and install the emulator. `--tmp-dir` overrides where the downloaded ZIP goes (see [Temporary space](#temporary-space)). |
-| `emulator start [options]` | Start the emulator via the bundled launcher and detach, so the CLI can exit while it keeps running. |
-| `emulator status [--address <host:port>] [--json]` | Report whether the emulator is installed, running, and connected to `hdc`, without starting it. Exits non-zero when not installed. DevEco Studio's HarmonyOS emulator is not covered; it shows up in `devices`. |
-| `emulator stop` | Kill running emulator processes. |
-| `emulator connect [--address <host:port>]` | Attempt an `hdc` connection (default `127.0.0.1:55555`). |
-| `emulator remove` | Delete the configured emulator directory. |
+| `emulator start [options]` | Start the emulator via the bundled launcher and detach, so the CLI can exit while it keeps running. With `--instance <n>` (1..99), start pool instance `n` instead (see [Emulator pool](#emulator-pool)). |
+| `emulator status [--address <host:port>] [--instance <n>] [--json]` | Report whether the emulator is installed, running, and connected to `hdc`, without starting it, then (when pool instances exist) one line per instance, the default emulator as `0`, with its [health](#emulator-pool). `--json` adds an `instances` array to the existing fields; with `--instance`, only that instance's object is printed. Exits non-zero when not installed. DevEco Studio's HarmonyOS emulator is not covered; it shows up in `devices`. |
+| `emulator stop [--instance <n> [--discard]]` | Without `--instance`: kill running emulator processes (every `qemu-system-x86_64`, pool instances included). With `--instance <n>`: stop only that pool instance's QEMU; `--discard` also deletes its overlays, log and state. |
+| `emulator connect [--address <host:port>]` | Attempt an `hdc` connection (default `127.0.0.1:55555`). Restarts the `hdc` server first. |
+| `emulator remove` | Delete the configured emulator directory (pool instances' overlays included). |
 
 `emulator start` options:
 
 | Flag | Description |
 | --- | --- |
-| `--headless` | Launch headless (VNC + telnet serial, no local window). Required in CI. |
-| `--log <path>` | Redirect launcher stdout/stderr to a file (default: discard). |
-| `--wait-for-hdc <seconds>` | Block until `hdc` connects, up to N seconds. `0` (default) returns as soon as the launcher spawns. |
-| `--connect <host:port>` | Override the launcher's hdc port-forward bind address. Pass `0.0.0.0:55555` on hosts where QEMU refuses to bind `127.0.0.1` (some CI runners). |
+| `--instance <n>` | Pool instance `1..99`. `0` or unset: the default emulator, through `run.sh`/`run.bat`, exactly as before. |
+| `--headless` | Launch headless (VNC + telnet serial, no local window). Required in CI. Pool instances are headless unless `--window`. |
+| `--log <path>` | Redirect launcher stdout/stderr to a file (default: discard; pool instances: `<instance dir>/qemu.log`). |
+| `--wait-for-hdc <seconds>` | Default emulator: block until `hdc` connects, up to N seconds (restarts the `hdc` server). `0` (default) returns as soon as the launcher spawns. |
+| `--wait-ready <seconds>` | Block until the guest reports `bootevent.boot.completed=true`, up to N seconds. Connects with `hdc tconn` only and never restarts the `hdc` server, so other devices stay connected. Exits non-zero on timeout or if QEMU dies (with the log tail). |
+| `--connect <host:port>` | Default emulator: override the launcher's hdc port-forward bind address. Pass `0.0.0.0:55555` on hosts where QEMU refuses to bind `127.0.0.1` (some CI runners). |
+| `--memory <size>`, `--smp <n>` | Pool: guest RAM (default `2048M`) and virtual CPUs (default `2`), smaller than `run.sh`'s 4 GB / 6 CPUs so several instances fit. |
+| `--resolution <WxH>` | Pool: display resolution (default `360x720`). |
+| `--window` | Pool: an SDL window instead of VNC. |
+| `--fresh` | Pool: discard the instance's overlays first (factory reset). Refused while the instance runs. |
+| `--boot-timeout <seconds>` | Pool: a boot that has not completed this long after launch is reported `stuck` (default 300). |
+| `--qemu <path>`, `--accel <kind>` | Pool: the `qemu-system-x86_64` binary (default `QEMU_BIN`, else `PATH`; `qemu-img` is looked up next to it), and the accelerator (`auto`, `kvm`, `hvf`, `whpx`, `tcg`; `auto` picks as `run.sh` does). |
+| `--json` | Pool: print the instance's status as JSON when done. |
+
+##### Emulator pool
+
+For parallel work, each item on its own emulator. `emulator start --instance <n>` runs its own QEMU, detached, with the command line `run.sh` uses (q35, KVM, the bundled kernel, ramdisk and kernel arguments, the four virtio disks in the same order, virtio-gpu, user networking), except that:
+
+- the disks are qcow2 copy-on-write overlays in `<emulator dir>/instances/<n>/` (`qemu-img create -f qcow2 -F raw -b images/<disk>.img`), so each instance has its own `/data` and the bundled images are only ever read. Overlays persist across `stop`/`start`; `--fresh` or `stop --discard` drops them. A booted instance's overlays take about 30 MB.
+- every port is bound to `127.0.0.1` at the instance's number:
+
+  | Port | Default emulator (`0`) | Pool instance `n` |
+  | --- | --- | --- |
+  | hdc (`hdc tconn`, `--device`) | `55555` | `55555+n` |
+  | VNC | display `:0` (`5900`) | display `:n` (`5900+n`) |
+  | serial console (telnet) | `4444` | `4444+n` |
+
+  A port that is already taken fails the start, naming it.
+
+Address an instance like any TCP device: `oniro-app --device 127.0.0.1:55556 …` or `ONIRO_DEVICE_SERIAL=127.0.0.1:55556`. `emulator start`, `status` and `--wait-ready` connect it with `hdc tconn`; nothing in the pool restarts or kills the `hdc` server, so a USB device and the other instances stay connected. A stopped instance stays listed by `hdc` as `Offline` until the `hdc` server next restarts.
+
+Health codes (`state` in `emulator status --json`):
+
+| State | Meaning |
+| --- | --- |
+| `stopped` | No QEMU process. |
+| `booting` | QEMU is alive; `hdc` cannot reach the guest yet, or `bootevent.boot.completed` is not `true`. |
+| `ready` | `hdc -t 127.0.0.1:<port> shell param get bootevent.boot.completed` answers `true`. `readyAt` and `bootSeconds` record when. |
+| `hdc-lost` | The instance was `ready` during this boot and `hdc` can no longer reach it (frozen or wedged guest). |
+| `stuck` | QEMU is alive but the boot has not completed `--boot-timeout` seconds after launch. |
+
+```bash
+oniro-app emulator start --instance 1 --wait-ready 300
+oniro-app emulator start --instance 2 --wait-ready 300 --memory 3G --smp 4
+oniro-app emulator status --json            # instances: [{instance: 0, state: "stopped"}, {instance: 1, state: "ready", ...}, ...]
+oniro-app --device 127.0.0.1:55557 hdc shell param get const.ohos.apiversion
+oniro-app emulator stop --instance 1        # instance 2 keeps running
+oniro-app emulator stop --instance 2 --discard
+```
+
+On this machine's KVM host (Linux), two instances at the defaults booted side by side to `ready` in about 15 s, each using about 2.3 GB of RAM and under 1 % of a CPU when idle. The pool shares the bundled images with the default emulator, which opens them read-write, so the two cannot run at once: `emulator start --instance <n>` refuses while the default emulator runs, and `emulator start` refuses while a pool instance does. If the default emulator has written to the images since an instance's overlays were made, starting that instance fails and asks for `--fresh`.
 
 #### `doctor` — check the machine can build, check, sign and test
 
