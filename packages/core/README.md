@@ -158,8 +158,15 @@ are the pair the installers use; `resolveTmpRoot(config, override?, installRoot?
 | --- | --- | --- |
 | `installEmulator` | `(InstallEmulatorOptions) => Promise<void>` | Download + extract the QEMU emulator into `emulatorDir`; `tmpDir` overrides the scratch directory (default: next to the install target). |
 | `isEmulatorInstalled` / `removeEmulator` | `(config) => boolean` / `void` | — |
-| `startEmulator` | `(StartEmulatorOptions) => Promise<void>` | Launch detached via `run.sh`/`run.bat`; optional `headless`, `logFile`, `connect`, and `waitForHdcSeconds`. |
-| `stopEmulator` | `(logger?) => Promise<void>` | Kill running emulator processes. |
+| `startEmulator` | `(StartEmulatorOptions) => Promise<void>` | Launch detached via `run.sh`/`run.bat`; optional `headless`, `logFile`, `connect`, `waitForHdcSeconds` and `waitReadySeconds` (waits for `bootevent.boot.completed` with `hdc tconn` only). Refuses while a pool instance runs. |
+| `stopEmulator` | `(logger?) => Promise<void>` | Kill running emulator processes (every `qemu-system-x86_64`, pool instances included). |
+| `getEmulatorStatus` | `(config, { address?, logger? }) => Promise<EmulatorStatus>` | `installed`, `running` (the default emulator; pool instances do not count), `connected`, and `instances`: the default emulator as instance 0, then every pool instance, each an `EmulatorInstanceStatus`. |
+| `startPoolInstance` | `(StartPoolInstanceOptions) => Promise<EmulatorInstanceStatus>` | Emulator pool: launch instance `n` (1..99) with its own QEMU on qcow2 overlays of the images in `<emulatorDir>/instances/<n>/`, hdc on `127.0.0.1:55555+n`, VNC `5900+n`, serial `4444+n`. Options `smp` (2), `memory` (`2048M`), `resolution`, `headless` (true), `fresh`, `bootTimeoutSeconds` (300), `waitReadySeconds`, `qemuBin`, `qemuImg`, `accel`, `logFile`. Fails on a taken port, a running default emulator, or base images changed since the overlays were made. |
+| `stopPoolInstance` | `({ config, instance, discard?, logger? }) => Promise<boolean>` | Signal only that instance's QEMU (by its recorded PID), `hdc tconn <addr> -remove`, and with `discard` delete its directory. |
+| `getPoolInstanceStatus` / `listPoolInstanceStatuses` | `(config, n, opts?)` / `(config, opts?)` | Health of one or every pool instance: `stopped`, `booting`, `ready`, `hdc-lost`, `stuck` (`EmulatorHealth`), probing with `hdc tconn` and `param get bootevent.boot.completed`; records `readyAt` in `instance.json`. |
+| `waitPoolInstanceReady` | `(WaitPoolInstanceReadyOptions) => Promise<EmulatorInstanceStatus>` | Poll until `ready`; throws on timeout or a dead QEMU. |
+| `probeEmulatorBoot` / `classifyEmulatorHealth` | `(config, address, opts?)` / `(HealthInputs) => EmulatorHealth` | The probe and the pure health rule behind the above. |
+| `poolInstancePorts` / `buildPoolQemuArgs` / `emulatorAccelArgs` | — | Pure helpers: an instance's ports, its QEMU argv, and the accelerator `run.sh` would pick. |
 | `attemptHdcConnection` | `(config, address?, logger?) => Promise<boolean>` | Try to connect `hdc` (default `127.0.0.1:55555`). |
 
 ### hdc — process execution
