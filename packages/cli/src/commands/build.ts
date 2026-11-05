@@ -9,7 +9,7 @@ import {
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 
-interface BuildOpts {
+export interface BuildOpts {
   product: string;
   module?: string;
   mode?: string;
@@ -18,6 +18,39 @@ interface BuildOpts {
   parallel: boolean;
   installSdk?: boolean;
   json?: boolean;
+}
+
+/**
+ * Build, and with `installSdk` install a missing SDK and build again. Throws
+ * only when the build could not run at all (no command-line tools, not a
+ * project). Shared with `serve mcp`.
+ */
+export async function runBuild(projectDir: string | undefined, opts: Omit<BuildOpts, 'json'>): Promise<BuildReport> {
+  const { config, logger, progress } = getRuntime();
+  const dir = path.resolve(projectDir ?? process.cwd());
+  logger.info(`Building project at ${dir}...`);
+  const build = () =>
+    buildWithDiagnostics({
+      config,
+      projectDir: dir,
+      product: opts.product,
+      module: opts.module,
+      mode: opts.mode,
+      task: opts.task,
+      autoInstallDeps: opts.deps,
+      parallel: opts.parallel,
+      logger,
+      // The logger already echoes spawn output; this hook is for streaming to other UIs.
+      onOutput: () => {},
+    });
+  let report = await build();
+  if (!report.ok && report.missingSdk?.version && opts.installSdk) {
+    const { version, api } = report.missingSdk;
+    logger.info(`Installing OpenHarmony SDK ${version} (api ${api}), which the project compiles against...`);
+    await downloadAndInstallSdk({ config, version, api, progress, logger });
+    report = await build();
+  }
+  return report;
 }
 
 export function registerBuildCommand(program: Command): void {
@@ -41,32 +74,10 @@ export function registerBuildCommand(program: Command): void {
       'print the result as JSON: ok, diagnostics (file, line, column, code, rule, message), summary, failedTask, discoveredHaps, warnings',
     )
     .action(async (projectDir: string | undefined, opts: BuildOpts) => {
-      const { config, logger, progress } = getRuntime();
-      const dir = path.resolve(projectDir ?? process.cwd());
-      logger.info(`Building project at ${dir}...`);
-      const build = () =>
-        buildWithDiagnostics({
-          config,
-          projectDir: dir,
-          product: opts.product,
-          module: opts.module,
-          mode: opts.mode,
-          task: opts.task,
-          autoInstallDeps: opts.deps,
-          parallel: opts.parallel,
-          logger,
-          // The logger already echoes spawn output; this hook is for streaming to other UIs.
-          onOutput: () => {},
-        });
+      const { logger } = getRuntime();
       let report: BuildReport;
       try {
-        report = await build();
-        if (!report.ok && report.missingSdk?.version && opts.installSdk) {
-          const { version, api } = report.missingSdk;
-          logger.info(`Installing OpenHarmony SDK ${version} (api ${api}), which the project compiles against...`);
-          await downloadAndInstallSdk({ config, version, api, progress, logger });
-          report = await build();
-        }
+        report = await runBuild(projectDir, opts);
       } catch (err) {
         // The build could not run at all (no command-line tools, not a project):
         // still one object on stdout for a caller that parses it.

@@ -19,7 +19,7 @@ import {
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 
-interface SdkOpts {
+export interface SdkOpts {
   api?: string;
   sdk?: string;
   project?: string;
@@ -27,7 +27,7 @@ interface SdkOpts {
   json?: boolean;
 }
 
-interface SearchOpts extends SdkOpts {
+export interface SearchOpts extends SdkOpts {
   kit?: string;
   kind?: string[];
   lang?: string;
@@ -36,7 +36,7 @@ interface SearchOpts extends SdkOpts {
   systemapi?: boolean;
 }
 
-interface ShowOpts extends SdkOpts {
+export interface ShowOpts extends SdkOpts {
   kit?: string;
   otherSdks?: boolean;
 }
@@ -131,6 +131,84 @@ function jsonEntry<T extends ApiEntry>(e: T, sdkDir: string): T & { path: string
   return { ...e, path: path.join(sdkDir, e.file) };
 }
 
+function sdkJson(index: ApiIndex, sel: ApiSdkSelection): Record<string, unknown> {
+  return { dir: index.sdkDir, api: index.api, version: index.sdkVersion, source: sel.source };
+}
+
+export interface ApiSearchRun {
+  /** What `api search --json` prints. */
+  json: Record<string, unknown>;
+  index: ApiIndex;
+  hits: ApiSearchHit[];
+  total: number;
+}
+
+/** `api search`: select the SDK, open its index and search it. Shared with `serve mcp`. */
+export function runApiSearch(query: string, opts: SearchOpts): ApiSearchRun {
+  const sel = selectSdk(opts);
+  const { index } = openIndex(sel.sdkDir, opts.rebuild);
+  const lang = opts.lang?.toLowerCase();
+  if (lang && lang !== 'arkts' && lang !== 'c') throw new OniroError(`--lang expects arkts or c, got "${opts.lang}".`);
+  const limit = Number(opts.limit ?? 20);
+  if (!Number.isInteger(limit) || limit <= 0) throw new OniroError(`--limit expects a positive number, got "${opts.limit}".`);
+  const result = searchApi(index, query, {
+    kit: opts.kit,
+    kinds: parseKinds(opts.kind),
+    language: lang as 'arkts' | 'c' | undefined,
+    noDeprecated: opts.deprecated === false,
+    noSystemApi: opts.systemapi === false,
+    limit,
+  });
+  const json = {
+    sdk: sdkJson(index, sel),
+    query: result.query,
+    total: result.total,
+    hits: result.hits.map((h: ApiSearchHit) => jsonEntry(h, index.sdkDir)),
+  };
+  return { json, index, hits: result.hits, total: result.total };
+}
+
+export interface ApiShowRun {
+  /** What `api show --json` prints. */
+  json: Record<string, unknown>;
+  index: ApiIndex;
+  found: boolean;
+  entries: ApiEntry[];
+  alsoIn: ApiElsewhere[];
+  suggestions: string[];
+}
+
+/** `api show`: the exact lookup, and on a miss the other SDKs and close names. Shared with `serve mcp`. */
+export function runApiShow(symbol: string, opts: ShowOpts): ApiShowRun {
+  const sel = selectSdk(opts);
+  const { index } = openIndex(sel.sdkDir, opts.rebuild);
+  const r = showApi(index, symbol, { kit: opts.kit });
+  let alsoIn: ApiElsewhere[] = [];
+  let suggestions: string[] = [];
+  if (!r.found) {
+    const { config, logger } = getRuntime();
+    if (opts.otherSdks !== false) {
+      alsoIn = findApiInOtherSdks(config, symbol, index.sdkDir, {
+        cacheDir: getApiIndexCacheDir(config),
+        kit: opts.kit,
+        logger,
+      });
+    }
+    suggestions = suggestApiSymbols(index, symbol);
+  }
+  const json: Record<string, unknown> = {
+    sdk: sdkJson(index, sel),
+    symbol,
+    found: r.found,
+    entries: r.entries.map((e) => jsonEntry(e, index.sdkDir)),
+  };
+  if (!r.found) {
+    json.alsoIn = alsoIn;
+    json.suggestions = suggestions;
+  }
+  return { json, index, found: r.found, entries: r.entries, alsoIn, suggestions };
+}
+
 export function registerApiCommand(program: Command): void {
   const api = program
     .command('api')
@@ -171,35 +249,15 @@ export function registerApiCommand(program: Command): void {
         'since, deprecated, deprecatedSince, useInstead, syscap, systemApi, file, path, line, signature, doc, overloads, score).',
     )
     .action((words: string[], opts: SearchOpts) => {
-      const query = words.join(' ');
-      const sel = selectSdk(opts);
-      const { index } = openIndex(sel.sdkDir, opts.rebuild);
-      const lang = opts.lang?.toLowerCase();
-      if (lang && lang !== 'arkts' && lang !== 'c') throw new OniroError(`--lang expects arkts or c, got "${opts.lang}".`);
-      const limit = Number(opts.limit ?? 20);
-      if (!Number.isInteger(limit) || limit <= 0) throw new OniroError(`--limit expects a positive number, got "${opts.limit}".`);
-      const result = searchApi(index, query, {
-        kit: opts.kit,
-        kinds: parseKinds(opts.kind),
-        language: lang as 'arkts' | 'c' | undefined,
-        noDeprecated: opts.deprecated === false,
-        noSystemApi: opts.systemapi === false,
-        limit,
-      });
+      const { json, index, hits, total } = runApiSearch(words.join(' '), opts);
       if (opts.json) {
-        const out = {
-          sdk: { dir: index.sdkDir, api: index.api, version: index.sdkVersion, source: sel.source },
-          query: result.query,
-          total: result.total,
-          hits: result.hits.map((h: ApiSearchHit) => jsonEntry(h, index.sdkDir)),
-        };
-        process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(json, null, 2)}\n`);
       } else {
-        for (const h of result.hits) process.stdout.write(`${formatApiEntry(h, index.sdkDir)}\n\n`);
-        const shown = result.hits.length < result.total ? `${result.hits.length} of ${result.total}` : `${result.total}`;
-        process.stdout.write(`${shown} match${result.total === 1 ? '' : 'es'} in ${describeIndex(index)}.\n`);
+        for (const h of hits) process.stdout.write(`${formatApiEntry(h, index.sdkDir)}\n\n`);
+        const shown = hits.length < total ? `${hits.length} of ${total}` : `${total}`;
+        process.stdout.write(`${shown} match${total === 1 ? '' : 'es'} in ${describeIndex(index)}.\n`);
       }
-      process.exitCode = result.total ? 0 : 1;
+      process.exitCode = total ? 0 : 1;
     });
 
   sdkOptions(
@@ -220,38 +278,13 @@ export function registerApiCommand(program: Command): void {
         'suggestions (qualified names).',
     )
     .action((symbol: string, opts: ShowOpts) => {
-      const sel = selectSdk(opts);
-      const { index } = openIndex(sel.sdkDir, opts.rebuild);
-      const r = showApi(index, symbol, { kit: opts.kit });
-      let alsoIn: ApiElsewhere[] = [];
-      let suggestions: string[] = [];
-      if (!r.found) {
-        const { config, logger } = getRuntime();
-        if (opts.otherSdks !== false) {
-          alsoIn = findApiInOtherSdks(config, symbol, index.sdkDir, {
-            cacheDir: getApiIndexCacheDir(config),
-            kit: opts.kit,
-            logger,
-          });
-        }
-        suggestions = suggestApiSymbols(index, symbol);
-      }
+      const { json, index, found, entries, alsoIn, suggestions } = runApiShow(symbol, opts);
       if (opts.json) {
-        const out: Record<string, unknown> = {
-          sdk: { dir: index.sdkDir, api: index.api, version: index.sdkVersion, source: sel.source },
-          symbol,
-          found: r.found,
-          entries: r.entries.map((e) => jsonEntry(e, index.sdkDir)),
-        };
-        if (!r.found) {
-          out.alsoIn = alsoIn;
-          out.suggestions = suggestions;
-        }
-        process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
-      } else if (r.found) {
-        for (const e of r.entries) process.stdout.write(`${formatApiEntry(e, index.sdkDir)}\n\n`);
+        process.stdout.write(`${JSON.stringify(json, null, 2)}\n`);
+      } else if (found) {
+        for (const e of entries) process.stdout.write(`${formatApiEntry(e, index.sdkDir)}\n\n`);
         process.stdout.write(
-          `${symbol} is declared in ${describeIndex(index)} (${r.entries.length} declaration${r.entries.length === 1 ? '' : 's'}).\n`,
+          `${symbol} is declared in ${describeIndex(index)} (${entries.length} declaration${entries.length === 1 ? '' : 's'}).\n`,
         );
       } else {
         process.stdout.write(`${symbol} is not declared in ${describeIndex(index)}.\n`);
@@ -260,7 +293,7 @@ export function registerApiCommand(program: Command): void {
         }
         if (suggestions.length) process.stdout.write(`  close matches: ${suggestions.join(', ')}\n`);
       }
-      process.exitCode = r.found ? 0 : 1;
+      process.exitCode = found ? 0 : 1;
     });
 
   sdkOptions(
