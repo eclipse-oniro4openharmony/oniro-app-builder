@@ -206,7 +206,7 @@ for HarmonyOS is refused with a pointer to `--harmonyos`.
 
 #### `build` — build the app via `hvigorw`
 
-`build [project-dir]` (defaults to the current directory). Modules build in parallel by default. An OpenHarmony project whose `compileSdkVersion` SDK is not installed fails before anything runs, naming the release to install. A failed build lists its errors on stderr, one per line (`file:line:col error source code: message (rule)`), after hvigor's own output. When the project uses kit symbols that its SDK lacks but a newer installed SDK declares, the error names that API level; when no installed SDK has them (`'…' is not exported from Kit '…'`), it adds a hint about the full SDK, which carries the system APIs.
+`build [project-dir]` (defaults to the current directory). Modules build in parallel by default. An OpenHarmony project whose `compileSdkVersion` SDK is not installed fails before anything runs, naming the release to install. A failed build lists its errors on stderr, one per line (`file:line:col error source code: message (rule)`), after hvigor's own output. When the project uses kit symbols that its SDK lacks but a newer installed SDK declares, the error names that API level; when no installed SDK has them (`'…' is not exported from Kit '…'`), it adds a hint about the full SDK, which carries the system APIs. A failed build names the SDK it compiled against (`Built against HarmonyOS 5.1.0 (API 18) at ~/command-line-tools/sdk.`). When the errors are missing properties or names (`Property '…' does not exist on type …`, `Cannot find name '…'`) in code under `oh_modules/`, it adds a hint naming the dependency and that SDK: the dependency may need a newer API level than the SDK has. The hint reads only the compiler messages, not the dependencies' metadata, whose declared `compatibleSdkVersion` can be wrong.
 
 With `--json`, stdout gets one object whether the build passes or fails, and a failed build still exits 1:
 
@@ -222,12 +222,15 @@ With `--json`, stdout gets one object whether the build passes or fails, and a f
   ],
   "summary": { "errors": 1, "warnings": 0, "reportedErrors": 2, "reportedWarnings": 1 },
   "discoveredHaps": {}, "warnings": [],
-  "error": "hvigorw exited with code 255",
+  "error": "hvigorw exited with code 255\nBuilt against OpenHarmony 6.0 (API 20) at /home/user/setup-ohos-sdk/linux/20.",
+  "sdk": { "runtimeOS": "OpenHarmony", "displayName": "OpenHarmony 6.0", "version": "6.0.0.47", "api": "20",
+           "path": "/home/user/setup-ohos-sdk/linux/20" },
   "rawTail": "last 200 lines of build output, colour codes removed"
 }
 ```
 
-- `source` is `arkts` (the ArkTS compiler), `hvigor` (configuration and task errors such as `00303060`), `native` (clang and lld, one diagnostic per undefined symbol), `ohpm` (the dependency install before the build; `failedTask` is then `ohpm install --all`) or `sdk`. An `sdk` diagnostic carries `api`, the API level the build needs: the SDK the project compiles against is not installed (the object also has `missingSdk: { api, version, expectedPath }`), or a newer installed SDK declares the symbols the build could not find.
+- `source` is `arkts` (the ArkTS compiler), `hvigor` (configuration and task errors such as `00303060`), `native` (clang and lld, one diagnostic per undefined symbol), `ohpm` (the dependency install before the build; `failedTask` is then `ohpm install --all`) or `sdk`. An `sdk` diagnostic carries `api`, the API level the build needs: the SDK the project compiles against is not installed (the object also has `missingSdk: { api, version, expectedPath }`), or a newer installed SDK declares the symbols the build could not find. A `warning` `sdk` diagnostic without `api` is the dependency hint above.
+- `sdk` is the SDK the build compiled against: `runtimeOS`, `displayName`, `version` (`6.1.1(24)` for HarmonyOS, the SDK build for OpenHarmony), `api` and `path` (`DEVECO_SDK_HOME` for HarmonyOS). It is there for a build that passed too, and absent when it cannot be told (an ohpm failure, a missing SDK, no numeric `compileSdkVersion`).
 - `file` is relative to the project when it lies inside it. hvigor prints the ArkTS block twice; each diagnostic is listed once.
 - `summary.reportedErrors` and `reportedWarnings` are hvigor's own `COMPILE RESULT` counts. They can exceed the distinct diagnostics (hvigor counts 3 errors for the two above), so use them as a cross-check, not as the length of the list.
 - A build that passes has `ok: true`, `discoveredHaps` (HAPs grouped by module) and its compiler warnings in `diagnostics`.

@@ -4,9 +4,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   buildOutputTail,
+  dependencyApiDiagnostic,
   missingSdkSymbols,
+  ohModulesPackage,
   parseBuildOutput,
   sdkTooOldDiagnostic,
+  type BuildDiagnostic,
 } from '../src/build/diagnostics.js';
 import { BuildFailedError, buildHap, buildWithDiagnostics, diagnoseBuildFailure } from '../src/build/buildHap.js';
 import { staticConfig } from '../src/ports/config.js';
@@ -201,6 +204,54 @@ describe('diagnoseBuildFailure', () => {
   });
 });
 
+describe('dependencyApiDiagnostic (#22)', () => {
+  const arkts = (message: string, file: string): BuildDiagnostic => ({ severity: 'error', source: 'arkts', message, file });
+
+  it('hints at the API level for missing properties inside oh_modules, naming the package and the SDK', () => {
+    // Recorded: a HAR calling KeyEvent.isCapsLockOn (@since 19) in an API 18 build.
+    const { diagnostics } = parseBuildOutput(fixture('dependency-too-old'), { projectDir: '/work/App' });
+    const hint = dependencyApiDiagnostic(diagnostics, 'OpenHarmony 5.1.0 (API 18) at /sdk/18', 'install a newer SDK.');
+    expect(hint).toMatchObject({ severity: 'warning', source: 'sdk' });
+    expect(hint!.message).toBe(
+      '1 error in dependencies (@demo/caps) reports a property or name the SDK does not declare; the build used ' +
+        'OpenHarmony 5.1.0 (API 18) at /sdk/18. A dependency may need a newer API level: install a newer SDK.',
+    );
+  });
+
+  it('counts `Cannot find name` too, and lists each package once', () => {
+    const hint = dependencyApiDiagnostic(
+      [
+        arkts("Property 'getGlobalWindowMode' does not exist on type 'typeof window'.", '/p/oh_modules/@ohos/flutter_ohos/src/a.ets'),
+        arkts("Cannot find name 'PiPWindow'.", 'oh_modules/.ohpm/@ohos+flutter_ohos@1.0.0/oh_modules/@ohos/flutter_ohos/b.ets'),
+        arkts("Cannot find name 'X'.", 'oh_modules/.ohpm/plain@2.0.0/c.ets'),
+      ],
+      undefined,
+      'r',
+    );
+    expect(hint!.message).toMatch(/^3 errors in dependencies \(@ohos\/flutter_ohos, plain\) report a property or name the SDK does not declare\. /);
+  });
+
+  it('stays out of errors in the project itself and of other messages', () => {
+    expect(
+      dependencyApiDiagnostic(
+        [
+          arkts("Property 'nonExistentMethod' does not exist on type 'Index'.", 'entry/src/main/ets/pages/Index.ets'),
+          arkts('Use explicit types instead of "any"', 'oh_modules/@x/y/a.ets'),
+        ],
+        undefined,
+        'r',
+      ),
+    ).toBeNull();
+  });
+
+  it('reads the package from oh_modules paths', () => {
+    expect(ohModulesPackage('oh_modules/.ohpm/@ohos+flutter_ohos@1.0.0+h/oh_modules/@ohos/flutter_ohos/x.ets')).toBe('@ohos/flutter_ohos');
+    expect(ohModulesPackage('/a/oh_modules/lodash/index.ets')).toBe('lodash');
+    expect(ohModulesPackage('oh_modules/.ohpm/@ohos+flutter_ohos@1.0.0/x.ets')).toBe('@ohos/flutter_ohos');
+    expect(ohModulesPackage('entry/src/x.ets')).toBeUndefined();
+  });
+});
+
 // hvigorw and ohpm are shell-script stand-ins that replay a recorded fixture.
 describe.skipIf(process.platform === 'win32')('buildHap / buildWithDiagnostics on a failing build', () => {
   let tmp: string;
@@ -297,6 +348,69 @@ describe.skipIf(process.platform === 'win32')('buildHap / buildWithDiagnostics o
     expect(sdk).toEqual([expect.objectContaining({ api: '20' })]);
     expect(report.error).toMatch(/Raise compileSdkVersion/);
     expect(report.error).not.toMatch(/full OpenHarmony SDK/);
+  });
+
+  /** An installed OpenHarmony SDK API folder, as `sdk install` leaves it. */
+  const openHarmonySdk = (api: string, version: string): string => {
+    const dir = path.join(tmp, 'sdk', getOsFolder(), api);
+    fs.mkdirSync(path.join(dir, 'ets'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'ets', 'oh-uni-package.json'), JSON.stringify({ apiVersion: api, version }));
+    return dir;
+  };
+
+  it('names the SDK a failed build used, in the error and as `sdk` (#22)', async () => {
+    project(18);
+    fs.mkdirSync(path.join(projectDir, 'oh_modules'));
+    const sdkDir = openHarmonySdk('18', '5.1.0.107');
+    tool('hvigorw', 'arkts-errors', 255);
+    const report = await buildWithDiagnostics({ config: config(), projectDir });
+    expect(report.sdk).toEqual({
+      runtimeOS: 'OpenHarmony',
+      displayName: 'OpenHarmony 5.1.0',
+      version: '5.1.0.107',
+      api: '18',
+      path: sdkDir,
+    });
+    expect(report.error).toBe(`hvigorw exited with code 255\nBuilt against OpenHarmony 5.1.0 (API 18) at ${sdkDir}.`);
+    expect(report.diagnostics.some((d) => d.source === 'sdk')).toBe(false);
+  });
+
+  it('hints that a dependency may need a newer API level when its code names missing properties', async () => {
+    project(18);
+    fs.mkdirSync(path.join(projectDir, 'oh_modules'));
+    const sdkDir = openHarmonySdk('18', '5.1.0.107');
+    tool('hvigorw', 'dependency-too-old', 255);
+    const report = await buildWithDiagnostics({ config: config(), projectDir });
+    const hint = report.diagnostics.find((d) => d.source === 'sdk');
+    expect(hint).toMatchObject({ severity: 'warning' });
+    expect(hint!.message).toContain(`the build used OpenHarmony 5.1.0 (API 18) at ${sdkDir}`);
+    expect(hint!.message).toContain('oniro-app sdk install');
+    expect(report.error).toContain(hint!.message);
+  });
+
+  it('names the HarmonyOS SDK of a failed HarmonyOS build, and how to get a newer one', async () => {
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, 'build-profile.json5'),
+      JSON.stringify({ app: { products: [{ name: 'default', runtimeOS: 'HarmonyOS', compileSdkVersion: '5.1.0(18)' }] } }),
+    );
+    fs.mkdirSync(path.join(projectDir, 'oh_modules'));
+    fs.mkdirSync(path.join(cmdTools, 'sdk', 'default', 'openharmony'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cmdTools, 'sdk', 'default', 'sdk-pkg.json'),
+      JSON.stringify({ data: { displayName: 'HarmonyOS 5.1.0', platformVersion: '5.1.0', apiVersion: '18' } }),
+    );
+    tool('hvigorw', 'dependency-too-old', 255);
+    const report = await buildWithDiagnostics({ config: config(), projectDir });
+    expect(report.sdk).toEqual({
+      runtimeOS: 'HarmonyOS',
+      displayName: 'HarmonyOS 5.1.0',
+      version: '5.1.0(18)',
+      api: '18',
+      path: path.join(cmdTools, 'sdk'),
+    });
+    expect(report.error).toContain(`the build used HarmonyOS 5.1.0 (API 18) at ${path.join(cmdTools, 'sdk')}`);
+    expect(report.error).toContain('oniro-app cmdtools install --from-zip <zip> --force');
   });
 
   it('returns the warnings of a build that passed', async () => {

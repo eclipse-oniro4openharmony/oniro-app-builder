@@ -12,10 +12,22 @@ import { detectRuntimeOs } from '../harmonyos/target.js';
 import { findHarmonyOsSdk, findHarmonyOsTool } from '../harmonyos/sdk.js';
 import {
   buildOutputTail,
+  dependencyApiDiagnostic,
   parseBuildOutput,
   sdkTooOldDiagnostic,
   type BuildDiagnostic,
 } from './diagnostics.js';
+import { describeBuildSdk, resolveBuildSdk, type BuildSdk } from './buildSdk.js';
+
+/** How to build against a newer SDK, for the dependency hint. */
+const NEWER_SDK_REMEDY: Record<BuildSdk['runtimeOS'], string> = {
+  HarmonyOS:
+    'install newer HarmonyOS command-line tools (`oniro-app cmdtools install --from-zip <zip> --force`; ' +
+    '`oniro-app cmdtools status` shows the API level of the current ones), then raise compileSdkVersion to their release.',
+  OpenHarmony:
+    'install a newer SDK (`oniro-app sdk list`, `oniro-app sdk install <version>`) and raise compileSdkVersion ' +
+    'and compatibleSdkVersion in build-profile.json5 to its API level.',
+};
 
 /** How much of the build output is kept for {@link diagnoseBuildFailure}, from the end. */
 const DIAGNOSIS_OUTPUT_LIMIT = 2_000_000;
@@ -81,6 +93,8 @@ export interface BuildHapResult {
   /** Compiler warnings (and errors, for a failed build) parsed from the output. */
   diagnostics: BuildDiagnostic[];
   summary: BuildSummary;
+  /** The SDK the build compiled against, when it could be told. */
+  sdk?: BuildSdk;
 }
 
 /**
@@ -89,6 +103,9 @@ export interface BuildHapResult {
  * scrape the output.
  */
 export class BuildFailedError extends OniroError {
+  /** The SDK hvigor compiled against, when it could be told (not for an ohpm failure). */
+  public sdk?: BuildSdk;
+
   constructor(
     message: string,
     public readonly exitCode: number,
@@ -197,9 +214,20 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
       ? null
       : sdkTooOldDiagnostic(diagnostics, getOhosBaseSdkHome(opts.config), detectProjectSdkVersion(projectDir));
     if (tooOld) diagnostics.push(tooOld);
-    const hint = tooOld?.message ?? diagnoseBuildFailure(output);
-    throw new BuildFailedError(
-      hint ? `${err.message}\n${hint}` : err.message,
+    // Name the SDK used: an SDK too old for a dependency otherwise shows only as
+    // ArkTS errors deep inside oh_modules/ (#22).
+    const sdk = resolveBuildSdk({ config: opts.config, projectDir, runtimeOS: isHarmonyOs ? 'HarmonyOS' : 'OpenHarmony' });
+    const sdkLabel = sdk ? describeBuildSdk(sdk) : undefined;
+    const depHint = dependencyApiDiagnostic(
+      diagnostics,
+      sdkLabel,
+      NEWER_SDK_REMEDY[isHarmonyOs ? 'HarmonyOS' : 'OpenHarmony'],
+    );
+    if (depHint) diagnostics.push(depHint);
+    const hint = tooOld?.message ?? depHint?.message ?? diagnoseBuildFailure(output);
+    const footer = sdkLabel && !depHint ? `Built against ${sdkLabel}.` : undefined;
+    const failed = new BuildFailedError(
+      [err.message, hint, footer].filter(Boolean).join('\n'),
       exitCode,
       diagnostics,
       summarise(diagnostics, parsed),
@@ -208,6 +236,8 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
       hint,
       err,
     );
+    if (sdk) failed.sdk = sdk;
+    throw failed;
   }
 
   const discoveredHaps = await discoverHaps({ projectDir });
@@ -223,6 +253,7 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
   }
 
   const parsed = parseBuildOutput(output, { projectDir });
+  const sdk = resolveBuildSdk({ config: opts.config, projectDir, runtimeOS: isHarmonyOs ? 'HarmonyOS' : 'OpenHarmony' });
   return {
     exitCode,
     durationMs: Date.now() - start,
@@ -230,6 +261,7 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
     warnings,
     diagnostics: parsed.diagnostics,
     summary: summarise(parsed.diagnostics, parsed),
+    ...(sdk ? { sdk } : {}),
   };
 }
 
@@ -249,6 +281,11 @@ export interface BuildReport {
   error?: string;
   /** The SDK the project compiles against is not installed: install it and build again. */
   missingSdk?: { api: string; version?: string; expectedPath: string };
+  /**
+   * The SDK hvigor compiled against (`runtimeOS`, `displayName`, `version`, `api`,
+   * `path`), when it could be told. Absent for an ohpm failure or a missing SDK.
+   */
+  sdk?: BuildSdk;
   /** The last 200 lines of build output, colour codes removed. Empty for a successful build. */
   rawTail: string;
 }
@@ -279,6 +316,7 @@ export async function buildWithDiagnostics(opts: BuildHapOptions): Promise<Build
         rawTail: err.rawTail,
       };
       if (err.failedTask) report.failedTask = err.failedTask;
+      if (err.sdk) report.sdk = err.sdk;
       return report;
     }
     if (err instanceof SdkNotInstalledError) {
