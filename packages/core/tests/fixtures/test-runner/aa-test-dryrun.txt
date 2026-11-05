@@ -1,0 +1,5 @@
+start ability successfully.
+{"suites":[{"ActsAbilityTest":[{"itName":"listHasItems"},{"itName":"throwsError"},{"itName":"assertContain"}]},{"IndexTest":[{"itName":"startsEntryAbility"},{"itName":"tapShowsWelcome"}]}]}
+TestFinished-ResultCode: 0
+TestFinished-ResultMsg: dry run finished!!!
+user test finished.

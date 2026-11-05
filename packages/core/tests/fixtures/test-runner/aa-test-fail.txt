@@ -1,0 +1,134 @@
+start ability successfully.
+
+OHOS_REPORT_SUM: 3
+OHOS_REPORT_STATUS: class=ActsAbilityTest
+
+
+OHOS_REPORT_STATUS: class=ActsAbilityTest
+OHOS_REPORT_STATUS: current=1
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=listHasItems
+OHOS_REPORT_STATUS_CODE: 1
+
+
+OHOS_REPORT_STATUS: class=ActsAbilityTest
+OHOS_REPORT_STATUS: current=1
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stack=    at AssertException @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:72:9)
+    at anonymous @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:1107:37)
+    at anonymous entry (entry/src/ohosTest/ets/test/Ability.test.ets:26:17)
+    at anonymous @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:87:19)
+    at getFuncWithArgsZero @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:79:12)
+    at processedFunc @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:158:24)
+    at asyncRun @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:989:24)
+    at asyncRunSpecs @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:697:32)
+OHOS_REPORT_STATUS: stream=Error in listHasItems, expect 0 equals 3
+OHOS_REPORT_STATUS: test=listHasItems
+OHOS_REPORT_STATUS_CODE: -2
+OHOS_REPORT_STATUS: consuming=2
+
+
+OHOS_REPORT_STATUS: class=ActsAbilityTest
+OHOS_REPORT_STATUS: current=2
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=throwsError
+OHOS_REPORT_STATUS_CODE: 1
+
+
+OHOS_REPORT_STATUS: class=ActsAbilityTest
+OHOS_REPORT_STATUS: current=2
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stack=    at anonymous entry (entry/src/ohosTest/ets/test/Ability.test.ets:29:13)
+    at anonymous @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:87:19)
+    at getFuncWithArgsZero @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:79:12)
+    at processedFunc @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:158:24)
+    at asyncRun @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:989:24)
+    at asyncRunSpecs @ohos/hypium (oh_modules/.ohpm/@ohos+hypium@1.0.24/oh_modules/@ohos/hypium/src/main/service.js:697:32)
+OHOS_REPORT_STATUS: stream=Error in throwsError, boom from test
+OHOS_REPORT_STATUS: test=throwsError
+OHOS_REPORT_STATUS_CODE: -1
+OHOS_REPORT_STATUS: consuming=1
+
+
+OHOS_REPORT_STATUS: class=ActsAbilityTest
+OHOS_REPORT_STATUS: current=3
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=assertContain
+OHOS_REPORT_STATUS_CODE: 1
+
+
+OHOS_REPORT_STATUS: class=ActsAbilityTest
+OHOS_REPORT_STATUS: current=3
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=assertContain
+OHOS_REPORT_STATUS_CODE: 0
+OHOS_REPORT_STATUS: consuming=2
+
+
+OHOS_REPORT_STATUS: class=ActsAbilityTest
+OHOS_REPORT_STATUS: suiteconsuming=5
+
+
+OHOS_REPORT_SUM: 2
+OHOS_REPORT_STATUS: class=IndexTest
+
+
+OHOS_REPORT_STATUS: class=IndexTest
+OHOS_REPORT_STATUS: current=4
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=startsEntryAbility
+OHOS_REPORT_STATUS_CODE: 1
+
+
+OHOS_REPORT_STATUS: class=IndexTest
+OHOS_REPORT_STATUS: current=4
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=startsEntryAbility
+OHOS_REPORT_STATUS_CODE: 0
+OHOS_REPORT_STATUS: consuming=1785
+
+
+OHOS_REPORT_STATUS: class=IndexTest
+OHOS_REPORT_STATUS: current=5
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=tapShowsWelcome
+OHOS_REPORT_STATUS_CODE: 1
+
+
+OHOS_REPORT_STATUS: class=IndexTest
+OHOS_REPORT_STATUS: current=5
+OHOS_REPORT_STATUS: id=JS
+OHOS_REPORT_STATUS: numtests=5
+OHOS_REPORT_STATUS: stream=
+OHOS_REPORT_STATUS: test=tapShowsWelcome
+OHOS_REPORT_STATUS_CODE: 0
+OHOS_REPORT_STATUS: consuming=654
+
+
+OHOS_REPORT_STATUS: class=IndexTest
+OHOS_REPORT_STATUS: suiteconsuming=2439
+
+
+OHOS_REPORT_RESULT: stream=Tests run: 5, Failure: 1, Error: 1, Pass: 3, Ignore: 0
+OHOS_REPORT_CODE: -1
+OHOS_REPORT_STATUS: taskconsuming=2444
+
+TestFinished-ResultCode: 0
+TestFinished-ResultMsg: your test finished!!!
+user test finished.

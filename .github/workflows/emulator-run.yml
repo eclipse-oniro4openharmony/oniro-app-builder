@@ -33,6 +33,12 @@ on:
         type: string
         required: true
         description: Filename of the signed .hap within hap_artifact.
+      test_hap_file:
+        type: string
+        default: ''
+        description: >-
+          Filename of the signed test .hap (entry/src/ohosTest) within hap_artifact. When set,
+          the suite runs on the emulator with `oniro-app test`.
       bundle_name:
         type: string
         required: true
@@ -71,6 +77,7 @@ jobs:
       PROBE_BUNDLE: ${{ inputs.probe_bundle }}
       PROJECT: ${{ github.workspace }}/project
       HAP: ${{ github.workspace }}/hap/${{ inputs.hap_file }}
+      TEST_HAP_FILE: ${{ inputs.test_hap_file }}
       # hdc address of the emulator. Passed explicitly to `reboot` so the post-reboot
       # wait reconnects the TCP target (hdc does not auto-reconnect TCP across a reboot).
       DEVICE: 127.0.0.1:55555
@@ -273,6 +280,18 @@ jobs:
         continue-on-error: true
         run: oniro-app app apply "$PROJECT" --bundle "$BUNDLE" --hap "$HAP" --json
 
+      - name: Run the app's ohosTest suite (test)
+        if: inputs.test_hap_file != ''
+        run: |
+          # `test --no-build` installs the HAPs it finds where hvigor writes them, so put
+          # the downloaded ones there. It wakes the screen, swipes away the keyguard and
+          # exits 1 when a case fails, 2 when the run itself cannot complete.
+          out="$PROJECT/entry/build/default/outputs"
+          mkdir -p "$out/default" "$out/ohosTest"
+          cp "$HAP" "$out/default/"
+          cp "$GITHUB_WORKSPACE/hap/$TEST_HAP_FILE" "$out/ohosTest/"
+          oniro-app test "$PROJECT" --no-build --json > "$GITHUB_WORKSPACE/test.json"
+
       - name: File send/recv round-trip (file send / file recv)
         run: |
           echo "oniro device verification" > sendme.txt
@@ -307,6 +326,7 @@ jobs:
             burst-*.jpeg
             layout.json
             watch.json
+            test.json
           if-no-files-found: ignore
 
       - name: Upload emulator log

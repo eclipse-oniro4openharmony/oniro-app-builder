@@ -252,10 +252,19 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `sdkTooOldDiagnostic` / `missingSdkSymbols` | — | The `sdk` diagnostic naming the installed API level that declares the kit symbols a build could not find. `diagnoseBuildFailure` gives the hint for other causes (system APIs, an SDK path hvigor cannot find). |
 | `runHvigorw` | `(RunHvigorwOptions) => Promise<RunHvigorwResult>` | Raw single `hvigorw` spawn. Parallel by default; `parallel: false` adds `--no-parallel`. |
 | `buildHvigorwArgs` | `(opts) => string[]` | Pure argv builder (unit-testable). |
-| `discoverHaps` | `(DiscoverHapsOptions) => Promise<Record<string, ModuleHaps>>` | Group `*-signed`/`*-unsigned` HAPs by module, newest first. |
+| `discoverHaps` | `(DiscoverHapsOptions) => Promise<Record<string, ModuleHaps>>` | Group `*-signed`/`*-unsigned` HAPs by module, newest first. Test HAPs (`*-ohosTest-*.hap`, `isTestHap`) are left out. |
 | `pickHap` | `(haps, module?) => PickedHap \| null` | The HAP to install: a signed one, else unsigned (`signed: false`). |
 | `runOhpm` / `ensureOhModules` | — | Run `ohpm`; install `--all` only when `oh_modules/` is missing. |
 | `runCodelinter` / `parseCodelinterReport` / `parseCodelinterFindings` | — | Run the codelinter → `CodelinterResult { code, findings, summary, notices, incomplete, raw }`; the parsers read its per-file table and `-Defects:` totals. |
+
+### Tests
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `runTests` | `(RunTestsOptions) => Promise<TestRunReport>` | Build a module's main and `ohosTest` HAPs, install both, run `aa test` (Hypium's OpenHarmonyTestRunner) and parse it. `outcome` is `passed`, `failed` or `runner-error`; it does not throw for a failed case, build or run. Wakes and unlocks the screen first unless `wakeScreen: false`. |
+| `parseTestOutput` | `(output) => ParsedTestOutput` | Pure parser of `aa test` output: cases with `status` and the raw `statusCode` (0 pass, -2 assertion failed, -1 threw), message, stack and duration; the `OHOS_REPORT_RESULT` summary; `TestFinished-ResultCode`/`-ResultMsg`; a dry run's case list. |
+| `aaTestCommand` / `testHapPath` / `readTestModuleName` / `decideOutcome` | — | The pieces of `runTests`, exported for callers that drive the runner themselves. |
+| `wakeAndUnlock` / `holdScreenOn` | — | Turn the screen on and swipe away a lock screen without a credential; keep the screen on (`power-shell timeout -o`) and restore it. |
 
 ### Project scaffolding & inspection
 

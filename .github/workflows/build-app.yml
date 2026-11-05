@@ -10,7 +10,8 @@
 #
 # Consumes an artifact uploaded by another job containing the project tree at the
 # artifact root. Produces:
-#   - <hap_artifact>: the signed .hap (single file)
+#   - <hap_artifact>: the signed .hap and the signed test .hap built from
+#     entry/src/ohosTest, side by side
 #
 # The emulator job installs its own command-line tools, so no toolchains artifact is
 # shipped from here anymore.
@@ -34,6 +35,9 @@ on:
       hap_file:
         description: Filename of the signed .hap produced by the build.
         value: ${{ jobs.build.outputs.hap_file }}
+      test_hap_file:
+        description: Filename of the signed test .hap (the entry module's ohosTest suite).
+        value: ${{ jobs.build.outputs.test_hap_file }}
       hap_artifact:
         description: Artifact name carrying the signed .hap.
         value: ${{ inputs.hap_artifact }}
@@ -43,6 +47,7 @@ jobs:
     runs-on: oniro-runner
     outputs:
       hap_file: ${{ steps.locate.outputs.hap_file }}
+      test_hap_file: ${{ steps.locate.outputs.test_hap_file }}
     steps:
       - name: Checkout repository (for the CLI sources)
         uses: actions/checkout@v4
@@ -105,22 +110,30 @@ jobs:
         working-directory: ${{ github.workspace }}/project
         run: oniro-app lint
 
-      - name: Build the app (build)
+      - name: Build the app (build --json)
         working-directory: ${{ github.workspace }}/project
-        run: oniro-app build
+        run: oniro-app build --json > "$GITHUB_WORKSPACE/build.json"
 
-      - name: Locate signed HAP
+      - name: Build the test HAP (build --module entry@ohosTest)
+        # The template's ohosTest module must build: it once declared a device type the
+        # OpenHarmony SDK has no system capabilities for (00303060 at SyscapTransform).
+        working-directory: ${{ github.workspace }}/project
+        run: oniro-app build --module entry@ohosTest
+
+      - name: Locate signed HAPs
         id: locate
         working-directory: ${{ github.workspace }}/project
         run: |
-          HAP_PATH=$(find entry/build -name '*-signed.hap' | head -1)
-          if [ -z "$HAP_PATH" ]; then
-            echo "::error::No signed .hap found under entry/build" && exit 1
+          HAP_PATH=$(find entry/build -path '*/outputs/default/*' -name '*-signed.hap' | head -1)
+          TEST_HAP_PATH=$(find entry/build -path '*/outputs/ohosTest/*' -name '*-ohosTest-signed.hap' | head -1)
+          if [ -z "$HAP_PATH" ] || [ -z "$TEST_HAP_PATH" ]; then
+            echo "::error::No signed .hap (or test .hap) found under entry/build" && exit 1
           fi
-          echo "Found: $HAP_PATH"
+          echo "Found: $HAP_PATH and $TEST_HAP_PATH"
           echo "hap_file=$(basename "$HAP_PATH")" >> "$GITHUB_OUTPUT"
+          echo "test_hap_file=$(basename "$TEST_HAP_PATH")" >> "$GITHUB_OUTPUT"
           mkdir -p "$GITHUB_WORKSPACE/build-output"
-          cp "$HAP_PATH" "$GITHUB_WORKSPACE/build-output/"
+          cp "$HAP_PATH" "$TEST_HAP_PATH" "$GITHUB_WORKSPACE/build-output/"
 
       - name: Upload signed HAP
         uses: actions/upload-artifact@v4

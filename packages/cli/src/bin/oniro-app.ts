@@ -17,6 +17,7 @@ import { registerDumpCommand } from '../commands/dump.js';
 import { registerDevicesCommand } from '../commands/devices.js';
 import { registerFileCommand } from '../commands/file.js';
 import { registerLintCommand } from '../commands/lint.js';
+import { registerTestCommand } from '../commands/test.js';
 import { registerInputCommand } from '../commands/input.js';
 import { registerLogsCommand } from '../commands/logs.js';
 import { registerHdcCommand } from '../commands/hdc.js';
@@ -55,6 +56,7 @@ function buildProgram(): Command {
   registerDevicesCommand(program);
   registerFileCommand(program);
   registerLintCommand(program);
+  registerTestCommand(program);
   registerInputCommand(program);
   registerLogsCommand(program);
   registerHdcCommand(program);
