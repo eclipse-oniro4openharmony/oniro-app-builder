@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DumpLayoutResult, LayoutNode } from '@oniroproject/core';
-import { formatFlatLayout, formatLayoutLine } from '../src/lib/layoutText.js';
+import { formatFlatLayout, formatLayoutLine, formatSelectorMatches } from '../src/lib/layoutText.js';
 
 describe('formatLayoutLine', () => {
   it('prints type, labels, id, center, and flags', () => {
@@ -57,5 +57,29 @@ describe('formatFlatLayout', () => {
     const out = formatFlatLayout({ display: null, tree: { children: [app, keyboard] } });
     expect(out).toContain('# display unknown;');
     expect(out).toContain('[window dev.patrickgold.florisboard]\nButton "q" c=0.050,0.750 click\n');
+  });
+
+  it('puts the window id (what --window takes) in the header, one header per window', () => {
+    const shade: LayoutNode = { bundle: 'com.ohos.sceneboard', windowId: 20, children: [{ type: 'Text', text: '12:42', c: [0.1, 0.02] }] };
+    const bar: LayoutNode = { bundle: 'com.ohos.sceneboard', windowId: 18, children: [{ type: 'Button', text: 'Back', c: [0.5, 0.98], click: true }] };
+    const out = formatFlatLayout({ display: null, tree: { children: [{ ...app, windowId: 92 }, shade, bar] } });
+    expect(out).toContain('[window 92 com.example.app]\nText "Sign in"');
+    expect(out).toContain('[window 20 com.ohos.sceneboard]\nText "12:42" c=0.100,0.020\n[window 18 com.ohos.sceneboard]\nButton "Back"');
+  });
+});
+
+describe('formatSelectorMatches', () => {
+  it('numbers the matches for the [n] suffix and names their window', () => {
+    const out = formatSelectorMatches({ width: 1080, height: 2400 }, 'type=Button,text*=Sign', [
+      { type: 'Button', text: 'Sign in', id: 'signIn', c: [0.361, 0.214], click: true, window: 'com.example.app', windowId: 92 },
+      { type: 'Button', text: 'Sign up', id: 'signUp', c: [0.631, 0.214], click: true, window: 'com.example.app', windowId: 92 },
+    ]);
+    expect(out.split('\n')).toEqual([
+      '# display 1080x2400; 2 element(s) match "type=Button,text*=Sign"; append [n] to the selector to act on one',
+      '[0] Button "Sign in" #signIn c=0.361,0.214 click (window 92 com.example.app)',
+      '[1] Button "Sign up" #signUp c=0.631,0.214 click (window 92 com.example.app)',
+      '',
+    ]);
+    expect(formatSelectorMatches(null, 'id=x', [])).toBe('# display unknown; 0 element(s) match "id=x"\n');
   });
 });

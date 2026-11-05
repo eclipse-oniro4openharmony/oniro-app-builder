@@ -9,6 +9,8 @@ import { shell, ensureOk } from './exec.js';
 import { recvFile } from './files.js';
 import { getDisplaySize, type DisplaySize } from './display.js';
 import { getImeBundles, findKeyboardWindow } from './ime.js';
+import { matchSelector, type ElementSelector } from './selector.js';
+import { flatLayoutNode, hasOwnFields } from './layoutQuery.js';
 
 /** A raw `uitest dumpLayout` node (attributes are strings). */
 export interface RawLayoutNode {
@@ -39,6 +41,13 @@ export interface LayoutNode {
   longClick?: boolean;
   /** The component is disabled (`enabled: false`). */
   disabled?: boolean;
+  /** The component is not drawn (`visible: false`). */
+  hidden?: boolean;
+  /**
+   * Set on the node where a window starts: its window id (uitest's
+   * `hostWindowId`, the `WinId` column of `hidumper -s WindowManagerService -a -a`).
+   */
+  windowId?: number;
   /** The node's center is painted over by a later filled node (an overlay, a
    *  dialog scrim, the soft keyboard), so a tap there would land on that instead. */
   covered?: boolean;
@@ -159,8 +168,12 @@ export function pruneLayout(
   node: RawLayoutNode,
   display: DisplaySize | null,
   covered?: ReadonlySet<RawLayoutNode>,
+  parentWindow?: string,
 ): LayoutNode | LayoutNode[] | null {
   const a = node.attributes ?? {};
+  // uitest tags every node with the window it belongs to; record where that changes.
+  const win = a.hostWindowId || parentWindow;
+  const startsWindow = !!a.hostWindowId && a.hostWindowId !== parentWindow && Number.isFinite(Number(a.hostWindowId));
   const px = parseBounds(a.bounds);
   const out: LayoutNode = {};
   if (px && display) {
@@ -185,11 +198,13 @@ export function pruneLayout(
     if (a[attr] === 'true') (out[short] as boolean) = true;
   }
   if (a.enabled === 'false') out.disabled = true;
+  if (a.visible === 'false') out.hidden = true;
   if (covered?.has(node)) out.covered = true;
+  if (startsWindow) out.windowId = Number(a.hostWindowId);
 
   const children: LayoutNode[] = [];
   for (const c of node.children ?? []) {
-    const pc = pruneLayout(c, display, covered);
+    const pc = pruneLayout(c, display, covered, win);
     if (pc) {
       if (Array.isArray(pc)) children.push(...pc);
       else children.push(pc);
@@ -198,13 +213,16 @@ export function pruneLayout(
 
   const hasSignal = Boolean(
     out.text || out.desc || out.hint || out.id || out.key || out.click ||
-      out.scroll || out.check || out.longClick || out.bundle ||
+      out.scroll || out.check || out.longClick || out.bundle || out.windowId !== undefined ||
       (out.type && out.type !== 'root'),
   );
 
   if (!hasSignal && children.length === 0) return null;
   // Collapse structural wrappers: pass children up to the parent.
   if (!hasSignal) return children.length === 1 ? children[0]! : children;
+  // A structural node kept for its own signal (an id, a click handler) keeps its type,
+  // so selectors and XPath steps can name it (`//Column[@id="list"]/Button`).
+  if (out.type === undefined && a.type && a.type !== 'root') out.type = a.type;
 
   if (children.length) out.children = children;
   return out;
@@ -214,19 +232,94 @@ export function pruneLayout(
 export interface FlatLayoutNode extends Omit<LayoutNode, 'children'> {
   /** Bundle of the enclosing window (the nearest node carrying `bundle`). */
   window?: string;
+  /** Id of the enclosing window (the nearest node carrying `windowId`). */
+  windowId?: number;
 }
 
 /** Flatten a pruned layout tree into a depth-first (paint-order) list. */
 export function flattenLayout(tree: LayoutNode): FlatLayoutNode[] {
   const out: FlatLayoutNode[] = [];
-  const visit = (n: LayoutNode, window: string | undefined): void => {
-    const { children, ...rest } = n;
+  const visit = (n: LayoutNode, window: string | undefined, windowId: number | undefined): void => {
     const win = n.bundle ?? window;
-    if (Object.keys(rest).length > 0) out.push({ ...rest, ...(win ? { window: win } : {}) });
-    for (const c of children ?? []) visit(c, win);
+    const winId = n.windowId ?? windowId;
+    if (hasOwnFields(n)) out.push(flatLayoutNode(n, win, winId));
+    for (const c of n.children ?? []) visit(c, win, winId);
+  };
+  visit(tree, undefined, undefined);
+  return out;
+}
+
+/** A window found in a pruned layout tree. */
+export interface LayoutWindow {
+  windowId: number;
+  /** Bundle owning the window, when uitest reports one. */
+  bundle?: string;
+  /** Bounds [x1,y1,x2,y2] normalized to 0–1 of the display. */
+  b?: [number, number, number, number];
+}
+
+/** The windows in a pruned layout tree, in paint order. Pure. */
+export function listLayoutWindows(tree: LayoutNode): LayoutWindow[] {
+  const out: LayoutWindow[] = [];
+  const visit = (n: LayoutNode, bundle: string | undefined): void => {
+    const own = n.bundle ?? bundle;
+    if (n.windowId !== undefined) {
+      out.push({ windowId: n.windowId, ...(own ? { bundle: own } : {}), ...(n.b ? { b: n.b } : {}) });
+    }
+    for (const c of n.children ?? []) visit(c, own);
   };
   visit(tree, undefined);
   return out;
+}
+
+/**
+ * The part of a pruned tree that belongs to window `windowId`, under an empty
+ * root like a full dump's, or null when the window is not in the tree. Windows
+ * nested inside it are left out. Pure.
+ */
+export function windowSubtree(tree: LayoutNode, windowId: number): LayoutNode | null {
+  const strip = (n: LayoutNode): LayoutNode =>
+    n.children
+      ? { ...n, children: n.children.filter((c) => c.windowId === undefined || c.windowId === windowId).map(strip) }
+      : n;
+  const roots: LayoutNode[] = [];
+  const visit = (n: LayoutNode): void => {
+    if (n.windowId === windowId) roots.push(strip(n));
+    else for (const c of n.children ?? []) visit(c);
+  };
+  visit(tree);
+  return roots.length > 0 ? { children: roots } : null;
+}
+
+/** The same as {@link windowSubtree}, on a raw (unpruned) `uitest dumpLayout` tree. */
+export function rawWindowSubtree(tree: RawLayoutNode, windowId: number): RawLayoutNode | null {
+  const id = String(windowId);
+  const strip = (n: RawLayoutNode): RawLayoutNode =>
+    n.children
+      ? { ...n, children: n.children.filter((c) => (c.attributes?.hostWindowId || id) === id).map(strip) }
+      : n;
+  const roots: RawLayoutNode[] = [];
+  const visit = (n: RawLayoutNode): void => {
+    if (n.attributes?.hostWindowId === id) roots.push(strip(n));
+    else for (const c of n.children ?? []) visit(c);
+  };
+  visit(tree);
+  return roots.length > 0 ? { ...(tree.attributes ? { attributes: tree.attributes } : {}), children: roots } : null;
+}
+
+/** The error for a `--window` that is not in the layout, listing the windows that are. */
+export function windowNotFoundError(windows: readonly LayoutWindow[], windowId: number): OniroError {
+  if (windows.length === 0) {
+    return new OniroError(
+      `Window ${windowId} is not in the layout, and this device's uitest does not tag nodes with ` +
+        'their window (hostWindowId), so --window cannot be used here.',
+    );
+  }
+  const list = windows.map((w) => `${w.windowId}${w.bundle ? ` (${w.bundle})` : ''}`).join(', ');
+  return new OniroError(
+    `Window ${windowId} is not on screen. Windows in the layout: ${list}. ` +
+      '`oniro-app dump windows` lists every window, including hidden ones.',
+  );
 }
 
 /** Selects layout nodes by what an agent can read off the screen. */
@@ -239,8 +332,23 @@ export interface LayoutSelector {
   type?: string;
 }
 
-/** Throw unless `selector` constrains something: a non-blank text, an id, or a type. */
-export function assertLayoutSelector(selector: LayoutSelector): void {
+/**
+ * What to look for: the plain `--target` fields ({@link LayoutSelector}) or a
+ * parsed `--selector` expression ({@link ElementSelector}: the attribute DSL or XPath).
+ */
+export type ElementQuery = LayoutSelector | ElementSelector;
+
+/** The query is a parsed `--selector` expression rather than plain `--target` fields. */
+export function isElementSelector(q: ElementQuery): q is ElementSelector {
+  return 'kind' in q && (q.kind === 'dsl' || q.kind === 'xpath');
+}
+
+/**
+ * Throw unless `selector` constrains something: a non-blank text, an id, or a
+ * type. A parsed {@link ElementSelector} always does.
+ */
+export function assertLayoutSelector(selector: ElementQuery): void {
+  if (isElementSelector(selector)) return;
   if (selector.text === undefined && selector.id === undefined && selector.type === undefined) {
     throw new OniroError('A layout selector needs a text, id, or type.');
   }
@@ -262,9 +370,12 @@ export function withoutWindow(tree: LayoutNode, bundle: string): LayoutNode {
  * Find the nodes matching `selector` in a pruned layout tree, in paint order.
  * For `text`, exact (case-insensitive, trimmed) matches are returned when any
  * exist; otherwise substring matches. Covered nodes are included — callers
- * decide what to do with them (see {@link pickTarget}).
+ * decide what to do with them (see {@link pickTarget}). A parsed
+ * {@link ElementSelector} returns every match ({@link matchSelector}); its
+ * index suffix is applied by {@link pickTarget} and {@link findVisibleMatch}.
  */
-export function findLayoutNodes(tree: LayoutNode, selector: LayoutSelector): FlatLayoutNode[] {
+export function findLayoutNodes(tree: LayoutNode, selector: ElementQuery): FlatLayoutNode[] {
+  if (isElementSelector(selector)) return matchSelector(tree, selector);
   assertLayoutSelector(selector);
   const type = selector.type?.toLowerCase();
   const nodes = flattenLayout(tree).filter(
@@ -282,7 +393,8 @@ export function findLayoutNodes(tree: LayoutNode, selector: LayoutSelector): Fla
   return nodes.filter((n) => labels(n).some((l) => l.includes(want)));
 }
 
-function describeSelector(s: LayoutSelector): string {
+function describeSelector(s: ElementQuery): string {
+  if (isElementSelector(s)) return `selector ${JSON.stringify(s.raw)}`;
   const parts: string[] = [];
   if (s.text !== undefined) parts.push(`text "${s.text}"`);
   if (s.id !== undefined) parts.push(`id "${s.id}"`);
@@ -321,15 +433,64 @@ export class TargetNotFoundError extends OniroError {
 }
 
 /**
+ * The match index a query pins: a DSL selector's `[n]` suffix, else `index`
+ * when the query is a parsed selector. Negative counts from the end.
+ */
+function selectorIndex(selector: ElementQuery, index: number | undefined): number | undefined {
+  if (!isElementSelector(selector)) return undefined;
+  return (selector.kind === 'dsl' ? selector.index : undefined) ?? index;
+}
+
+/** `list[i]`, counting a negative `i` from the end. */
+function at<T>(list: readonly T[], i: number): T | undefined {
+  return i < 0 ? list[list.length + i] : list[i];
+}
+
+/**
+ * The first uncovered node matching `selector`, or null. When a DSL selector
+ * carries an index (`[n]`), only that match counts, and only while uncovered.
+ */
+export function findVisibleMatch(tree: LayoutNode, selector: ElementQuery): FlatLayoutNode | null {
+  const matches = findLayoutNodes(tree, selector);
+  const i = selectorIndex(selector, undefined);
+  if (i !== undefined) {
+    const n = at(matches, i);
+    return n && !n.covered ? n : null;
+  }
+  return matches.find((n) => !n.covered) ?? null;
+}
+
+/**
  * Choose the single node to act on for `selector`. Covered nodes are skipped;
  * clickable matches are preferred over plain ones (a "Sign in" Button over the
  * "Sign in" title); a match nested inside another clickable match collapses
  * into it. `index` picks among what remains, in paint order. Throws
  * {@link TargetNotFoundError} when nothing (or more than one node) qualifies.
+ *
+ * For a parsed selector with an index (the DSL's `[n]` suffix, or `index`),
+ * the index picks from every match in paint order, the list
+ * `dump layout --selector` prints, and that element must be on screen and
+ * uncovered; the preferences above do not apply.
  */
-export function pickTarget(tree: LayoutNode, selector: LayoutSelector, index?: number): FlatLayoutNode {
-  const matches = findLayoutNodes(tree, selector).filter((n) => n.c !== undefined);
+export function pickTarget(tree: LayoutNode, selector: ElementQuery, index?: number): FlatLayoutNode {
   const what = describeSelector(selector);
+  const pinned = selectorIndex(selector, index);
+  if (pinned !== undefined) {
+    const all = findLayoutNodes(tree, selector);
+    const n = at(all, pinned);
+    if (!n) {
+      throw new TargetNotFoundError(
+        `Index ${pinned} is out of range: ${all.length} element(s) match ${what}.`,
+        all.length > 0 ? 'ambiguous' : 'none',
+      );
+    }
+    if (!n.c) throw new TargetNotFoundError(`Match ${pinned} of ${what} has no on-screen position: ${describeLayoutNode(n)}.`, 'none');
+    if (n.covered) {
+      throw new TargetNotFoundError(`Match ${pinned} of ${what} is covered by an overlay: ${describeLayoutNode(n)}.`, 'covered');
+    }
+    return n;
+  }
+  const matches = findLayoutNodes(tree, selector).filter((n) => n.c !== undefined);
   if (matches.length === 0) {
     throw new TargetNotFoundError(`No on-screen element matches ${what}. Run \`oniro-app dump layout --flat\` to see what is there.`, 'none');
   }
@@ -354,7 +515,10 @@ export function pickTarget(tree: LayoutNode, selector: LayoutSelector, index?: n
   }
   if (candidates.length > 1) {
     throw new TargetNotFoundError(
-      `${candidates.length} elements match ${what}; pass an index to choose: ` +
+      `${candidates.length} elements match ${what}; ` +
+        (isElementSelector(selector)
+          ? 'make the selector more specific, or append [n] to pick the n-th match of `dump layout --selector`: '
+          : 'pass an index to choose: ') +
         candidates.map((n, i) => `[${i}] ${describeLayoutNode(n)}`).join('; '),
       'ambiguous',
     );
@@ -366,6 +530,12 @@ export interface DumpLayoutOptions {
   config: ConfigProvider;
   /** Filter to a single window/bundle (`uitest dumpLayout -b '<bundle>'`). */
   bundleName?: string;
+  /**
+   * Keep only this window (an id from `dump windows`, or a `windowId` in the
+   * layout). The whole screen is still dumped, so overlays from other windows
+   * still mark nodes covered and the soft keyboard is still detected.
+   */
+  windowId?: number;
   /** When false, return the parsed-but-unpruned tree. Default true. */
   prune?: boolean;
   /**
@@ -398,15 +568,24 @@ export async function dumpLayout(opts: DumpLayoutOptions): Promise<DumpLayoutRes
     const parsed = JSON.parse(await fs.promises.readFile(local, 'utf8')) as RawLayoutNode;
     const display = await getDisplaySize(opts.config, { deviceSerial: opts.deviceSerial });
 
-    if (opts.prune === false) {
+    if (opts.prune === false && opts.windowId === undefined) {
       return { display, tree: parsed as unknown as LayoutNode };
     }
     const prunedRaw = pruneLayout(parsed, display, findCoveredNodes(parsed));
-    const tree: LayoutNode = Array.isArray(prunedRaw) ? { children: prunedRaw } : prunedRaw ?? { children: [] };
+    const full: LayoutNode = Array.isArray(prunedRaw) ? { children: prunedRaw } : prunedRaw ?? { children: [] };
+    let tree = full;
+    if (opts.windowId !== undefined) {
+      const sub = windowSubtree(full, opts.windowId);
+      if (!sub) throw windowNotFoundError(listLayoutWindows(full), opts.windowId);
+      tree = sub;
+    }
+    if (opts.prune === false) {
+      return { display, tree: (rawWindowSubtree(parsed, opts.windowId!) ?? parsed) as unknown as LayoutNode };
+    }
     if (!opts.detectKeyboard || opts.bundleName) return { display, tree };
 
     const imeBundles = await getImeBundles(opts.config, { deviceSerial: opts.deviceSerial, logger: opts.logger });
-    const kb = findKeyboardWindow(tree, imeBundles);
+    const kb = findKeyboardWindow(full, imeBundles);
     const keyboard: KeyboardState = kb ? { shown: true, bundle: kb.bundle, ...(kb.b ? { b: kb.b } : {}) } : { shown: false };
     return { display, tree, keyboard };
   } finally {

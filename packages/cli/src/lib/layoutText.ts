@@ -16,6 +16,7 @@ function flags(n: FlatLayoutNode): string[] {
   if (n.sel) out.push('selected');
   if (n.focus) out.push('focus');
   if (n.disabled) out.push('disabled');
+  if (n.hidden) out.push('hidden');
   if (n.covered) out.push('covered');
   return out;
 }
@@ -39,9 +40,14 @@ function isListed(n: FlatLayoutNode): boolean {
   return labelled || !!(n.click || n.longClick || n.scroll || n.check || n.focus);
 }
 
+/** `<id> <bundle>`, or whichever of the two is known. */
+function windowLabel(windowId: number | undefined, bundle: string | undefined): string {
+  return [windowId, bundle].filter((x) => x !== undefined).join(' ');
+}
+
 /**
- * Render a pruned layout as compact text for agents: a `[window <bundle>]`
- * header per window, then one line per labelled or interactive element in
+ * Render a pruned layout as compact text for agents: a `[window <id> <bundle>]`
+ * header per window (the id is what `--window` takes), then one line per labelled or interactive element in
  * paint order (decorative images and id-only wrappers are left to the JSON
  * output). The soft keyboard collapses to a single `[keyboard <bundle>]` line
  * instead of listing every key.
@@ -55,18 +61,36 @@ export function formatFlatLayout(result: DumpLayoutResult): string {
   );
   const keyboardBundle = result.keyboard?.shown ? result.keyboard.bundle : undefined;
   let window: string | undefined;
+  let windowId: number | undefined;
   for (const n of flattenLayout(result.tree)) {
-    if (n.window !== window) {
+    if (n.window !== window || n.windowId !== windowId) {
       window = n.window;
+      windowId = n.windowId;
       if (window !== undefined && window === keyboardBundle) {
-        lines.push(`[keyboard ${window}] up — dismiss with input --type hideKeyboard`);
-      } else if (window !== undefined) {
-        lines.push(`[window ${window}]`);
+        lines.push(`[keyboard ${windowLabel(windowId, window)}] up — dismiss with input --type hideKeyboard`);
+      } else if (window !== undefined || windowId !== undefined) {
+        lines.push(`[window ${windowLabel(windowId, window)}]`);
       }
     }
     if (window !== undefined && window === keyboardBundle) continue;
     if (n.bundle !== undefined && n.text === undefined && !n.click) continue; // the window root itself
     if (isListed(n)) lines.push(formatLayoutLine(n));
   }
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Render the matches of `dump layout --selector`: one line per match, numbered
+ * with the index a `[n]` suffix on the selector picks, and the window it is in.
+ */
+export function formatSelectorMatches(display: DumpLayoutResult['display'], selector: string, matches: FlatLayoutNode[]): string {
+  const lines = [
+    `# display ${display ? `${display.width}x${display.height}` : 'unknown'}; ${matches.length} element(s) match ` +
+      `${JSON.stringify(selector)}${matches.length > 1 ? '; append [n] to the selector to act on one' : ''}`,
+  ];
+  matches.forEach((n, i) => {
+    const win = windowLabel(n.windowId, n.window);
+    lines.push(`[${i}] ${formatLayoutLine(n)}${win ? ` (window ${win})` : ''}`);
+  });
   return `${lines.join('\n')}\n`;
 }

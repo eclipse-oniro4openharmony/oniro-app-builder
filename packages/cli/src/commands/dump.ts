@@ -1,8 +1,18 @@
 import { Command } from 'commander';
 import * as fs from 'node:fs';
-import { diffLayouts, dumpLayout, parseLayoutBaseline, summarizeLayout } from '@oniroproject/core';
+import {
+  diffLayouts,
+  dumpLayout,
+  findLayoutNodes,
+  listWindows,
+  parseLayoutBaseline,
+  selectableTree,
+  summarizeLayout,
+  type WindowInfo,
+} from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
-import { formatFlatLayout } from '../lib/layoutText.js';
+import { formatFlatLayout, formatSelectorMatches } from '../lib/layoutText.js';
+import { SELECTOR_HELP, WINDOW_HELP, parseSelectorOption, windowIdFrom } from '../lib/target.js';
 
 interface DumpOpts {
   bundle?: string;
@@ -10,6 +20,9 @@ interface DumpOpts {
   flat?: boolean;
   summary?: boolean;
   diff?: string;
+  selector?: string;
+  window?: string;
+  json?: boolean;
   device?: string;
 }
 
@@ -28,13 +41,22 @@ function readBaseline(file: string): ReturnType<typeof parseLayoutBaseline> {
   }
 }
 
+function formatWindows(windows: WindowInfo[]): string {
+  const lines = ['# id name pid type z-order [x y w h]; z-order -1 = not shown; `--window <id>` restricts dump/input/wait/screenshot'];
+  for (const w of windows) {
+    const rect = w.rect ? ` [${w.rect.join(' ')}]` : '';
+    lines.push(`${w.id} ${w.name} pid=${w.pid} type=${w.type} z=${w.zOrder}${rect}${w.focused ? ' focused' : ''}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 export function registerDumpCommand(program: Command): void {
   program
     .command('dump [target]')
     .description(
-      'Dump device state. Currently supports `dump layout` (the default target): JSON by default, ' +
-        'or one line per element with --flat. --summary counts elements per window; --diff compares ' +
-        'the live layout with one saved earlier.',
+      'Dump device state. `dump layout` (the default target): JSON by default, or one line per element with --flat; ' +
+        '--selector lists only the matching elements, --summary counts elements per window, --diff compares the live ' +
+        'layout with one saved earlier. `dump windows`: the window list (ids for --window).',
     )
     .option('--bundle <bundle>', 'Filter the layout to a single window/bundle.')
     .option('--raw', 'Return the unpruned layout tree.')
@@ -44,25 +66,48 @@ export function registerDumpCommand(program: Command): void {
       '--diff <baseline.json>',
       'Compare with a saved `dump layout` JSON: matched elements with IoU, missing, extra, and a 0-1 similarity (JSON).',
     )
+    .option('--selector <expr>', `List only the elements matching this expression, numbered for its [n] suffix. ${SELECTOR_HELP}`)
+    .option('--window <id>', WINDOW_HELP)
+    .option('--json', 'dump windows: print JSON instead of one line per window.')
     .option('--device <serial>', 'Target device serial.')
     .action(async (target: string | undefined, opts: DumpOpts) => {
       const { config, logger } = getRuntime();
       const what = target ?? 'layout';
-      if (what !== 'layout') throw new Error(`Unknown dump target "${what}". Supported: layout.`);
+      if (what === 'windows') {
+        const windows = await listWindows({ config, deviceSerial: opts.device, logger });
+        process.stdout.write(opts.json ? `${JSON.stringify(windows, null, 2)}\n` : formatWindows(windows));
+        return;
+      }
+      if (what !== 'layout') throw new Error(`Unknown dump target "${what}". Supported: layout, windows.`);
       if (opts.raw && opts.flat) throw new Error('--raw and --flat cannot be combined.');
+      const selector = parseSelectorOption(opts.selector);
+      if (selector && opts.raw) throw new Error('--selector matches the pruned layout; it cannot be combined with --raw.');
       const modes = [opts.flat && '--flat', opts.summary && '--summary', opts.diff !== undefined && '--diff'].filter(Boolean);
       if (modes.length > 1) throw new Error(`${modes.join(' and ')} cannot be combined.`);
       if (opts.raw && modes.length > 0) throw new Error(`--raw cannot be combined with ${modes[0]}.`);
+      if (selector && (opts.summary || opts.diff !== undefined)) {
+        throw new Error(`--selector cannot be combined with ${opts.summary ? '--summary' : '--diff'}.`);
+      }
       // Read the baseline before touching the device, so a bad path fails fast.
       const baseline = opts.diff !== undefined ? readBaseline(opts.diff) : undefined;
       const result = await dumpLayout({
         config,
         bundleName: opts.bundle,
+        windowId: windowIdFrom(opts),
         prune: !opts.raw,
         detectKeyboard: !opts.raw,
         deviceSerial: opts.device,
         logger,
       });
+      if (selector) {
+        const matches = findLayoutNodes(selectableTree(result, windowIdFrom(opts)), selector);
+        process.stdout.write(
+          opts.flat
+            ? formatSelectorMatches(result.display, selector.raw, matches)
+            : `${JSON.stringify({ display: result.display, selector: selector.raw, matches }, null, 2)}\n`,
+        );
+        return;
+      }
       let out: string;
       if (opts.flat) out = formatFlatLayout(result);
       else if (opts.summary) out = `${JSON.stringify(summarizeLayout(result), null, 2)}\n`;

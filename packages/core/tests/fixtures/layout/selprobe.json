@@ -1,0 +1,1250 @@
+{
+ "_comment": "uitest dumpLayout of the SelProbe test app (com.example.selprobe, window 92) and the SceneBoard status bar (window 20) on an API 26 arm64 device; empty and per-boot attributes removed.",
+ "display": {
+  "width": 1080,
+  "height": 2400
+ },
+ "tree": {
+  "attributes": {
+   "bounds": "[0,0][1080,2400]"
+  },
+  "children": [
+   {
+    "attributes": {
+     "backgroundColor": "#00000000",
+     "bounds": "[0,117][1080,2400]",
+     "bundleName": "com.example.selprobe",
+     "checkable": "false",
+     "checked": "false",
+     "clickable": "false",
+     "clip": "false",
+     "displayId": "0",
+     "enabled": "true",
+     "focused": "true",
+     "hitTestBehavior": "HitTestMode.Default",
+     "hostWindowId": "92",
+     "longClickable": "false",
+     "opacity": "1.000000",
+     "scrollable": "false",
+     "selected": "false",
+     "type": "root",
+     "visible": "true",
+     "zIndex": "0"
+    },
+    "children": [
+     {
+      "attributes": {
+       "backgroundColor": "#00000000",
+       "bounds": "[0,117][1080,2316]",
+       "checkable": "false",
+       "checked": "false",
+       "clickable": "false",
+       "clip": "false",
+       "displayId": "0",
+       "enabled": "true",
+       "focused": "true",
+       "hitTestBehavior": "HitTestMode.Default",
+       "hostWindowId": "92",
+       "longClickable": "false",
+       "opacity": "1.000000",
+       "scrollable": "false",
+       "selected": "false",
+       "type": "Column",
+       "visible": "true",
+       "zIndex": "0"
+      },
+      "children": [
+       {
+        "attributes": {
+         "backgroundColor": "#00000000",
+         "bounds": "[259,189][822,287]",
+         "checkable": "false",
+         "checked": "false",
+         "clickable": "false",
+         "clip": "false",
+         "displayId": "0",
+         "enabled": "true",
+         "focused": "false",
+         "hitTestBehavior": "HitTestMode.Default",
+         "hostWindowId": "92",
+         "id": "title",
+         "key": "title",
+         "longClickable": "false",
+         "opacity": "1.000000",
+         "originalText": "Selector Probe",
+         "scrollable": "false",
+         "selected": "false",
+         "text": "Selector Probe",
+         "type": "Text",
+         "visible": "true",
+         "zIndex": "0"
+        }
+       },
+       {
+        "attributes": {
+         "backgroundColor": "#00000000",
+         "bounds": "[388,335][693,405]",
+         "checkable": "false",
+         "checked": "false",
+         "clickable": "false",
+         "clip": "false",
+         "displayId": "0",
+         "enabled": "true",
+         "focused": "false",
+         "hitTestBehavior": "HitTestMode.Default",
+         "hostWindowId": "92",
+         "id": "status",
+         "key": "status",
+         "longClickable": "false",
+         "opacity": "1.000000",
+         "originalText": "Status: Idle",
+         "scrollable": "false",
+         "selected": "false",
+         "text": "Status: Idle",
+         "type": "Text",
+         "visible": "true",
+         "zIndex": "0"
+        }
+       },
+       {
+        "attributes": {
+         "backgroundColor": "#00000000",
+         "bounds": "[266,453][814,573]",
+         "checkable": "false",
+         "checked": "false",
+         "clickable": "false",
+         "clip": "false",
+         "displayId": "0",
+         "enabled": "true",
+         "focused": "false",
+         "hitTestBehavior": "HitTestMode.Default",
+         "hostWindowId": "92",
+         "id": "authRow",
+         "key": "authRow",
+         "longClickable": "false",
+         "opacity": "1.000000",
+         "scrollable": "false",
+         "selected": "false",
+         "type": "Row",
+         "visible": "true",
+         "zIndex": "0"
+        },
+        "children": [
+         {
+          "attributes": {
+           "backgroundColor": "#FF007DFF",
+           "bounds": "[266,453][513,573]",
+           "checkable": "false",
+           "checked": "false",
+           "clickable": "true",
+           "clip": "false",
+           "displayId": "0",
+           "enabled": "true",
+           "focused": "false",
+           "hitTestBehavior": "HitTestMode.Default",
+           "hostWindowId": "92",
+           "id": "signIn",
+           "key": "signIn",
+           "longClickable": "false",
+           "opacity": "1.000000",
+           "originalText": "Sign in",
+           "scrollable": "false",
+           "selected": "false",
+           "text": "Sign in",
+           "type": "Button",
+           "visible": "true",
+           "zIndex": "0"
+          }
+         },
+         {
+          "attributes": {
+           "backgroundColor": "#FF007DFF",
+           "bounds": "[549,453][814,573]",
+           "checkable": "false",
+           "checked": "false",
+           "clickable": "true",
+           "clip": "false",
+           "displayId": "0",
+           "enabled": "true",
+           "focused": "false",
+           "hitTestBehavior": "HitTestMode.Default",
+           "hostWindowId": "92",
+           "id": "signUp",
+           "key": "signUp",
+           "longClickable": "false",
+           "opacity": "1.000000",
+           "originalText": "Sign up",
+           "scrollable": "false",
+           "selected": "false",
+           "text": "Sign up",
+           "type": "Button",
+           "visible": "true",
+           "zIndex": "0"
+          }
+         }
+        ]
+       },
+       {
+        "attributes": {
+         "backgroundColor": "#FF007DFF",
+         "bounds": "[346,621][734,741]",
+         "checkable": "false",
+         "checked": "false",
+         "clickable": "true",
+         "clip": "false",
+         "displayId": "0",
+         "enabled": "true",
+         "focused": "false",
+         "hitTestBehavior": "HitTestMode.Default",
+         "hostWindowId": "92",
+         "id": "toggle",
+         "key": "toggle",
+         "longClickable": "false",
+         "opacity": "1.000000",
+         "originalText": "Show banner",
+         "scrollable": "false",
+         "selected": "false",
+         "text": "Show banner",
+         "type": "Button",
+         "visible": "true",
+         "zIndex": "0"
+        }
+       },
+       {
+        "attributes": {
+         "backgroundColor": "#FF007DFF",
+         "bounds": "[396,789][685,909]",
+         "checkable": "false",
+         "checked": "false",
+         "clickable": "false",
+         "clip": "false",
+         "displayId": "0",
+         "enabled": "false",
+         "focused": "false",
+         "hitTestBehavior": "HitTestMode.Default",
+         "hostWindowId": "92",
+         "id": "disabledBtn",
+         "key": "disabledBtn",
+         "longClickable": "false",
+         "opacity": "1.000000",
+         "originalText": "Disabled",
+         "scrollable": "false",
+         "selected": "false",
+         "text": "Disabled",
+         "type": "Button",
+         "visible": "true",
+         "zIndex": "0"
+        }
+       },
+       {
+        "attributes": {
+         "backgroundColor": "#00000000",
+         "bounds": "[469,957][611,1125]",
+         "checkable": "false",
+         "checked": "false",
+         "clickable": "false",
+         "clip": "false",
+         "displayId": "0",
+         "enabled": "true",
+         "focused": "false",
+         "hitTestBehavior": "HitTestMode.Default",
+         "hostWindowId": "92",
+         "id": "items",
+         "key": "items",
+         "longClickable": "false",
+         "opacity": "1.000000",
+         "scrollable": "false",
+         "selected": "false",
+         "type": "Column",
+         "visible": "true",
+         "zIndex": "0"
+        },
+        "children": [
+         {
+          "attributes": {
+           "backgroundColor": "#00000000",
+           "bounds": "[470,957][611,1013]",
+           "checkable": "false",
+           "checked": "false",
+           "clickable": "false",
+           "clip": "false",
+           "displayId": "0",
+           "enabled": "true",
+           "focused": "false",
+           "hitTestBehavior": "HitTestMode.Default",
+           "hostWindowId": "92",
+           "id": "itemA",
+           "key": "itemA",
+           "longClickable": "false",
+           "opacity": "1.000000",
+           "originalText": "Item A",
+           "scrollable": "false",
+           "selected": "false",
+           "text": "Item A",
+           "type": "Text",
+           "visible": "true",
+           "zIndex": "0"
+          }
+         },
+         {
+          "attributes": {
+           "backgroundColor": "#00000000",
+           "bounds": "[469,1013][611,1069]",
+           "checkable": "false",
+           "checked": "false",
+           "clickable": "false",
+           "clip": "false",
+           "displayId": "0",
+           "enabled": "true",
+           "focused": "false",
+           "hitTestBehavior": "HitTestMode.Default",
+           "hostWindowId": "92",
+           "id": "itemB",
+           "key": "itemB",
+           "longClickable": "false",
+           "opacity": "1.000000",
+           "originalText": "Item B",
+           "scrollable": "false",
+           "selected": "false",
+           "text": "Item B",
+           "type": "Text",
+           "visible": "true",
+           "zIndex": "0"
+          }
+         },
+         {
+          "attributes": {
+           "backgroundColor": "#00000000",
+           "bounds": "[469,1069][611,1125]",
+           "checkable": "false",
+           "checked": "false",
+           "clickable": "false",
+           "clip": "false",
+           "displayId": "0",
+           "enabled": "true",
+           "focused": "false",
+           "hitTestBehavior": "HitTestMode.Default",
+           "hostWindowId": "92",
+           "id": "itemC",
+           "key": "itemC",
+           "longClickable": "false",
+           "opacity": "1.000000",
+           "originalText": "Item C",
+           "scrollable": "false",
+           "selected": "false",
+           "text": "Item C",
+           "type": "Text",
+           "visible": "true",
+           "zIndex": "0"
+          }
+         }
+        ]
+       },
+       {
+        "attributes": {
+         "backgroundColor": "#0C182431",
+         "bounds": "[166,1173][915,1293]",
+         "checkable": "false",
+         "checked": "false",
+         "clickable": "true",
+         "clip": "false",
+         "displayId": "0",
+         "enabled": "true",
+         "focused": "false",
+         "hint": "you@example.com",
+         "hitTestBehavior": "HitTestMode.Default",
+         "hostWindowId": "92",
+         "id": "email",
+         "key": "email",
+         "longClickable": "true",
+         "opacity": "1.000000",
+         "scrollable": "true",
+         "selected": "false",
+         "type": "TextInput",
+         "visible": "true",
+         "zIndex": "0"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "attributes": {
+     "backgroundColor": "#00000000",
+     "bounds": "[0,0][1080,117]",
+     "bundleName": "com.ohos.sceneboard",
+     "checkable": "false",
+     "checked": "false",
+     "clickable": "false",
+     "clip": "false",
+     "displayId": "0",
+     "enabled": "true",
+     "focused": "false",
+     "hitTestBehavior": "HitTestMode.None",
+     "hostWindowId": "20",
+     "id": "session20",
+     "key": "session20",
+     "longClickable": "false",
+     "opacity": "1.000000",
+     "scrollable": "false",
+     "selected": "false",
+     "type": "WindowScene",
+     "visible": "true",
+     "zIndex": "0"
+    },
+    "children": [
+     {
+      "attributes": {
+       "backgroundColor": "#00000000",
+       "bounds": "[0,0][1080,117]",
+       "checkable": "false",
+       "checked": "false",
+       "clickable": "false",
+       "clip": "false",
+       "displayId": "0",
+       "enabled": "true",
+       "focused": "false",
+       "hitTestBehavior": "HitTestMode.Default",
+       "hostWindowId": "20",
+       "id": "StatusBarBox",
+       "key": "StatusBarBox",
+       "longClickable": "false",
+       "opacity": "1.000000",
+       "scrollable": "false",
+       "selected": "false",
+       "type": "__Common__",
+       "visible": "true",
+       "zIndex": "0"
+      },
+      "children": [
+       {
+        "attributes": {
+         "backgroundColor": "#00000000",
+         "bounds": "[0,0][1080,117]",
+         "checkable": "false",
+         "checked": "false",
+         "clickable": "false",
+         "clip": "false",
+         "displayId": "0",
+         "enabled": "true",
+         "focused": "false",
+         "hitTestBehavior": "HitTestMode.Default",
+         "hostWindowId": "20",
+         "longClickable": "false",
+         "opacity": "1.000000",
+         "scrollable": "false",
+         "selected": "false",
+         "type": "Stack",
+         "visible": "true",
+         "zIndex": "0"
+        },
+        "children": [
+         {
+          "attributes": {
+           "backgroundColor": "#00000000",
+           "bounds": "[0,0][1080,117]",
+           "checkable": "false",
+           "checked": "false",
+           "clickable": "true",
+           "clip": "false",
+           "displayId": "0",
+           "enabled": "true",
+           "focused": "false",
+           "hitTestBehavior": "HitTestMode.Default",
+           "hostWindowId": "20",
+           "id": "StatusBarBridgeView",
+           "key": "StatusBarBridgeView",
+           "longClickable": "false",
+           "opacity": "1.000000",
+           "scrollable": "false",
+           "selected": "false",
+           "type": "__Common__",
+           "visible": "true",
+           "zIndex": "0"
+          },
+          "children": [
+           {
+            "attributes": {
+             "backgroundColor": "#00000000",
+             "bounds": "[0,0][1080,117]",
+             "checkable": "false",
+             "checked": "false",
+             "clickable": "false",
+             "clip": "false",
+             "displayId": "0",
+             "enabled": "true",
+             "focused": "false",
+             "hitTestBehavior": "HitTestMode.Default",
+             "hostWindowId": "20",
+             "id": "StatusBarViewV2",
+             "key": "StatusBarViewV2",
+             "longClickable": "false",
+             "opacity": "1.000000",
+             "scrollable": "false",
+             "selected": "false",
+             "type": "Stack",
+             "visible": "true",
+             "zIndex": "0"
+            },
+            "children": [
+             {
+              "attributes": {
+               "backgroundColor": "#00000000",
+               "bounds": "[0,0][1080,117]",
+               "checkable": "false",
+               "checked": "false",
+               "clickable": "false",
+               "clip": "false",
+               "displayId": "0",
+               "enabled": "true",
+               "focused": "false",
+               "hitTestBehavior": "HitTestMode.Default",
+               "hostWindowId": "20",
+               "longClickable": "false",
+               "opacity": "1.000000",
+               "scrollable": "false",
+               "selected": "false",
+               "type": "EffectComponent",
+               "visible": "true",
+               "zIndex": "0"
+              },
+              "children": [
+               {
+                "attributes": {
+                 "backgroundColor": "#00000000",
+                 "bounds": "[0,0][1080,117]",
+                 "checkable": "false",
+                 "checked": "false",
+                 "clickable": "false",
+                 "clip": "false",
+                 "displayId": "0",
+                 "enabled": "true",
+                 "focused": "false",
+                 "hitTestBehavior": "HitTestMode.Default",
+                 "hostWindowId": "20",
+                 "id": "StatusBarView",
+                 "key": "StatusBarView",
+                 "longClickable": "false",
+                 "opacity": "1.000000",
+                 "scrollable": "false",
+                 "selected": "false",
+                 "type": "Stack",
+                 "visible": "true",
+                 "zIndex": "0"
+                },
+                "children": [
+                 {
+                  "attributes": {
+                   "backgroundColor": "#00FFFFFF",
+                   "bounds": "[0,0][1080,117]",
+                   "checkable": "false",
+                   "checked": "false",
+                   "clickable": "false",
+                   "clip": "false",
+                   "displayId": "0",
+                   "enabled": "true",
+                   "focused": "false",
+                   "hitTestBehavior": "HitTestMode.Default",
+                   "hostWindowId": "20",
+                   "id": "StatusBarBackground_Row_0",
+                   "key": "StatusBarBackground_Row_0",
+                   "longClickable": "false",
+                   "opacity": "1.000000",
+                   "scrollable": "false",
+                   "selected": "false",
+                   "type": "Row",
+                   "visible": "true",
+                   "zIndex": "0"
+                  }
+                 },
+                 {
+                  "attributes": {
+                   "backgroundColor": "#00000000",
+                   "bounds": "[48,23][1080,95]",
+                   "checkable": "false",
+                   "checked": "false",
+                   "clickable": "false",
+                   "clip": "false",
+                   "displayId": "0",
+                   "enabled": "true",
+                   "focused": "false",
+                   "hitTestBehavior": "HitTestMode.Default",
+                   "hostWindowId": "20",
+                   "id": "sbg_left",
+                   "key": "sbg_left",
+                   "longClickable": "false",
+                   "opacity": "1.000000",
+                   "scrollable": "false",
+                   "selected": "false",
+                   "type": "Stack",
+                   "visible": "true",
+                   "zIndex": "0"
+                  },
+                  "children": [
+                   {
+                    "attributes": {
+                     "backgroundColor": "#00000000",
+                     "bounds": "[48,23][1080,95]",
+                     "checkable": "false",
+                     "checked": "false",
+                     "clickable": "false",
+                     "clip": "false",
+                     "displayId": "0",
+                     "enabled": "true",
+                     "focused": "false",
+                     "hitTestBehavior": "HitTestMode.Default",
+                     "hostWindowId": "20",
+                     "longClickable": "false",
+                     "opacity": "1.000000",
+                     "scrollable": "false",
+                     "selected": "false",
+                     "type": "RelativeContainer",
+                     "visible": "true",
+                     "zIndex": "0"
+                    },
+                    "children": [
+                     {
+                      "attributes": {
+                       "backgroundColor": "#00000000",
+                       "bounds": "[48,23][174,95]",
+                       "checkable": "false",
+                       "checked": "false",
+                       "clickable": "false",
+                       "clip": "false",
+                       "displayId": "0",
+                       "enabled": "true",
+                       "focused": "false",
+                       "hitTestBehavior": "HitTestMode.Default",
+                       "hostWindowId": "20",
+                       "id": "StatusBarIconWrapper_status_bar_clock",
+                       "key": "StatusBarIconWrapper_status_bar_clock",
+                       "longClickable": "false",
+                       "opacity": "1.000000",
+                       "scrollable": "false",
+                       "selected": "false",
+                       "type": "Stack",
+                       "visible": "true",
+                       "zIndex": "0"
+                      },
+                      "children": [
+                       {
+                        "attributes": {
+                         "backgroundColor": "#00000000",
+                         "bounds": "[48,23][174,95]",
+                         "checkable": "false",
+                         "checked": "false",
+                         "clickable": "false",
+                         "clip": "false",
+                         "displayId": "0",
+                         "enabled": "true",
+                         "focused": "false",
+                         "hitTestBehavior": "HitTestMode.Default",
+                         "hostWindowId": "20",
+                         "longClickable": "false",
+                         "opacity": "1.000000",
+                         "scrollable": "false",
+                         "selected": "false",
+                         "type": "Row",
+                         "visible": "true",
+                         "zIndex": "0"
+                        },
+                        "children": [
+                         {
+                          "attributes": {
+                           "backgroundColor": "#00000000",
+                           "bounds": "[48,23][174,95]",
+                           "checkable": "false",
+                           "checked": "false",
+                           "clickable": "false",
+                           "clip": "false",
+                           "displayId": "0",
+                           "enabled": "true",
+                           "focused": "false",
+                           "hitTestBehavior": "HitTestMode.Default",
+                           "hostWindowId": "20",
+                           "id": "ClockStatusView",
+                           "key": "ClockStatusView",
+                           "longClickable": "false",
+                           "opacity": "1.000000",
+                           "scrollable": "false",
+                           "selected": "false",
+                           "text": "12, :, 42",
+                           "type": "Flex",
+                           "visible": "true",
+                           "zIndex": "0"
+                          },
+                          "children": [
+                           {
+                            "attributes": {
+                             "backgroundColor": "#00000000",
+                             "bounds": "[52,33][117,86]",
+                             "checkable": "false",
+                             "checked": "false",
+                             "clickable": "false",
+                             "clip": "false",
+                             "displayId": "0",
+                             "enabled": "true",
+                             "focused": "false",
+                             "hitTestBehavior": "HitTestMode.Default",
+                             "hostWindowId": "20",
+                             "longClickable": "false",
+                             "opacity": "1.000000",
+                             "scrollable": "false",
+                             "selected": "false",
+                             "type": "Row",
+                             "visible": "true",
+                             "zIndex": "0"
+                            },
+                            "children": [
+                             {
+                              "attributes": {
+                               "backgroundColor": "#00000000",
+                               "bounds": "[52,33][105,86]",
+                               "checkable": "false",
+                               "checked": "false",
+                               "clickable": "false",
+                               "clip": "false",
+                               "displayId": "0",
+                               "enabled": "true",
+                               "focused": "false",
+                               "hitTestBehavior": "HitTestMode.Default",
+                               "hostWindowId": "20",
+                               "id": "TimeView_Text_timeText",
+                               "key": "TimeView_Text_timeText",
+                               "longClickable": "false",
+                               "opacity": "1.000000",
+                               "scrollable": "false",
+                               "selected": "false",
+                               "type": "TextClock",
+                               "visible": "true",
+                               "zIndex": "0"
+                              },
+                              "children": [
+                               {
+                                "attributes": {
+                                 "backgroundColor": "#00000000",
+                                 "bounds": "[52,33][105,86]",
+                                 "checkable": "false",
+                                 "checked": "false",
+                                 "clickable": "false",
+                                 "clip": "false",
+                                 "displayId": "0",
+                                 "enabled": "true",
+                                 "focused": "false",
+                                 "hitTestBehavior": "HitTestMode.Default",
+                                 "hostWindowId": "20",
+                                 "longClickable": "false",
+                                 "opacity": "1.000000",
+                                 "originalText": "12",
+                                 "scrollable": "false",
+                                 "selected": "false",
+                                 "text": "12",
+                                 "type": "Text",
+                                 "visible": "true",
+                                 "zIndex": "0"
+                                }
+                               }
+                              ]
+                             },
+                             {
+                              "attributes": {
+                               "backgroundColor": "#00000000",
+                               "bounds": "[105,37][117,82]",
+                               "checkable": "false",
+                               "checked": "false",
+                               "clickable": "false",
+                               "clip": "false",
+                               "displayId": "0",
+                               "enabled": "true",
+                               "focused": "false",
+                               "hitTestBehavior": "HitTestMode.Default",
+                               "hostWindowId": "20",
+                               "id": "TimeView_Text_timeText",
+                               "key": "TimeView_Text_timeText",
+                               "longClickable": "false",
+                               "opacity": "1.000000",
+                               "originalText": ":",
+                               "scrollable": "false",
+                               "selected": "false",
+                               "text": ":",
+                               "type": "Text",
+                               "visible": "true",
+                               "zIndex": "0"
+                              }
+                             }
+                            ]
+                           },
+                           {
+                            "attributes": {
+                             "backgroundColor": "#00000000",
+                             "bounds": "[117,33][170,86]",
+                             "checkable": "false",
+                             "checked": "false",
+                             "clickable": "false",
+                             "clip": "false",
+                             "displayId": "0",
+                             "enabled": "true",
+                             "focused": "false",
+                             "hitTestBehavior": "HitTestMode.Default",
+                             "hostWindowId": "20",
+                             "id": "TimeView_Text_timeText",
+                             "key": "TimeView_Text_timeText",
+                             "longClickable": "false",
+                             "opacity": "1.000000",
+                             "scrollable": "false",
+                             "selected": "false",
+                             "type": "TextClock",
+                             "visible": "true",
+                             "zIndex": "0"
+                            },
+                            "children": [
+                             {
+                              "attributes": {
+                               "backgroundColor": "#00000000",
+                               "bounds": "[117,33][170,86]",
+                               "checkable": "false",
+                               "checked": "false",
+                               "clickable": "false",
+                               "clip": "false",
+                               "displayId": "0",
+                               "enabled": "true",
+                               "focused": "false",
+                               "hitTestBehavior": "HitTestMode.Default",
+                               "hostWindowId": "20",
+                               "longClickable": "false",
+                               "opacity": "1.000000",
+                               "originalText": "42",
+                               "scrollable": "false",
+                               "selected": "false",
+                               "text": "42",
+                               "type": "Text",
+                               "visible": "true",
+                               "zIndex": "0"
+                              }
+                             }
+                            ]
+                           }
+                          ]
+                         }
+                        ]
+                       }
+                      ]
+                     }
+                    ]
+                   }
+                  ]
+                 },
+                 {
+                  "attributes": {
+                   "backgroundColor": "#00000000",
+                   "bounds": "[0,23][1032,95]",
+                   "checkable": "false",
+                   "checked": "false",
+                   "clickable": "false",
+                   "clip": "false",
+                   "displayId": "0",
+                   "enabled": "true",
+                   "focused": "false",
+                   "hitTestBehavior": "HitTestMode.None",
+                   "hostWindowId": "20",
+                   "id": "sbg_right",
+                   "key": "sbg_right",
+                   "longClickable": "false",
+                   "opacity": "1.000000",
+                   "scrollable": "false",
+                   "selected": "false",
+                   "type": "RelativeContainer",
+                   "visible": "true",
+                   "zIndex": "0"
+                  },
+                  "children": [
+                   {
+                    "attributes": {
+                     "backgroundColor": "#00000000",
+                     "bounds": "[813,23][874,95]",
+                     "checkable": "false",
+                     "checked": "false",
+                     "clickable": "false",
+                     "clip": "false",
+                     "displayId": "0",
+                     "enabled": "true",
+                     "focused": "false",
+                     "hitTestBehavior": "HitTestMode.Default",
+                     "hostWindowId": "20",
+                     "id": "StatusBarIconWrapper_status_bar_wifi",
+                     "key": "StatusBarIconWrapper_status_bar_wifi",
+                     "longClickable": "false",
+                     "opacity": "1.000000",
+                     "scrollable": "false",
+                     "selected": "false",
+                     "type": "Stack",
+                     "visible": "true",
+                     "zIndex": "0"
+                    },
+                    "children": [
+                     {
+                      "attributes": {
+                       "backgroundColor": "#00000000",
+                       "bounds": "[819,23][874,95]",
+                       "checkable": "false",
+                       "checked": "false",
+                       "clickable": "false",
+                       "clip": "false",
+                       "displayId": "0",
+                       "enabled": "true",
+                       "focused": "false",
+                       "hitTestBehavior": "HitTestMode.Default",
+                       "hostWindowId": "20",
+                       "longClickable": "false",
+                       "opacity": "1.000000",
+                       "scrollable": "false",
+                       "selected": "false",
+                       "type": "Stack",
+                       "visible": "true",
+                       "zIndex": "0"
+                      },
+                      "children": [
+                       {
+                        "attributes": {
+                         "backgroundColor": "#00000000",
+                         "bounds": "[819,35][874,83]",
+                         "checkable": "false",
+                         "checked": "false",
+                         "clickable": "false",
+                         "clip": "false",
+                         "displayId": "0",
+                         "enabled": "true",
+                         "focused": "false",
+                         "hitTestBehavior": "HitTestMode.Default",
+                         "hostWindowId": "20",
+                         "id": "WifiComponent-WifiIcon_Image_wifi_signal_level",
+                         "key": "WifiComponent-WifiIcon_Image_wifi_signal_level",
+                         "longClickable": "false",
+                         "opacity": "1.000000",
+                         "scrollable": "false",
+                         "selected": "false",
+                         "type": "Image",
+                         "visible": "true",
+                         "zIndex": "0"
+                        }
+                       },
+                       {
+                        "attributes": {
+                         "backgroundColor": "#00000000",
+                         "bounds": "[819,35][874,83]",
+                         "checkable": "false",
+                         "checked": "false",
+                         "clickable": "false",
+                         "clip": "false",
+                         "displayId": "0",
+                         "enabled": "true",
+                         "focused": "false",
+                         "hitTestBehavior": "HitTestMode.Default",
+                         "hostWindowId": "20",
+                         "id": "WifiComponent-WifiIcon_Image_wifi_data_flow",
+                         "key": "WifiComponent-WifiIcon_Image_wifi_data_flow",
+                         "longClickable": "false",
+                         "opacity": "1.000000",
+                         "scrollable": "false",
+                         "selected": "false",
+                         "type": "Image",
+                         "visible": "true",
+                         "zIndex": "0"
+                        }
+                       }
+                      ]
+                     }
+                    ]
+                   },
+                   {
+                    "attributes": {
+                     "backgroundColor": "#00000000",
+                     "bounds": "[874,23][917,95]",
+                     "checkable": "false",
+                     "checked": "false",
+                     "clickable": "false",
+                     "clip": "false",
+                     "displayId": "0",
+                     "enabled": "true",
+                     "focused": "false",
+                     "hitTestBehavior": "HitTestMode.Default",
+                     "hostWindowId": "20",
+                     "id": "StatusBarIconWrapper_status_bar_signal",
+                     "key": "StatusBarIconWrapper_status_bar_signal",
+                     "longClickable": "false",
+                     "opacity": "1.000000",
+                     "scrollable": "false",
+                     "selected": "false",
+                     "type": "Stack",
+                     "visible": "true",
+                     "zIndex": "0"
+                    },
+                    "children": [
+                     {
+                      "attributes": {
+                       "backgroundColor": "#00000000",
+                       "bounds": "[880,23][917,95]",
+                       "checkable": "false",
+                       "checked": "false",
+                       "clickable": "false",
+                       "clip": "false",
+                       "displayId": "0",
+                       "enabled": "true",
+                       "focused": "false",
+                       "hitTestBehavior": "HitTestMode.Default",
+                       "hostWindowId": "20",
+                       "longClickable": "false",
+                       "opacity": "1.000000",
+                       "scrollable": "false",
+                       "selected": "false",
+                       "type": "Row",
+                       "visible": "true",
+                       "zIndex": "0"
+                      },
+                      "children": [
+                       {
+                        "attributes": {
+                         "backgroundColor": "#00000000",
+                         "bounds": "[880,35][917,83]",
+                         "checkable": "false",
+                         "checked": "false",
+                         "clickable": "false",
+                         "clip": "false",
+                         "displayId": "0",
+                         "enabled": "true",
+                         "focused": "false",
+                         "hitTestBehavior": "HitTestMode.Default",
+                         "hostWindowId": "20",
+                         "longClickable": "false",
+                         "opacity": "1.000000",
+                         "scrollable": "false",
+                         "selected": "false",
+                         "type": "Row",
+                         "visible": "true",
+                         "zIndex": "0"
+                        },
+                        "children": [
+                         {
+                          "attributes": {
+                           "backgroundColor": "#00000000",
+                           "bounds": "[880,35][917,83]",
+                           "checkable": "false",
+                           "checked": "false",
+                           "clickable": "false",
+                           "clip": "false",
+                           "displayId": "0",
+                           "enabled": "true",
+                           "focused": "false",
+                           "hitTestBehavior": "HitTestMode.Default",
+                           "hostWindowId": "20",
+                           "longClickable": "false",
+                           "opacity": "1.000000",
+                           "scrollable": "false",
+                           "selected": "false",
+                           "type": "Stack",
+                           "visible": "true",
+                           "zIndex": "0"
+                          },
+                          "children": [
+                           {
+                            "attributes": {
+                             "backgroundColor": "#00000000",
+                             "bounds": "[880,35][917,83]",
+                             "checkable": "false",
+                             "checked": "false",
+                             "clickable": "false",
+                             "clip": "false",
+                             "displayId": "0",
+                             "enabled": "true",
+                             "focused": "false",
+                             "hitTestBehavior": "HitTestMode.Default",
+                             "hostWindowId": "20",
+                             "id": "SignalComponent-SignalIcon_Image_cellularImage",
+                             "key": "SignalComponent-SignalIcon_Image_cellularImage",
+                             "longClickable": "false",
+                             "opacity": "1.000000",
+                             "scrollable": "false",
+                             "selected": "false",
+                             "type": "Image",
+                             "visible": "true",
+                             "zIndex": "0"
+                            }
+                           }
+                          ]
+                         }
+                        ]
+                       }
+                      ]
+                     }
+                    ]
+                   },
+                   {
+                    "attributes": {
+                     "backgroundColor": "#00000000",
+                     "bounds": "[917,23][1032,95]",
+                     "checkable": "false",
+                     "checked": "false",
+                     "clickable": "false",
+                     "clip": "false",
+                     "displayId": "0",
+                     "enabled": "true",
+                     "focused": "false",
+                     "hitTestBehavior": "HitTestMode.Default",
+                     "hostWindowId": "20",
+                     "id": "StatusBarIconWrapper_status_bar_battery",
+                     "key": "StatusBarIconWrapper_status_bar_battery",
+                     "longClickable": "false",
+                     "opacity": "1.000000",
+                     "scrollable": "false",
+                     "selected": "false",
+                     "type": "Stack",
+                     "visible": "true",
+                     "zIndex": "0"
+                    },
+                    "children": [
+                     {
+                      "attributes": {
+                       "backgroundColor": "#00000000",
+                       "bounds": "[923,23][1032,95]",
+                       "checkable": "false",
+                       "checked": "false",
+                       "clickable": "false",
+                       "clip": "false",
+                       "displayId": "0",
+                       "enabled": "true",
+                       "focused": "false",
+                       "hitTestBehavior": "HitTestMode.Default",
+                       "hostWindowId": "20",
+                       "id": "BatteryComponent-batteryIcon_Image_batteryIcon",
+                       "key": "BatteryComponent-batteryIcon_Image_batteryIcon",
+                       "longClickable": "false",
+                       "opacity": "1.000000",
+                       "scrollable": "false",
+                       "selected": "false",
+                       "type": "Row",
+                       "visible": "true",
+                       "zIndex": "0"
+                      },
+                      "children": [
+                       {
+                        "attributes": {
+                         "backgroundColor": "#00000000",
+                         "bounds": "[923,34][1009,85]",
+                         "checkable": "false",
+                         "checked": "false",
+                         "clickable": "false",
+                         "clip": "false",
+                         "displayId": "0",
+                         "enabled": "true",
+                         "focused": "false",
+                         "hitTestBehavior": "HitTestMode.Default",
+                         "hostWindowId": "20",
+                         "longClickable": "false",
+                         "opacity": "1.000000",
+                         "scrollable": "false",
+                         "selected": "false",
+                         "type": "Stack",
+                         "visible": "true",
+                         "zIndex": "0"
+                        },
+                        "children": [
+                         {
+                          "attributes": {
+                           "backgroundColor": "#00000000",
+                           "bounds": "[923,36][1009,84]",
+                           "checkable": "false",
+                           "checked": "false",
+                           "clickable": "false",
+                           "clip": "false",
+                           "displayId": "0",
+                           "enabled": "true",
+                           "focused": "false",
+                           "hitTestBehavior": "HitTestMode.Default",
+                           "hostWindowId": "20",
+                           "id": "BatteryComponent-batteryIcon_Image_batteryBorder",
+                           "key": "BatteryComponent-batteryIcon_Image_batteryBorder",
+                           "longClickable": "false",
+                           "opacity": "1.000000",
+                           "scrollable": "false",
+                           "selected": "false",
+                           "type": "Image",
+                           "visible": "true",
+                           "zIndex": "0"
+                          }
+                         },
+                         {
+                          "attributes": {
+                           "backgroundColor": "#00000000",
+                           "bounds": "[919,37][1005,85]",
+                           "checkable": "false",
+                           "checked": "false",
+                           "clickable": "false",
+                           "clip": "false",
+                           "displayId": "0",
+                           "enabled": "true",
+                           "focused": "false",
+                           "hitTestBehavior": "HitTestMode.Default",
+                           "hostWindowId": "20",
+                           "id": "BatteryComponent-batteryIcon_Text_batterySoc",
+                           "key": "BatteryComponent-batteryIcon_Text_batterySoc",
+                           "longClickable": "false",
+                           "opacity": "1.000000",
+                           "originalText": "100",
+                           "scrollable": "false",
+                           "selected": "false",
+                           "text": "100",
+                           "type": "Text",
+                           "visible": "true",
+                           "zIndex": "0"
+                          }
+                         }
+                        ]
+                       },
+                       {
+                        "attributes": {
+                         "backgroundColor": "#00000000",
+                         "bounds": "[1009,35][1032,83]",
+                         "checkable": "false",
+                         "checked": "false",
+                         "clickable": "false",
+                         "clip": "false",
+                         "displayId": "0",
+                         "enabled": "true",
+                         "focused": "false",
+                         "hitTestBehavior": "HitTestMode.Default",
+                         "hostWindowId": "20",
+                         "id": "BatteryComponent-batteryIcon_Image_batteryCharging",
+                         "key": "BatteryComponent-batteryIcon_Image_batteryCharging",
+                         "longClickable": "false",
+                         "opacity": "1.000000",
+                         "scrollable": "false",
+                         "selected": "false",
+                         "type": "Image",
+                         "visible": "true",
+                         "zIndex": "0"
+                        }
+                       }
+                      ]
+                     }
+                    ]
+                   }
+                  ]
+                 }
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

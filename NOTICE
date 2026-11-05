@@ -44,6 +44,15 @@ binder-chain analysis used by `oniro-app logs crash`. Each adapted file carries
 a header naming its upstream origin; the file map, the deviations and the MIT
 license text are in packages/core/src/faultlog/NOTICE.md.
 
+The `--selector` language of `input`, `wait`, `screenshot` and `dump layout` is
+adapted from deveco-cli's packages/cli/src/ui/layout/selector-parser.ts (the
+attribute DSL: grammar, operators, quoting, index suffix) and xpath-finder.ts
+(the `xpath=` form and its element model), and `dump windows` from
+packages/cli/src/ui/window/fetcher.ts. They live in
+packages/core/src/hdc/selector.ts, xpath.ts and windows.ts, each with a header
+naming its upstream file and the changes; the XPath evaluator is a rewrite of a
+documented subset that drops upstream's @xmldom/xmldom and xpath dependencies.
+
 MIT License
 
 Copyright (c) 2026 Huawei Device Co., Ltd.

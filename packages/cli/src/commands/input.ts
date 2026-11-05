@@ -8,7 +8,7 @@ import {
   type Waypoint,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
-import { addTargetOptions, selectorFrom, targetIndexFrom, type TargetOpts } from '../lib/target.js';
+import { addTargetOptions, selectorFrom, targetIndexFrom, windowIdFrom, type TargetOpts } from '../lib/target.js';
 
 const INPUT_TYPES: UiInputType[] = [
   'click',
@@ -55,7 +55,7 @@ export function registerInputCommand(program: Command): void {
   const input = program
     .command('input')
     .description(
-      'Inject a UI input event via uitest uiInput. Position it with --target (an on-screen element), ' +
+      'Inject a UI input event via uitest uiInput. Position it with --target or --selector (an on-screen element), ' +
         '--fx/--fy (0-1 fractions of the display, as in `dump layout` and the screenshot grid), or --x/--y (pixels).',
     )
     .addOption(new Option('--type <type>', 'Input type.').choices(INPUT_TYPES).makeOptionMandatory());
@@ -86,6 +86,7 @@ export function registerInputCommand(program: Command): void {
         type: opts.type,
         target: selectorFrom(opts),
         targetIndex: targetIndexFrom(opts),
+        windowId: windowIdFrom(opts),
         fx: num(opts.fx),
         fy: num(opts.fy),
         fx2: num(opts.fx2),

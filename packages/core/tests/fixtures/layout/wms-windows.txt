@@ -1,0 +1,35 @@
+
+-------------------------------[ability]-------------------------------
+
+
+----------------------------------WindowManagerService----------------------------------
+-------------------------------------ScreenGroup 0-------------------------------------
+WindowName           DisplayId Pid     WinId Type Mode Flag ZOrd Orientation [ x    y    w    h    ] [ OffsetX OffsetY ] [ ScaleX  ScaleY  PivotX  PivotY  ]
+SCBScenePanel1       0         4491    5     2109 1    0    100  0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1.10093 1.10042 0.5     0.5     ]
+SCBWallpaper5        0         4491    9     2000 1    0    1999 0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0.5     0.5     ]
+SCBDesktop6          0         4491    11    2001 1    0    2    0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0.5     0.5     ]
+SCBScreenLock10      0         4491    15    2110 1    0    2000 0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0.5     0.5     ]
+SCBFormCenter11      0         4491    16    2135 1    0    3    0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0.5     0.5     ]
+SCBGestureNavBar13   0         4491    18    2111 1    0    2200 0           [ 0    2316 1080 84   ] [ 0       0       ] [ 1       1       0.5     0.5     ]
+SCBStatusBar15       0         4491    20    2108 1    0    2202 0           [ 0    0    1080 174  ] [ 0       0       ] [ 1       1       0.5     0.5     ]
+SCBGestureBack18     0         4491    23    2111 1    0    4102 0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0.5     0.5     ]
+---------------------------------------------------------------------------------------
+SCBKeyboardPanel     0         4491    4     2134 1    0    -1   0           [ 0    0    0    0    ] [ 0       0       ] [ 1       1       0       0       ]
+BackgroundBlurView2  0         4491    6     2109 1    0    -1   0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1.10093 1.10042 0.5     0.5     ]
+TransparentView3     0         4491    7     2136 1    0    -1   0           [ 0    0    0    0    ] [ 0       0       ] [ 1       1       0       0       ]
+BackgroundBlurView4  0         4491    8     2135 1    0    -1   0           [ 0    0    0    0    ] [ 0       0       ] [ 1       1       0       0       ]
+SCBSysDialogDefault7 0         4491    12    2104 1    0    -1   0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0       0       ]
+SCBBannerNotificatio 0         4491    13    2106 1    0    -1   0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0       0       ]
+SceneSessionAdapter9 0         4491    14    2109 1    0    -1   0           [ 0    0    0    0    ] [ 0       0       ] [ 1       1       0       0       ]
+SCBGestureTopBar12   0         4491    17    2111 1    0    -1   0           [ 0    0    1080 117  ] [ 0       0       ] [ 1       1       0       0       ]
+SCBDropdownPanel14   0         4491    19    2109 1    0    -1   0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0       0       ]
+SCBSysDialogUpper16  0         4491    21    2111 1    0    -1   0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0       0       ]
+SCBVolumePanel17     0         4491    22    2111 1    0    -1   0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0       0       ]
+SCBSceneUseControl12 0         4491    24    2109 1    0    -1   0           [ 0    0    0    0    ] [ 0       0       ] [ 1       1       0       0       ]
+selprobe0            0         17969   92    1    1    0    -1   0           [ 0    0    1080 2400 ] [ 0       0       ] [ 1       1       0.5     0.5     ]
+Focus window: 15
+All Focus window: 
+DisplayId: 0 WindowId: 15
+SingleHand: X[0] Y[0] scale[1]
+Total window num: 51
+Highlighted windows: 15
