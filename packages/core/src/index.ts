@@ -18,3 +18,4 @@ export * from './check/index.js';
 export * from './doctor/index.js';
 export * from './screens/index.js';
 export * from './apiIndex/index.js';
+export * from './faultlog/index.js';

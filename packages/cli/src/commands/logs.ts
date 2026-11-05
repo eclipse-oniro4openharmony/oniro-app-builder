@@ -1,9 +1,11 @@
 import { Command } from 'commander';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { captureLog } from '@oniroproject/core';
+import { analyzeFaultLog, captureLog, latestCrash, type CrashVerdict } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 import { collectLogBundle } from '../lib/logBundle.js';
+import { formatCrashVerdict, parseCrashSince, projectBundle } from '../lib/crashReport.js';
 
 interface LogsOpts {
   output?: string;
@@ -23,6 +25,16 @@ interface CollectOptions {
   level?: string;
   duration: string;
   redact: boolean;
+  json?: boolean;
+}
+
+interface CrashOptions {
+  bundle?: string;
+  since?: string;
+  wait?: string;
+  path?: string;
+  output: string;
+  device?: string;
   json?: boolean;
 }
 
@@ -99,6 +111,50 @@ export function registerLogsCommand(program: Command): void {
       process.stdout.write(output);
       if (!result.complete) {
         throw new Error(`Bundle is partial; inspect manifest.json. ${result.error ?? 'One or more collectors failed.'}`);
+      }
+    });
+
+  logs
+    .command('crash')
+    .description(
+      "Fetch the newest faultlog of an app from the device and say what happened: a native crash (cpp_crash), " +
+        'an uncaught ArkTS/JS error (js_crash), a freeze (app_freeze), or none. Reports the reason, the top frame, ' +
+        'the first frame in the project\'s own code with file:line:column, the JS error and its stack, the native ' +
+        'frames and, for a freeze, the binder chain. The bundle defaults to the project in the current directory, ' +
+        'else any app. Lists through `hidumper -s 1201 -a "-p Faultlogger"`, and also reads faultloggerd\'s native ' +
+        'crash records that hiview did not turn into a faultlog. Exits 0 whether or not there was a crash; check `crashed`.',
+    )
+    .allowExcessArguments(false)
+    .option('--bundle <bundle>', 'App to look for (default: the bundleName of the project in the current directory, else any process).')
+    .option('--since <s|ISO>', 'Only faults from the last N seconds (device clock), or since an ISO 8601 time.')
+    .option('--wait <ms>', 'Keep looking this long when there is no fault yet; hiview writes the faultlog a few seconds after the process dies (default: look once).')
+    .option('--path <file>', 'Analyse this local faultlog (or faultloggerd .json crash record) instead of fetching one.')
+    .option('-o, --output <directory>', 'Where to save the fetched faultlog.', path.join(os.homedir(), '.oniro', 'faultlogs'))
+    .option('--device <serial>', 'Target device serial.')
+    .option(
+      '--json',
+      'Print the verdict as JSON: crashed, kind, subtype, confidence, bundle, pid, time, reason, topFrame, projectFrame, ' +
+        'file, line, column, jsError {name, message, stack}, stack, nativeFrames, jsFrames, binderChain, deadlocks, notes, name, path, rawPath.',
+    )
+    .action(async (opts: CrashOptions) => {
+      const since = parseCrashSince(opts.since);
+      const waitMs = opts.wait !== undefined ? Number(opts.wait) : 0;
+      if (!Number.isFinite(waitMs) || waitMs < 0) throw new Error(`--wait takes a number of milliseconds, not "${opts.wait}".`);
+      let verdict: CrashVerdict | null;
+      const bundle = opts.bundle ?? (opts.path ? undefined : projectBundle(process.cwd()));
+      if (opts.path) {
+        const file = path.resolve(opts.path);
+        verdict = analyzeFaultLog(await fs.readFile(file, 'utf8'), { name: path.basename(file), path: file, rawPath: file });
+      } else {
+        const { config, logger } = getRuntime();
+        logger.info(`Looking for the newest fault of ${bundle ?? 'any process'}${opts.since ? ` since ${opts.since}` : ''}...`);
+        verdict = await latestCrash({ config, bundle, since, waitMs, deviceSerial: opts.device, saveDir: opts.output, logger });
+      }
+      if (opts.json) {
+        const none = { crashed: false, kind: null, bundle: bundle ?? null, since: since instanceof Date ? since.toISOString() : since ?? null };
+        process.stdout.write(`${JSON.stringify(verdict ?? none, null, 2)}\n`);
+      } else {
+        process.stdout.write(verdict ? formatCrashVerdict(verdict) : `No fault for ${bundle ?? 'any process'}${opts.since ? ` since ${opts.since}` : ''}.\n`);
       }
     });
 }

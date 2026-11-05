@@ -37,6 +37,13 @@ blank. Both files are reimplementations that carry a header naming the origin;
 they work on greyscale decoded by the caller, and add a variance condition and
 a background-share measure to the hash test.
 
+Portions of packages/core/src/faultlog/ are adapted from deveco-cli 1.3.10's
+packages/cli/src/faultlog/ — faultlog classification (cpp_crash, js_crash,
+app_freeze, sample_stack), the cppcrash, jscrash and appfreeze parsers, and the
+binder-chain analysis used by `oniro-app logs crash`. Each adapted file carries
+a header naming its upstream origin; the file map, the deviations and the MIT
+license text are in packages/core/src/faultlog/NOTICE.md.
+
 MIT License
 
 Copyright (c) 2026 Huawei Device Co., Ltd.
