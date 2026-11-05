@@ -11,7 +11,9 @@ Features:
   SDK for a HarmonyOS project). `--files` checks only the files given, `--fix` applies the fixes it can verify and
   reverts any that adds an error, `--json` prints `ok`, `completed`, `diagnostics` (the `build --json` shape, with
   `source: "arkts-check"`), `fixed` and `summary`. Exits 0 when clean, 1 on an error, 2 when the checker could not
-  run. The checker is deveco-cli's `arkts-check.cjs` (MIT), adapted to take the SDK directory.
+  run. The checker is deveco-cli's `arkts-check.cjs` (MIT), adapted to take the SDK directory. Beyond upstream,
+  `--fix` adds the missing `export` when the imported file exports nothing at all ("File '...' is not a module"),
+  not only when it exports something else.
 - `lint --engine arkts` runs `check arkts`.
 - `lint` exits 2 when codelinter reports that its run was incomplete (for example with command-line tools of the
   other flavour), since a clean report then says nothing; `--allow-incomplete` restores exit 0.
