@@ -310,7 +310,7 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 | Command | Description |
 | --- | --- |
 | `app install [project-dir \| file.hap] [--hap <path>] [--device <serial>]` | Install a `.hap` via `hdc`: a given file, else the project's newest signed HAP, else its unsigned one (a `*-signed.hap` path that does not exist falls back to its `*-unsigned.hap`). Fails when the bundle manager rejects the HAP; when a target refuses an unsigned HAP, the error gives the bundle manager's reason and the `sign` command to run. |
-| `app launch [project-dir] [--module <m>] [--ability <name>] [--device <serial>]` | Launch the app. `--ability` defaults to the module's `mainElement` / first visible ability. |
+| `app launch [project-dir] [--module <m>] [--ability <name>] [--device <serial>] [--smoke]` | Launch the app. `--ability` defaults to the module's `mainElement` / first visible ability. `--bundle <b>` launches an installed app without a project. With `--smoke`, also judge the launch (below). |
 | `app apply [project-dir] --bundle <b> [options]` | Install a HAP **and verify it took**: fails when the bundle manager rejects it or `bm dump` does not then list the bundle, and handles sign-info mismatch, asset-cache invalidation, and persistent-bundle restart. Uses the newest signed HAP, else the unsigned one, and explains a target's refusal of an unsigned HAP like `app install`. |
 | `app uninstall <bundle> [--device <serial>]` | Uninstall an app by bundle name. |
 | `app stop <bundle> [--device <serial>]` | Force-stop an app by bundle name. |
@@ -326,7 +326,23 @@ These commands target a connected device or emulator over `hdc`. Most accept `--
 | `--system` | Treat as a persistent/system bundle (refuses to uninstall on a sign-info mismatch). |
 | `--allow-uninstall` | Permit uninstalling a system bundle on sign-info mismatch (dangerous). |
 | `--device <serial>` | Target device serial. |
-| `--json` | Emit the result (`method`, pre/post-install pid, `cacheCleared`) as JSON. |
+| `--json` | Emit the result (`method`, pre/post-install pid, `cacheCleared`) as JSON; with `--smoke`, plus a `smoke` object. |
+| `--smoke` | After installing, launch the app and judge the launch (below). |
+
+**Launch smoke check** (`app launch --smoke`, `app apply --smoke`): wakes the screen and swipes away a lock screen without a credential, launches, waits for the app's process (up to 10 s), waits `--smoke-delay`, takes a screenshot, and checks the process is still the same pid. The verdict fails, and the command exits 1, when the process never started or died, or the screen is blank: the app area (status and navigation bars cropped off) is a flat frame by perceptual hash with little variance, or 99.8 % one colour — the deveco-cli smoke-inspector pattern. `--json` prints it (`app launch` as `{ bundle, smoke }`):
+
+```json
+{ "smoke": { "passed": false, "failures": ["the screen is blank"], "pid": 15446, "alive": true,
+  "blankScreen": true, "blankScore": 1, "blank": { "phashDistance": 0, "stdDev": 0, "background": 255, … },
+  "screenshot": "/tmp/oniro-smoke-com.example.app-1762342512000.jpeg", "crash": null, "crashChecked": false, "delayMs": 2000 } }
+```
+
+`blankScore` is the share (0–1) of the app area in its dominant colour: a "Hello World" page scores about 0.977, an empty page 1. `crash` is reserved for crash detection (`crashChecked` is `false` until it is wired in).
+
+| Flag | Description |
+| --- | --- |
+| `--smoke-delay <ms>` | Wait between the process appearing and the screenshot (default `2000`). |
+| `--smoke-screenshot <file>` | Where to write the screenshot (default: `oniro-smoke-<bundle>-<time>.jpeg` in the system temp dir). |
 
 #### `file` — transfer files to/from the device
 
@@ -440,7 +456,7 @@ Specify exactly one of `--log`, `--boot`, `--bundle`, or an element selector (`-
 
 #### `screenshot` — capture the screen as a JPEG
 
-Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP screenshot (downscaled + grid overlay). `--crop` / `--target` write a full-resolution crop of one region or element — detail where it is needed without the cost of a full-resolution screenshot. `--contact-sheet` captures a burst (default 8 frames) into one tiled sheet and prints per-frame diffs (0..1) on stdout — one image instead of N, pointing you at the frame where something changed.
+Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP screenshot (downscaled + grid overlay). `--crop` / `--target` write a full-resolution crop of one region or element — detail where it is needed without the cost of a full-resolution screenshot. `--contact-sheet` captures a burst (default 8 frames) into one tiled sheet and prints per-frame diffs (0..1) on stdout — one image instead of N, pointing you at the frame where something changed. `--diff <baseline.jpeg>` captures the screen (to `--output`) and compares it with a baseline.
 
 | Flag | Description |
 | --- | --- |
@@ -452,8 +468,14 @@ Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP sc
 | `--contact-sheet` | Capture a burst and composite it into one tiled image with per-frame change diffs. |
 | `--burst <count>` | Capture N frames; writes `<base>-<i><ext>` (or sets the `--contact-sheet` frame count). |
 | `--interval <ms>` | Delay between burst frames (default `50`). |
-| `--json` | With `--contact-sheet`, emit the full result object as JSON on stdout. |
+| `--diff <baseline.jpeg>` | Capture and compare with this screenshot: pHash and dHash distance (0–64 bits), `pixelChangeRatio` (share of pixels that moved more than 24 of 255 grey levels), `meanDiff` (the contact sheet's change metric), and `same` (both hashes within 4 bits, under 1 % of pixels changed). Images of different sizes are scaled to a common one (`sizeMismatch` flags a different aspect). Exits 0 either way. |
+| `--json` | With `--contact-sheet` or `--diff`, emit the full result object as JSON on stdout. |
 | `--device <serial>` | Target device serial. |
+
+```text
+$ oniro-app screenshot --diff before.jpeg -o after.jpeg
+different: pHash 9/64, dHash 5/64, 2.47% of pixels changed, mean change 0.0072
+```
 
 #### `dump` — dump device state
 
@@ -465,10 +487,21 @@ Default: writes the full-resolution raw JPEG. `--grid` reproduces the old MCP sc
 | --- | --- |
 | `--bundle <bundle>` | Filter the layout to a single window/bundle. |
 | `--flat` | One line per labelled or interactive element, grouped by window: type, label, `#id`, center `c=x,y` (0–1 fractions), and flags (`click`, `focus`, `disabled`, `covered`, …). The soft keyboard collapses to one `[keyboard …]` line. |
-| `--raw` | Return the unpruned tree (no keyboard detection; not combinable with `--flat`). |
+| `--raw` | Return the unpruned tree (no keyboard detection; not combinable with `--flat`, `--summary` or `--diff`). |
+| `--summary` | Per window, and in total: `elements`, `content` (text, description, placeholder or image), `clickable` and `text` node counts (JSON). |
+| `--diff <baseline.json>` | Compare the live layout with one saved by `dump layout > baseline.json` (JSON). Elements pair within a window by id, then key, then label and type, then type with overlapping boxes; each pair reports `by`, its `iou` (boxes are 0–1 fractions, so layouts from different resolutions compare) and `changed` fields. Unpaired ones are listed as `missing` and `extra`, and `similarity` (0–1) is the sum of pair IoUs (halved when a field changed) over pairs plus missing plus extra. Exits 0 either way. |
 | `--device <serial>` | Target device serial. |
 
 The pruned output marks elements as `covered` when a later layer with a visible background (a dialog scrim, an overlay, the keyboard) paints over their center, so a tap there would land on that layer instead. A fully transparent layer that only intercepts touches is not detected. Placeholder text is reported as `hint`, and disabled components as `disabled`. The JSON result also carries `keyboard: { shown, bundle, b }`.
+
+```text
+$ oniro-app dump layout > before.json
+$ oniro-app input --type click --target "Hello World"      # the text becomes "Welcome"
+$ oniro-app dump layout --diff before.json
+layout similarity 0.978: 28 matched (1 moved, 1 changed), 0 missing, 0 extra.     # stderr; the JSON follows on stdout
+{ "similarity": 0.978, "matched": [ …, { "by": "id", "baseline": { "id": "HelloWorld", "text": "Hello World", … },
+  "current": { "id": "HelloWorld", "text": "Welcome", … }, "iou": 0.766, "changed": ["text"] } ], "missing": [], "extra": [], … }
+```
 
 ```text
 $ oniro-app dump layout --flat
@@ -525,9 +558,9 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
-- **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). Set `ONIRO_DEBUG=1` to also print full stack traces.
+- **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.
 
 ## Configuration

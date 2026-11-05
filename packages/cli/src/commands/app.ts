@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   installApp,
@@ -9,11 +10,95 @@ import {
   existingHapOrUnsigned,
   getBundleName,
   readHapBundleName,
+  smokeCheck,
+  wakeAndUnlock,
+  DEFAULT_SMOKE_DELAY_MS,
   OniroError,
+  type ConfigProvider,
+  type Logger,
+  type SmokeResult,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+import { decodeGreyscale } from '../lib/screenshotImage.js';
 
-interface ApplyOpts {
+interface SmokeOpts {
+  smoke?: boolean;
+  smokeDelay: string;
+  smokeScreenshot?: string;
+}
+
+function addSmokeOptions(cmd: Command): Command {
+  return cmd
+    .option(
+      '--smoke',
+      'After launch, wait for the process, take a screenshot after --smoke-delay, and fail (exit 1) when the ' +
+        'process died or the screen is blank.',
+    )
+    .option('--smoke-delay <ms>', 'With --smoke: wait between the process appearing and the screenshot.', String(DEFAULT_SMOKE_DELAY_MS))
+    .option('--smoke-screenshot <file>', 'With --smoke: where to write the screenshot (default: a file in the system temp dir).');
+}
+
+function smokeDelayFrom(raw: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) throw new OniroError(`--smoke-delay expects a number of milliseconds; got "${raw}".`);
+  return Math.round(n);
+}
+
+/**
+ * A dark screen would read as a blank app, and `aa start` refuses to launch
+ * over a lock screen, so turn the screen on and swipe the lock away first.
+ */
+async function wakeForSmoke(config: ConfigProvider, logger: Logger, device?: string): Promise<void> {
+  const screen = await wakeAndUnlock({ config, deviceSerial: device, logger }).catch((err: Error) => {
+    logger.warn(`Could not wake the screen: ${err.message}`);
+    return null;
+  });
+  if (screen?.locked) logger.warn('The lock screen asks for a credential; the smoke screenshot will show it.');
+}
+
+/** The launch smoke check, with sharp decoding the screenshot. */
+function runSmoke(
+  config: ConfigProvider,
+  logger: Logger,
+  bundle: string,
+  since: Date,
+  opts: SmokeOpts & { device?: string },
+): Promise<SmokeResult> {
+  const screenshotPath = opts.smokeScreenshot
+    ? path.resolve(opts.smokeScreenshot)
+    : path.join(os.tmpdir(), `oniro-smoke-${bundle}-${since.getTime()}.jpeg`);
+  return smokeCheck({
+    config,
+    bundle,
+    since,
+    delayMs: smokeDelayFrom(opts.smokeDelay),
+    screenshotPath,
+    decodeGreyscale: (jpeg) => decodeGreyscale(jpeg),
+    // Crash detection: pass the faultlog reader here (crashProbe: latestCrash) once core has it.
+    deviceSerial: opts.device,
+    logger,
+  });
+}
+
+/** One line for the smoke verdict. */
+export function formatSmoke(s: SmokeResult): string {
+  const parts = [
+    s.pid === null ? 'no process' : `pid ${s.pid} ${s.alive ? 'alive' : 'died'}`,
+    s.blankScreen === null ? 'blank check skipped' : `${s.blankScreen ? 'blank' : 'not blank'} (score ${s.blankScore})`,
+  ];
+  if (s.screenshot) parts.push(`screenshot ${s.screenshot}`);
+  return `smoke: ${s.passed ? 'passed' : `FAILED (${s.failures.join('; ')})`}: ${parts.join(', ')}`;
+}
+
+interface LaunchOpts extends SmokeOpts {
+  bundle?: string;
+  module: string;
+  ability?: string;
+  device?: string;
+  json?: boolean;
+}
+
+interface ApplyOpts extends SmokeOpts {
   bundle?: string;
   module?: string;
   hap?: string;
@@ -46,7 +131,7 @@ export function registerAppCommand(program: Command): void {
       logger.info(`Installed ${result.hapPath}.`);
     });
 
-  app
+  const launch = app
     .command('launch [project-dir]')
     .description(
       'Launch an app on the connected device/emulator. Project mode (default): resolves ' +
@@ -56,21 +141,36 @@ export function registerAppCommand(program: Command): void {
     .option('--bundle <bundle>', 'Launch an already-installed app by bundle name (no project needed).')
     .option('--module <module>', 'Module folder name (project mode).', 'entry')
     .option('--ability <name>', 'Explicit ability to launch (defaults to the module mainElement in project mode, or the installed bundle main ability in --bundle mode).')
-    .option('--device <serial>', 'Target device serial.')
-    .action(async (projectDir: string | undefined, opts: { bundle?: string; module: string; ability?: string; device?: string }) => {
+    .option('--device <serial>', 'Target device serial.');
+  addSmokeOptions(launch)
+    .option('--json', 'With --smoke: emit `{ bundle, smoke }` as JSON.')
+    .action(async (projectDir: string | undefined, opts: LaunchOpts) => {
       const { config, logger } = getRuntime();
+      if (opts.smoke) {
+        smokeDelayFrom(opts.smokeDelay); // validate before launching
+        await wakeForSmoke(config, logger, opts.device);
+      }
+      const since = new Date();
+      let bundle: string;
       if (opts.bundle) {
+        bundle = opts.bundle;
         logger.info(`Launching installed bundle ${opts.bundle}...`);
         await launchApp({ config, bundleName: opts.bundle, abilityName: opts.ability, deviceSerial: opts.device, logger });
       } else {
         const dir = path.resolve(projectDir ?? process.cwd());
+        bundle = getBundleName(dir);
         logger.info(`Launching app from ${dir}...`);
         await launchApp({ config, projectDir: dir, moduleName: opts.module, abilityName: opts.ability, deviceSerial: opts.device, logger });
       }
       logger.info('App launched.');
+      if (!opts.smoke) return;
+      const smoke = await runSmoke(config, logger, bundle, since, opts);
+      if (opts.json) process.stdout.write(`${JSON.stringify({ bundle, smoke }, null, 2)}\n`);
+      else process.stdout.write(`${formatSmoke(smoke)}\n`);
+      if (!smoke.passed) process.exitCode = 1;
     });
 
-  app
+  const apply = app
     .command('apply [project-dir-or-hap]')
     .description(
       'Install a HAP (a project dir, default the current one, or a .hap file) and verify the running process ' +
@@ -87,9 +187,11 @@ export function registerAppCommand(program: Command): void {
     .option('--system', 'Treat as a persistent/system bundle (refuses uninstall on sign-info mismatch).')
     .option('--allow-uninstall', 'Permit uninstalling a system bundle on sign-info mismatch (dangerous).')
     .option('--device <serial>', 'Target device serial.')
-    .option('--json', 'Emit the result as JSON.')
+    .option('--json', 'Emit the result as JSON (with --smoke, plus a `smoke` object).');
+  addSmokeOptions(apply)
     .action(async (target: string | undefined, opts: ApplyOpts) => {
       const { config, logger } = getRuntime();
+      if (opts.smoke) smokeDelayFrom(opts.smokeDelay); // validate before installing
       const isHap = target !== undefined && /\.hap$/i.test(target);
       if (isHap && opts.hap) throw new OniroError('Pass the HAP either as the argument or with --hap, not both.');
       const dir = isHap ? process.cwd() : path.resolve(target ?? process.cwd());
@@ -115,14 +217,25 @@ export function registerAppCommand(program: Command): void {
         deviceSerial: opts.device,
         logger,
       });
+      let smoke: SmokeResult | undefined;
+      if (opts.smoke) {
+        // A replace install stops the app, so launch it again before judging it.
+        await wakeForSmoke(config, logger, opts.device);
+        const since = new Date();
+        logger.info(`Launching ${bundle} for the smoke check...`);
+        await launchApp({ config, bundleName: bundle, deviceSerial: opts.device, logger });
+        smoke = await runSmoke(config, logger, bundle, since, opts);
+      }
       if (opts.json) {
-        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(smoke ? { ...result, smoke } : result, null, 2)}\n`);
       } else {
         logger.info(
           `apply: method=${result.method} pid ${result.preInstallPid ?? '-'} -> ${result.postInstallPid ?? '-'}` +
             `${result.cacheCleared ? ' (cache cleared)' : ''}`,
         );
+        if (smoke) process.stdout.write(`${formatSmoke(smoke)}\n`);
       }
+      if (smoke && !smoke.passed) process.exitCode = 1;
     });
 
   app

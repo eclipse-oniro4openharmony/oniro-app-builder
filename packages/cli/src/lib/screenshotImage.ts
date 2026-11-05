@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { compareImages, type GreyImage, type ImageComparison } from '@oniroproject/core';
 
 /**
  * Agent-facing screenshot image processing for the CLI.
@@ -265,4 +266,34 @@ export async function frameDiffs(frames: Buffer[], opts: { sample?: number } = {
     out.push(+(s / n / 255).toFixed(4));
   }
   return out;
+}
+
+/**
+ * Decode a JPEG to 8-bit greyscale, downscaled (never upscaled) so its longest
+ * side is at most `maxDim` — the input core's image hashes and blank check
+ * expect ({@link GreyImage}).
+ */
+export async function decodeGreyscale(jpeg: Buffer, maxDim = 512): Promise<GreyImage> {
+  const { data, info } = await sharp(jpeg)
+    .greyscale()
+    .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const n = info.width * info.height;
+  const grey = new Uint8Array(n);
+  // One channel for an opaque JPEG; an alpha channel, if any, rides along after the grey one.
+  for (let i = 0; i < n; i++) grey[i] = data[i * info.channels]!;
+  return { width: info.width, height: info.height, data: grey };
+}
+
+export interface ScreenshotDiff extends ImageComparison {
+  /** Mean absolute greyscale difference, 0-1 (the `--contact-sheet` per-frame change metric). */
+  meanDiff: number;
+}
+
+/** Compare a baseline screenshot with a current one: pHash/dHash distances, pixel-change ratio, mean change. */
+export async function diffScreenshots(baseline: Buffer, current: Buffer): Promise<ScreenshotDiff> {
+  const [a, b] = await Promise.all([decodeGreyscale(baseline), decodeGreyscale(current)]);
+  const [, meanDiff] = await frameDiffs([baseline, current]);
+  return { ...compareImages(a, b), meanDiff: meanDiff ?? 0 };
 }

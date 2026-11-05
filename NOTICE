@@ -28,6 +28,15 @@ HarmonyOS API directory with `--hms` instead of locating DevEco Studio, and to
 let `--fix` export a declaration from a file that exports nothing yet. Its
 header lists the changes, and the MIT license text sits beside it in LICENSE.
 
+The launch smoke check (packages/core/src/hdc/smoke.ts) and its blank-screen
+test (packages/core/src/image/hash.ts) follow deveco-cli's smoke inspector
+(packages/cli/src/smoke/, notably screen-phash.ts): wait for the process,
+capture the screen, crop the status and navigation bars, and compare a DCT
+perceptual hash with a flat frame's, a distance of 10 bits or less meaning
+blank. Both files are reimplementations that carry a header naming the origin;
+they work on greyscale decoded by the caller, and add a variance condition and
+a background-share measure to the hash test.
+
 MIT License
 
 Copyright (c) 2026 Huawei Device Co., Ltd.

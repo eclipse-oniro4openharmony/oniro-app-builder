@@ -204,6 +204,8 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `listRunningProcesses` / `findAppProcessId` | — | `track-jpid`-based process listing / project-PID resolution. |
 | `detectAaStartFailure` | `(output) => string \| null` | Detect a refused launch (`aa start` exits 0 even on failure). |
 | `getBundleName` / `getMainAbility` | `(projectDir[, module?, ability?]) => string` | Read the bundle / resolve the launch ability from project manifests. |
+| `smokeCheck` | `(SmokeCheckOptions) => Promise<SmokeResult>` | Smoke-check a just-launched app: wait for its pid, wait `delayMs` (default 2000), screenshot and judge it against a flat frame (needs a `decodeGreyscale` decoder, since core decodes no images), check the same pid is still running, and ask an optional `crashProbe({ config, bundle, since, deviceSerial, logger })` for a crash since launch. Returns `{ passed, failures, pid, alive, blankScreen, blankScore, screenshot, crash, crashChecked, … }`; never throws for a failed check. |
+| `smokeVerdict` | `({ pid, alive, blankScreen, crash }) => { passed, failures }` | The pure verdict behind `smokeCheck`. |
 
 ### hdc — capture, display & UI dump
 
@@ -216,6 +218,21 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 | `parseBounds` / `pruneLayout` / `findCoveredNodes` | — | Pure helpers behind `dumpLayout`. |
 | `flattenLayout` / `findLayoutNodes` / `pickTarget` | — | Pure: flatten a tree (nodes tagged with their `window`), match a `LayoutSelector` (`text` / `id` / `type`), and choose one uncovered, preferably clickable node (throws `TargetNotFoundError` with `reason` `none` / `covered` / `ambiguous`). |
 | `getImeBundles` / `parseImeBundles` / `findKeyboardWindow` | — | Installed input methods (`hidumper -s 3703`) and the soft-keyboard window in a layout. |
+| `summarizeLayout` | `(DumpLayoutResult) => LayoutSummary` | Pure: per window (and in total) the element, content (text, description, placeholder or image), clickable and text-node counts. |
+| `diffLayouts` | `(baseline, current) => LayoutDiff` | Pure: pair elements within a window by id, key, label and type, then type with overlapping boxes (greedy by IoU); report each pair's IoU and changed fields, the `missing` and `extra` elements, and a 0–1 `similarity`. |
+| `parseLayoutBaseline` / `boxIoU` | — | Read a saved `dump layout` JSON (refuses a raw dump); IoU of two 0–1 boxes. |
+
+### Image comparison
+
+Pure functions over decoded greyscale pixels (`GreyImage`: `{ width, height, data: Uint8Array }`); the caller decodes the JPEG (the CLI uses sharp).
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `pHash` / `dHash` | `(GreyImage) => string` | 64-bit DCT perceptual hash / difference hash, as 16 hex digits. |
+| `hammingDistance` | `(a, b) => number` | Differing bits between two hashes. |
+| `compareImages` | `(baseline, current) => ImageComparison` | `phashDistance`, `dhashDistance`, `pixelChangeRatio` (share of pixels that moved more than 24 grey levels), `sizeMismatch`, and `same` (both hashes within 4 bits and under 1 % changed). |
+| `analyzeBlank` | `(GreyImage) => BlankAnalysis` | Whether a screenshot shows a blank app, status and navigation bars cropped off: blank when its pHash is within 10 bits of a flat frame's with a standard deviation of at most 10, or when 99.8 % of it is one colour. `blankScore` is that share. |
+| `resizeGrey` / `cropRows` / `pixelChangeRatio` / `flatFrameHash` | — | The helpers behind them. |
 
 ### hdc — input injection
 
