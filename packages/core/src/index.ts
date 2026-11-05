@@ -13,3 +13,4 @@ export * from './device/index.js';
 export * from './install/index.js';
 export * from './harmonyos/index.js';
 export * from './testing/index.js';
+export * from './check/index.js';

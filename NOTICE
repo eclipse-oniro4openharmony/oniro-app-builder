@@ -21,6 +21,12 @@ file carries a header naming its upstream origin; a file-by-file map, the list
 of deviations, and the full MIT license text are in
 packages/core/src/harmonyos/NOTICE.md.
 
+packages/core/vendor/deveco-cli/arkts-check.cjs, which `oniro-app check arkts`
+runs, is deveco-cli 1.3.10's packages/cli/src/resources/arkts-check.cjs (commit
+99e3725fc2c5), changed only to take the SDK directory with `--sdk` and the
+HarmonyOS API directory with `--hms` instead of locating DevEco Studio. Its
+header lists the changes, and the MIT license text sits beside it in LICENSE.
+
 MIT License
 
 Copyright (c) 2026 Huawei Device Co., Ltd.

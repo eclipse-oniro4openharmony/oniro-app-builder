@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import * as path from 'node:path';
 import {
   detectCmdToolsFlavour,
@@ -10,10 +10,13 @@ import {
   type CodelinterSummary,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+import { runArktsCheckCommand } from './check.js';
 
 interface LintOpts {
   files?: string[];
   json?: boolean;
+  engine: string;
+  allowIncomplete?: boolean;
 }
 
 /** codelinter's totals, or totals counted from the findings when it printed none. */
@@ -30,12 +33,18 @@ export function lintTotals(result: Pick<CodelinterResult, 'findings' | 'summary'
 
 /**
  * The exit code for a lint run: 1 when there is an error-severity finding, or when
- * codelinter exited non-zero without printing a report (so it did not really run).
- * Warnings and suggestions alone exit 0, although codelinter itself exits 1 for them.
+ * codelinter exited non-zero without printing a report (so it did not really run);
+ * 2 when codelinter said its report is incomplete (it skipped checks, so a clean
+ * report means nothing), unless `allowIncomplete`. Warnings and suggestions alone
+ * exit 0, although codelinter itself exits 1 for them.
  */
-export function lintExitCode(result: Pick<CodelinterResult, 'code' | 'findings' | 'summary'>): number {
+export function lintExitCode(
+  result: Pick<CodelinterResult, 'code' | 'findings' | 'summary' | 'incomplete'>,
+  allowIncomplete = false,
+): number {
   if (lintTotals(result).errors > 0) return 1;
-  return lintFailed(result) ? result.code : 0;
+  if (lintFailed(result)) return result.code;
+  return result.incomplete && !allowIncomplete ? 2 : 0;
 }
 
 /** True when codelinter exited non-zero without printing a report, so it did not really run. */
@@ -48,11 +57,28 @@ export function registerLintCommand(program: Command): void {
     .command('lint [project-dir]')
     .description(
       'Run the OpenHarmony codelinter on a project. Defaults to the current directory. ' +
-        'Exits 1 on error-severity findings or when codelinter fails to run; warnings alone exit 0.',
+        'Exits 1 on error-severity findings or when codelinter fails to run, 2 when codelinter reports that it ' +
+        'skipped checks (incomplete), 0 otherwise; warnings alone exit 0. `--engine arkts` runs `check arkts` instead.',
     )
     .option('--files <globs...>', 'Specific files/globs to lint (default: the whole project).')
     .option('--json', 'Emit the report (findings, summary, notices, incomplete) as JSON.')
+    .option(
+      '--engine <engine>',
+      '`codelinter`, or `arkts` for the ArkTS checker of `check arkts` (same options, report and exit codes).',
+      'codelinter',
+    )
+    .option(
+      '--allow-incomplete',
+      'Exit 0 rather than 2 when codelinter reports that it skipped checks (e.g. the tools flavour differs from runtimeOS).',
+    )
     .action(async (projectDir: string | undefined, opts: LintOpts) => {
+      if (opts.engine === 'arkts') {
+        process.exitCode = await runArktsCheckCommand(projectDir, { files: opts.files, json: opts.json });
+        return;
+      }
+      if (opts.engine !== 'codelinter') {
+        throw new InvalidArgumentError(`Unknown --engine ${opts.engine}: use codelinter or arkts.`);
+      }
       const { config, logger } = getRuntime();
       const dir = path.resolve(projectDir ?? process.cwd());
       const result = await runCodelinter({ config, projectDir: dir, files: opts.files, logger });
@@ -96,6 +122,12 @@ export function registerLintCommand(program: Command): void {
         }
       }
       // Let output flush before exiting non-zero.
-      process.exitCode = lintExitCode(result);
+      if (result.incomplete && !opts.allowIncomplete && lintTotals(result).errors === 0 && !failed) {
+        logger.error(
+          'codelinter reported an incomplete run, so a clean result is not evidence the code is clean: exiting 2. ' +
+            'Pass --allow-incomplete to exit 0, or use `oniro-app check arkts`, which does not depend on codelinter.',
+        );
+      }
+      process.exitCode = lintExitCode(result, opts.allowIncomplete);
     });
 }

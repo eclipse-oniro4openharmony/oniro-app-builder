@@ -246,14 +246,31 @@ Exits **0** when every case passed, **1** when a case failed (an assertion, runn
 
 `build` and `app install`/`app apply` leave test HAPs (`*-ohosTest-*.hap`) out of the HAPs they pick for a module.
 
+#### `check arkts` — ArkTS type check and lint without a build
+
+`check arkts [project-dir]` (defaults to the current directory) runs the SDK's own ArkTS checker (ets-loader's `etsStandaloneChecker`: the type check and ArkTS linter that the build's `CompileArkTS` task runs) without hvigor, plus the rules hvigor enforces later in a build that the checker does not see: `@Component`/`@ComponentV2` member decorators, `@ObservedV2` types under V1 state, the `@Entry` root node, statements in `build()`, struct names that collide with built-in components, `Navigation` route builders and route maps, `$r('app.*')` and `$r('sys.*')` resource names, resource directory names, `main_pages.json` pages, and `module.json5` permissions. It checks against the SDK the project compiles with: `<sdk home>/<compileSdkVersion>` for OpenHarmony, the located HarmonyOS SDK (with its `hms/ets` APIs) for a `runtimeOS: "HarmonyOS"` project. It needs no build, no device and no codelinter, so it works whichever flavour the command-line tools are.
+
+Prints each diagnostic as `file:line:col severity arkts-check: message (rule)`, then the totals. Exits 0 when clean, 1 on an error, 2 when the checker could not run (the SDK is missing, or the checker crashed): then nothing is known about the code, so do not read it as a pass. `lint --engine arkts` runs the same check.
+
+| Flag | Description |
+| --- | --- |
+| `--files <files...>` | Check only these `.ets` files. The project-wide rules (`main_pages.json`, route maps, resource directories, `module.json5`) are then skipped. |
+| `--fix` | Apply the fixes the checker can verify: the compiler's `Did you mean` suggestions, an import path ending in `.ets` or with the wrong depth, a default import of a module with only named exports, a missing `export` (in the declaring file, listed in `alsoModified`), misplaced imports, a `@Component`/`@ComponentV2` decorator that contradicts every member. It re-checks, reverts any file whose error count rose, and lists what it fixed in `fixed`. |
+| `--sdk <dir>` | Check against this SDK directory (the one holding `ets/`) instead of the one `compileSdkVersion` names. |
+| `--json` | Print the report: `ok`, `completed`, `diagnostics` (`severity`, `source: "arkts-check"`, `rule`, `message`, `file`, `line`, `column`, the shape `build --json` uses), `fixed`, `alsoModified`, `summary` (`errors`, `warnings`, `fixed`, `files`, `checkerDiagnostics`), `sdk`, `durationMs`, `error`. |
+
+The checker is deveco-cli's `arkts-check.cjs` (MIT, see `NOTICE`), run in a child `node` process.
+
 #### `lint` — run the OpenHarmony codelinter
 
-`lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0, although codelinter itself exits 1 for them. When codelinter says its report is incomplete, for example because the command-line tools' flavour (see `cmdtools status`) does not match the project's `runtimeOS`, a warning on stderr explains it: treat the counts as a lower bound.
+`lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0, although codelinter itself exits 1 for them. When codelinter says its report is incomplete, for example because the command-line tools' flavour (see `cmdtools status`) does not match the project's `runtimeOS`, it exits 2: it skipped checks, so a clean report is not evidence of clean code. Its notices, and a hint when the flavour is the cause, go to stderr.
 
 | Flag | Description |
 | --- | --- |
 | `--files <globs...>` | Specific files/globs to lint (default: the whole project). |
 | `--json` | Emit the report as JSON: `findings`, `summary` (codelinter's totals), `notices`, `incomplete`, `code`, and the cleaned `raw` output. |
+| `--allow-incomplete` | Exit 0 rather than 2 for an incomplete report without errors. |
+| `--engine <engine>` | `codelinter` (default), or `arkts` to run `check arkts` instead, with its report and exit codes. |
 
 ### Device & app
 
@@ -485,7 +502,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.
