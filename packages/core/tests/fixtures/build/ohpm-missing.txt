@@ -1,0 +1,135 @@
+[90mohpm DEBUG: ParameterParsingChainManager start handle: /work/ProbeOhpm.[39m
+[90mohpm DEBUG: ParameterParsingChainManager handle: /work/ProbeOhpm succeed, result: {"modelVersion":"5.1.0","description":"Please describe the basic information.","dependencies":{},"devDependencies":{"@ohos/hypium":"1.0.24","@ohos/hamock":"1.0.0"}}.[39m
+[90mohpm DEBUG: Creating node: start creating root nodes[39m
+[90mohpm DEBUG: ParameterParsingChainManager start handle: /work/ProbeOhpm/entry.[39m
+[90mohpm DEBUG: ParameterParsingChainManager handle: /work/ProbeOhpm/entry succeed, result: {"name":"entry","version":"1.0.0","description":"Please describe the basic information.","main":"","author":"","license":"","dependencies":{"@ohos/does-not-exist-xyz":"1.0.0"}}.[39m
+[90mohpm DEBUG: ParameterParsingChainManager start handle: /work/ProbeOhpm.[39m
+[90mohpm DEBUG: ParameterParsingChainManager handle: /work/ProbeOhpm succeed, result: {"modelVersion":"5.1.0","description":"Please describe the basic information.","dependencies":{},"devDependencies":{"@ohos/hypium":"1.0.24","@ohos/hamock":"1.0.0"}}.[39m
+[90mohpm DEBUG: overrideDependencyMap config init result: false.[39m
+[90mohpm DEBUG: exclusions start, nodeName: entry.[39m
+[90mohpm DEBUG: exclusions start, nodeName: .[39m
+[90mohpm DEBUG: getRootNode create root node of module: "entry" succeed, rootDir: /work/ProbeOhpm/entry, dev: [], prod: ["@ohos/does-not-exist-xyz"].[39m
+[90mohpm DEBUG: DependencyNode create dependency node succeed, name: entry, pinnedSpec: /work/ProbeOhpm/entry, saveRoot: /work/ProbeOhpm/entry, requirements: ["@ohos/does-not-exist-xyz"].[39m
+[90mohpm DEBUG: getRootNode create root node of module: "" succeed, rootDir: /work/ProbeOhpm, dev: ["@ohos/hypium","@ohos/hamock"], prod: [].[39m
+[90mohpm DEBUG: DependencyNode create dependency node succeed, name: , pinnedSpec: /work/ProbeOhpm, saveRoot: /work/ProbeOhpm, requirements: ["@ohos/hypium","@ohos/hamock"].[39m
+[90mohpm DEBUG: Creating node: successfully created the root node, cost: 0s 7ms[39m
+[90mohpm DEBUG: GraphBuilding building dependency graphs.[39m
+[90mohpm DEBUG: start registry node: entry@/work/ProbeOhpm/entry.[39m
+[90mohpm DEBUG: start registry node: @/work/ProbeOhpm.[39m
+[90mohpm DEBUG: Executor Running [max_concurrent:50, retry_times:1, retry_interval:1000][39m
+[90mohpm DEBUG: start create child node of @ohos/does-not-exist-xyz@1.0.0.[39m
+[90mohpm DEBUG: PackageLockerManager start building nodeData @ohos/does-not-exist-xyz@1.0.0.[39m
+[90mohpm DEBUG: DepNodeDataBuilder start fetching depNode metadata, fetchRequest: {
+  "name": "@ohos/does-not-exist-xyz",
+  "fetchSpec": "1.0.0",
+  "rootDir": "/work/ProbeOhpm/entry",
+  "where": "/work/ProbeOhpm",
+  "parentSaveRoot": "/work/ProbeOhpm/entry"
+}.[39m
+ohpm INFO: MetaDataFetcher fetching meta info of package '@ohos/does-not-exist-xyz' from https://repo.harmonyos.com/ohpm/
+[90mohpm DEBUG: Executor Running [max_concurrent:50, retry_times:1, retry_interval:1000][39m
+[90mohpm DEBUG: start create child node of @ohos/hypium@1.0.24.[39m
+[90mohpm DEBUG: PackageLockerManager start building nodeData @ohos/hypium@1.0.24.[39m
+[90mohpm DEBUG: DepNodeDataBuilder start fetching depNode metadata, fetchRequest: {
+  "name": "@ohos/hypium",
+  "fetchSpec": "1.0.24",
+  "rootDir": "/work/ProbeOhpm",
+  "where": "/work/ProbeOhpm",
+  "parentSaveRoot": "/work/ProbeOhpm"
+}.[39m
+[90mohpm DEBUG: InstallationMetadataFetcher get lock key @ohos/hypium@1.0.24 from lockfile succeed.[39m
+[90mohpm DEBUG: InstallationMetadataFetcher try fetch @ohos/hypium@1.0.24 result from lockPkg: {
+  "name": "@ohos/hypium",
+  "version": "1.0.24",
+  "integrity": "sha512-3dCqc+BAR5LqEGG2Vtzi8O3r7ci/3fYU+FWjwvUobbfko7DUnXGOccaror0yYuUhJfXzFK0aZNMGSnXaTwEnbw==",
+  "resolved": "https://repo.harmonyos.com/ohpm/@ohos/hypium/-/hypium-1.0.24.har",
+  "registryType": "ohpm"
+}[39m
+[90mohpm DEBUG: InstallationMetadataFetcher fetch @ohos/hypium@1.0.24 result from lockPkg succeed, result: {
+  "name": "@ohos/hypium",
+  "actualName": "@ohos/hypium",
+  "versions": {
+    "1.0.24": {
+      "name": "@ohos/hypium",
+      "version": "1.0.24",
+      "integrity": "sha512-3dCqc+BAR5LqEGG2Vtzi8O3r7ci/3fYU+FWjwvUobbfko7DUnXGOccaror0yYuUhJfXzFK0aZNMGSnXaTwEnbw==",
+      "resolved": "https://repo.harmonyos.com/ohpm/@ohos/hypium/-/hypium-1.0.24.har",
+      "registryType": "ohpm"
+    }
+  },
+  "registryType": "ohpm",
+  "isFromLockFile": true
+}[39m
+[90mohpm DEBUG: start create child node of @ohos/hamock@1.0.0.[39m
+[90mohpm DEBUG: PackageLockerManager start building nodeData @ohos/hamock@1.0.0.[39m
+[90mohpm DEBUG: DepNodeDataBuilder start fetching depNode metadata, fetchRequest: {
+  "name": "@ohos/hamock",
+  "fetchSpec": "1.0.0",
+  "rootDir": "/work/ProbeOhpm",
+  "where": "/work/ProbeOhpm",
+  "parentSaveRoot": "/work/ProbeOhpm"
+}.[39m
+[90mohpm DEBUG: InstallationMetadataFetcher get lock key @ohos/hamock@1.0.0 from lockfile succeed.[39m
+[90mohpm DEBUG: InstallationMetadataFetcher try fetch @ohos/hamock@1.0.0 result from lockPkg: {
+  "name": "@ohos/hamock",
+  "version": "1.0.0",
+  "integrity": "sha512-K6lDPYc6VkKe6ZBNQa9aoG+ZZMiwqfcR/7yAVFSUGIuOAhPvCJAo9+t1fZnpe0dBRBPxj2bxPPbKh69VuyAtDg==",
+  "resolved": "https://repo.harmonyos.com/ohpm/@ohos/hamock/-/hamock-1.0.0.har",
+  "registryType": "ohpm"
+}[39m
+[90mohpm DEBUG: InstallationMetadataFetcher fetch @ohos/hamock@1.0.0 result from lockPkg succeed, result: {
+  "name": "@ohos/hamock",
+  "actualName": "@ohos/hamock",
+  "versions": {
+    "1.0.0": {
+      "name": "@ohos/hamock",
+      "version": "1.0.0",
+      "integrity": "sha512-K6lDPYc6VkKe6ZBNQa9aoG+ZZMiwqfcR/7yAVFSUGIuOAhPvCJAo9+t1fZnpe0dBRBPxj2bxPPbKh69VuyAtDg==",
+      "resolved": "https://repo.harmonyos.com/ohpm/@ohos/hamock/-/hamock-1.0.0.har",
+      "registryType": "ohpm"
+    }
+  },
+  "registryType": "ohpm",
+  "isFromLockFile": true
+}[39m
+[90mohpm DEBUG: exclusions start, nodeName: @ohos/hypium.[39m
+[90mohpm DEBUG: exclude ignore, the exclusions config is empty![39m
+[90mohpm DEBUG: exclusions start, nodeName: @ohos/hamock.[39m
+[90mohpm DEBUG: exclude ignore, the exclusions config is empty![39m
+[90mohpm DEBUG: start create child node of name: @ohos/hypium, parent: "@/work/ProbeOhpm".[39m
+[90mohpm DEBUG: DependencyNode create dependency node succeed, name: @ohos/hypium, pinnedSpec: 1.0.24, saveRoot: @ohos+hypium@1.0.24, requirements: [].[39m
+[90mohpm DEBUG: InnerPkg start check need resolve inner pkg of @ohos/hypium@1.0.24, parent: @/work/ProbeOhpm.[39m
+[90mohpm DEBUG: start create child node of name: @ohos/hamock, parent: "@/work/ProbeOhpm".[39m
+[90mohpm DEBUG: DependencyNode create dependency node succeed, name: @ohos/hamock, pinnedSpec: 1.0.0, saveRoot: @ohos+hamock@1.0.0, requirements: [].[39m
+[90mohpm DEBUG: InnerPkg start check need resolve inner pkg of @ohos/hamock@1.0.0, parent: @/work/ProbeOhpm.[39m
+[90mohpm DEBUG: start build children: @ohos/hypium@1.0.24.[39m
+[90mohpm DEBUG: Find Node name: @ohos/hypium, spec: 1.0.24, keys: .[39m
+[90mohpm DEBUG: start build children: @ohos/hamock@1.0.0.[39m
+[90mohpm DEBUG: Find Node name: @ohos/hamock, spec: 1.0.0, keys: .[39m
+[90mohpm DEBUG: start registry node: @ohos/hypium@1.0.24.[39m
+[90mohpm DEBUG: start registry node: @ohos/hamock@1.0.0.[39m
+[90mohpm DEBUG: Executor all task execute finished.[39m
+[90mohpm DEBUG: Executor Run completed in 0s 5ms[39m
+[33mohpm WARN: fetch meta info of package '@ohos/does-not-exist-xyz' failed - GET https://repo.harmonyos.com/ohpm/@ohos/does-not-exist-xyz 404( undefined )[39m
+[90mohpm DEBUG: fetch meta info of package '@ohos/does-not-exist-xyz' success, but version '1.0.0' not exist https://repo.harmonyos.com/ohpm/@ohos/does-not-exist-xyz[39m
+[90mohpm DEBUG: exclusions start, nodeName: @ohos/does-not-exist-xyz.[39m
+[90mohpm DEBUG: exclude ignore, the exclusions config is empty![39m
+[90mohpm DEBUG: start create child node of name: @ohos/does-not-exist-xyz, parent: "entry@/work/ProbeOhpm/entry".[39m
+[90mohpm DEBUG: DependencyNode create dependency node succeed, name: @ohos/does-not-exist-xyz, pinnedSpec: , saveRoot: , requirements: [].[39m
+[90mohpm DEBUG: InnerPkg start check need resolve inner pkg of @ohos/does-not-exist-xyz@, parent: entry@/work/ProbeOhpm/entry.[39m
+[90mohpm DEBUG: start build children: @ohos/does-not-exist-xyz@.[39m
+[90mohpm DEBUG: Executor found task execute failed, exit process![39m
+[90mohpm DEBUG: Executor Run completed in 0s 941ms[39m
+[90mohpm DEBUG: Run install command failed 
+OhpmError: Error: 00617101 Fetch Pkg Info Failed. Error Message: FetchPackageInfo: "@ohos/does-not-exist-xyz" failed
+    at o.create (/home/user/command-line-tools/ohpm/lib/error/OhpmError.js:1:590)
+    at exports.RegistryMetaDataFetcherImpl.<anonymous> (/home/user/command-line-tools/ohpm/lib/core/dependency/dep-fetcher/implementor/RegistryMetaDataFetcherImpl.js:1:2958)
+    at Generator.next (<anonymous>)
+    at n (/home/user/command-line-tools/ohpm/lib/core/dependency/dep-fetcher/implementor/RegistryMetaDataFetcherImpl.js:1:124)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)[39m
+[90mohpm DEBUG: audit failed, detail: Error: 00634003 Trace Log Path UnExist. Error Message: the trace log file path is not exist! trace path: /home/user/Library/Caches/Huawei/DevEcoStudio6.1/TraceLogData[39m
+[31mohpm ERROR: Run install command failed 
+Error: 00617101 Fetch Pkg Info Failed
+Error Message: FetchPackageInfo: "@ohos/does-not-exist-xyz" failed
+╰→ Caused by:
+  Original Error: NOTFOUND package '@ohos/does-not-exist-xyz@1.0.0' not found from all the registries https://repo.harmonyos.com/ohpm/[39m

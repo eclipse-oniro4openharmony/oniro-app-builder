@@ -1,0 +1,60 @@
+> hvigor [33mWARN: The project has not explicitly set the 'targetSdkVersion' version at build-profile.json5. It is recommended to configure it. Reference: https://developer.huawei.com/consumer/en/doc/harmonyos-guides/ide-hvigor-build-profile-app#section45865492619[39m
+> hvigor [32mUP-TO-DATE :entry:default@PreBuild...  [39m
+> hvigor [32mFinished :entry:default@CreateModuleInfo... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateMetadata...  [39m
+> hvigor [32mFinished :entry:default@ConfigureCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@CreateBuildProfile...  [39m
+> hvigor [32mFinished :entry:default@PreCheckSyscap... after 1 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 4 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GeneratePkgSdkInfo...  [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 1 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MakePackInfo...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@SyscapTransform...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessProfile...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessRouterMap...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessShareConfig...  [39m
+> hvigor [32mFinished :entry:default@ProcessStartupConfig... after 1 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessResource...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateLoaderJson...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessLibs...  [39m
+> hvigor [32mFinished :entry:default@CompileResource... after 84 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@DoNativeStrip...  [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@CacheNativeLibs...  [39m
+> hvigor [91mERROR: Failed :entry:default@CompileArkTS... [39m
+> hvigor [33mWARN: 
+[33m1 WARN: [33m[33mArkTS:WARN: For details about ArkTS syntax errors, see FAQs[39m[39m[39m
+> hvigor [91mERROR: ArkTS Compiler Error
+[31m1 ERROR: [31m10605008 ArkTS Compiler Error
+Error Message: Use explicit types instead of "any", "unknown" (arkts-no-any-unknown) At File: /work/Probe/entry/src/main/ets/pages/Index.ets:5:24
+[39m
+[39m
+[31m2 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Property 'nonExistentMethod' does not exist on type 'Index'. At File: /work/Probe/entry/src/main/ets/pages/Index.ets:6:10
+[39m
+[39m
+[31mCOMPILE RESULT:FAIL {ERROR:3 WARN:1}[39m
+
+[31m* Try:
+> Run with --debug option to get more log output.
+[39m
+> hvigor [91mERROR: Error: ArkTS Compiler Error
+[31m1 ERROR: [31m10605008 ArkTS Compiler Error
+Error Message: Use explicit types instead of "any", "unknown" (arkts-no-any-unknown) At File: /work/Probe/entry/src/main/ets/pages/Index.ets:5:24
+[39m
+[39m
+[31m2 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Property 'nonExistentMethod' does not exist on type 'Index'. At File: /work/Probe/entry/src/main/ets/pages/Index.ets:6:10
+[39m
+[39m
+[31mCOMPILE RESULT:FAIL {ERROR:3 WARN:1}[39m
+    at runArkPack (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/arkts-pack.js:1:5076)
+ArkTSCompilerError: ArkTS Compiler Error
+    at throwArkTsCompilerError (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/data/compose-error.js:1:423)
+    at throwErrorIfHasErrorInfo (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/plugins/common-plugin.js:1:4923)
+    at Object.handler (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/plugins/common-plugin.js:1:3018)
+    at /home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-base/node_modules/rollup/dist/shared/rollup.js:27864:40[39m
+> hvigor [91mERROR: BUILD FAILED in 6 s 9 ms [39m

@@ -1,0 +1,44 @@
+> hvigor [33mWARN: The project has not explicitly set the 'targetSdkVersion' version at build-profile.json5. It is recommended to configure it. Reference: https://developer.huawei.com/consumer/en/doc/harmonyos-guides/ide-hvigor-build-profile-app#section45865492619[39m
+> hvigor [33mWARN: Currently, the device type 'phone' is not supported in module.json5 or config.json. You are advised to change the device type to 'default'.[39m
+> hvigor [32mFinished :entry:ohosTest@PreBuild... after 123 ms [39m
+> hvigor [32mFinished :entry:ohosTest@CreateModuleInfo... after 1 ms [39m
+> hvigor [32mFinished :entry:ohosTest@GenerateMetadata... after 2 ms [39m
+> hvigor [32mFinished :entry:ohosTest@ConfigureCmake... after 1 ms [39m
+> hvigor [32mFinished :entry:ohosTest@MergeProfile... after 5 ms [39m
+> hvigor [32mFinished :entry:ohosTest@CreateBuildProfile... after 1 ms [39m
+> hvigor [32mFinished :entry:ohosTest@PreCheckSyscap... after 1 ms [39m
+> hvigor [32mFinished :entry:ohosTest@GenerateOhosTestTemplate... after 5 ms [39m
+> hvigor [32mFinished :entry:ohosTest@GeneratePkgContextInfo... after 6 ms [39m
+> hvigor [32mFinished :entry:ohosTest@GeneratePkgSdkInfo... after 2 ms [39m
+> hvigor [32mFinished :entry:ohosTest@ProcessIntegratedHsp... after 1 ms [39m
+> hvigor [32mFinished :entry:ohosTest@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mFinished :entry:ohosTest@MakePackInfo... after 2 ms [39m
+> hvigor [33mWARN: The systemCapability set corresponding to the 'phone' is not found in the '/home/user/setup-ohos-sdk/linux/20/ets/api/device-define'.[39m
+> hvigor [91mERROR: Failed :entry:ohosTest@SyscapTransform... [39m
+> hvigor [91mERROR: [31m00303060 Configuration Error
+Error Message: The intersection of the system capability sets configured for multiple devices is empty. At file: /work/Probe/entry/src/ohosTest/module.json5
+
+* Try the following:
+  > Invalid configuration in syscap.json file or unable to find the systemCapability set corresponding to the deviceType which defined in the 'entry' module.json5 or config.json.
+[39m
+
+[31m* Try:
+> Run with --debug option to get more log output.
+[39m
+> hvigor [91mERROR: AdaptorError: [31m00303060 Configuration Error
+Error Message: The intersection of the system capability sets configured for multiple devices is empty. At file: /work/Probe/entry/src/ohosTest/module.json5
+
+* Try the following:
+  > Invalid configuration in syscap.json file or unable to find the systemCapability set corresponding to the deviceType which defined in the 'entry' module.json5 or config.json.
+[39m
+    at OhosLogger.printErrorExit (/home/user/command-line-tools/hvigor/hvigor/src/base/log/hvigor-log.js:1:5087)
+    at SyscapTransform.doTaskAction (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/src/tasks/abstract/abstract-syscap-transform.js:1:3202)
+    at SyscapTransform.<anonymous> (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/src/tasks/task/ohos-module-task.js:1:2137)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async SyscapTransform.execute (/home/user/command-line-tools/hvigor/hvigor/src/base/external/task/core-task-impl.js:1:2258)
+    at async TaskProxy.execute (/home/user/command-line-tools/hvigor/hvigor/src/base/internal/task/proxy/task-proxy.js:1:6613)
+    at async doIncrementalTask (/home/user/command-line-tools/hvigor/hvigor/src/base/internal/core/incremental-task-executor.js:1:941)
+    at async executeOneTask (/home/user/command-line-tools/hvigor/hvigor/src/base/internal/task/core/task-runner.js:1:4373)
+    at async runTaskFromQueue (/home/user/command-line-tools/hvigor/hvigor/src/base/internal/task/core/task-runner.js:1:2473)
+    at async runTaskFromQueue (/home/user/command-line-tools/hvigor/hvigor/src/base/internal/task/core/task-runner.js:1:3065)[39m
+> hvigor [91mERROR: BUILD FAILED in 1 s 383 ms [39m

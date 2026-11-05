@@ -1,0 +1,60 @@
+> hvigor [33mWARN: The project has not explicitly set the 'targetSdkVersion' version at build-profile.json5. It is recommended to configure it. Reference: https://developer.huawei.com/consumer/en/doc/harmonyos-guides/ide-hvigor-build-profile-app#section45865492619[39m
+> hvigor [32mUP-TO-DATE :entry:default@PreBuild...  [39m
+> hvigor [32mFinished :entry:default@CreateModuleInfo... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateMetadata...  [39m
+> hvigor [32mFinished :entry:default@ConfigureCmake... after 29 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@CreateBuildProfile...  [39m
+> hvigor [32mFinished :entry:default@PreCheckSyscap... after 1 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 3 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GeneratePkgSdkInfo...  [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 1 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 10 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MakePackInfo...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@SyscapTransform...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessProfile...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessRouterMap...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessShareConfig...  [39m
+> hvigor [32mFinished :entry:default@ProcessStartupConfig... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessResource...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateLoaderJson...  [39m
+> hvigor [32mFinished :entry:default@CompileResource... after 62 ms [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 2 ms [39m
+> hvigor [91mERROR: Failed :entry:default@BuildNativeWithNinja... [39m
+> hvigor [91mERROR: [31mError Code: 00308018 Unknown Error
+Exceptions happened while executing /home/user/setup-ohos-sdk/linux/20/native/build-tools/cmake/bin/ninja -C /work/ProbeNative/entry/.cxx/default/default/debug/arm64-v8a.
+[32mninja: Entering directory `/work/ProbeNative/entry/.cxx/default/default/debug/arm64-v8a'[32m[39m
+[32m[1/2] Building CXX object CMakeFiles/entry.dir/napi_init.cpp.o[32m[39m
+[31mFAILED: CMakeFiles/entry.dir/napi_init.cpp.o [31m[39m
+[31m/home/user/setup-ohos-sdk/linux/20/native/llvm/bin/clang++ --target=aarch64-linux-ohos --gcc-toolchain=/home/user/setup-ohos-sdk/linux/20/native/llvm --sysroot=/home/user/setup-ohos-sdk/linux/20/native/sysroot -Dentry_EXPORTS -I/work/ProbeNative/entry/src/main/cpp -I/work/ProbeNative/entry/src/main/cpp/include -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -fno-addrsig -Wa,--noexecstack -Wformat -Werror=format-security   -D__MUSL__ -O0 -g -fno-limit-debug-info  -fPIC -MD -MT CMakeFiles/entry.dir/napi_init.cpp.o -MF CMakeFiles/entry.dir/napi_init.cpp.o.d -o CMakeFiles/entry.dir/napi_init.cpp.o -c /work/ProbeNative/entry/src/main/cpp/napi_init.cpp[31m[39m
+[33mclang++: warning: argument unused during compilation: '--gcc-toolchain=/home/user/setup-ohos-sdk/linux/20/native/llvm' [-Wunused-command-line-argument][33m[39m
+[31m/work/ProbeNative/entry/src/main/cpp/napi_init.cpp:5:19: error: use of undeclared identifier 'undeclaredVar'[31m[39m
+[31m    size_t argc = undeclaredVar;[31m[39m
+[31m                  ^[31m[39m
+[33m1 error generated.[33m[39m
+[31mninja: build stopped: subcommand failed.[31m
+
+* Try the following:
+  > This error is unknown, view the detailed error logs in the '.hvigor > outputs > build-logs' directory in the project directory for analysis, or contact the developer's official website for help.
+  > More info: https://developer.huawei.com/consumer/en/doc/harmonyos-faqs/faqs-compiling-and-building
+[39m
+undefined
+
+[31m* Try:
+> Run with --debug option to get more log output.
+[39m
+> hvigor [91mERROR: Error: Exceptions happened while executing /home/user/setup-ohos-sdk/linux/20/native/build-tools/cmake/bin/ninja -C /work/ProbeNative/entry/.cxx/default/default/debug/arm64-v8a.
+[32mninja: Entering directory `/work/ProbeNative/entry/.cxx/default/default/debug/arm64-v8a'[32m[39m
+[32m[1/2] Building CXX object CMakeFiles/entry.dir/napi_init.cpp.o[32m[39m
+[31mFAILED: CMakeFiles/entry.dir/napi_init.cpp.o [31m[39m
+[31m/home/user/setup-ohos-sdk/linux/20/native/llvm/bin/clang++ --target=aarch64-linux-ohos --gcc-toolchain=/home/user/setup-ohos-sdk/linux/20/native/llvm --sysroot=/home/user/setup-ohos-sdk/linux/20/native/sysroot -Dentry_EXPORTS -I/work/ProbeNative/entry/src/main/cpp -I/work/ProbeNative/entry/src/main/cpp/include -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -fno-addrsig -Wa,--noexecstack -Wformat -Werror=format-security   -D__MUSL__ -O0 -g -fno-limit-debug-info  -fPIC -MD -MT CMakeFiles/entry.dir/napi_init.cpp.o -MF CMakeFiles/entry.dir/napi_init.cpp.o.d -o CMakeFiles/entry.dir/napi_init.cpp.o -c /work/ProbeNative/entry/src/main/cpp/napi_init.cpp[31m[39m
+[33mclang++: warning: argument unused during compilation: '--gcc-toolchain=/home/user/setup-ohos-sdk/linux/20/native/llvm' [-Wunused-command-line-argument][33m[39m
+[31m/work/ProbeNative/entry/src/main/cpp/napi_init.cpp:5:19: error: use of undeclared identifier 'undeclaredVar'[31m[39m
+[31m    size_t argc = undeclaredVar;[31m[39m
+[31m                  ^[31m[39m
+[33m1 error generated.[33m[39m
+[31mninja: build stopped: subcommand failed.[31m[39m
+undefined
+    at ChildProcess.<anonymous> (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/src/tasks/abstract-build-native.js:1:2767)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)[39m
+> hvigor [91mERROR: BUILD FAILED in 2 s 24 ms [39m

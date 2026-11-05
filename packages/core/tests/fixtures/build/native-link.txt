@@ -1,0 +1,63 @@
+> hvigor [33mWARN: The project has not explicitly set the 'targetSdkVersion' version at build-profile.json5. It is recommended to configure it. Reference: https://developer.huawei.com/consumer/en/doc/harmonyos-guides/ide-hvigor-build-profile-app#section45865492619[39m
+> hvigor [32mUP-TO-DATE :entry:default@PreBuild...  [39m
+> hvigor [32mFinished :entry:default@CreateModuleInfo... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateMetadata...  [39m
+> hvigor [32mFinished :entry:default@ConfigureCmake... after 31 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@CreateBuildProfile...  [39m
+> hvigor [32mFinished :entry:default@PreCheckSyscap... after 1 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 4 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GeneratePkgSdkInfo...  [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 1 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 12 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MakePackInfo...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@SyscapTransform...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessProfile...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessRouterMap...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessShareConfig...  [39m
+> hvigor [32mFinished :entry:default@ProcessStartupConfig... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessResource...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateLoaderJson...  [39m
+> hvigor [32mFinished :entry:default@CompileResource... after 65 ms [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 2 ms [39m
+> hvigor [91mERROR: Failed :entry:default@BuildNativeWithNinja... [39m
+> hvigor [91mERROR: [31mError Code: 00308018 Unknown Error
+Exceptions happened while executing /home/user/setup-ohos-sdk/linux/20/native/build-tools/cmake/bin/ninja -C /work/ProbeNative/entry/.cxx/default/default/debug/arm64-v8a.
+[32mninja: Entering directory `/work/ProbeNative/entry/.cxx/default/default/debug/arm64-v8a'[32m[39m
+[32m[1/2] Building CXX object CMakeFiles/entry.dir/napi_init.cpp.o[32m[39m
+[33mclang++: warning: argument unused during compilation: '--gcc-toolchain=/home/user/setup-ohos-sdk/linux/20/native/llvm' [-Wunused-command-line-argument][33m[39m
+[32m[2/2] Linking CXX shared library /work/ProbeNative/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libentry.so[32m[39m
+[31mFAILED: /work/ProbeNative/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libentry.so [31m[39m
+[31m: && /home/user/setup-ohos-sdk/linux/20/native/llvm/bin/clang++ --target=aarch64-linux-ohos --gcc-toolchain=/home/user/setup-ohos-sdk/linux/20/native/llvm --sysroot=/home/user/setup-ohos-sdk/linux/20/native/sysroot -fPIC -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -fno-addrsig -Wa,--noexecstack -Wformat -Werror=format-security   -D__MUSL__ -O0 -g -fno-limit-debug-info  --rtlib=compiler-rt -fuse-ld=lld -Wl,--build-id=sha1 -Wl,--warn-shared-textrel -Wl,--fatal-warnings -lunwind -Wl,--no-undefined -Qunused-arguments -Wl,-z,noexecstack -shared -Wl,-soname,libentry.so -o /work/ProbeNative/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libentry.so CMakeFiles/entry.dir/napi_init.cpp.o  -lace_napi.z  -lm && :[31m[39m
+[31mld.lld: error: undefined symbol: missingSymbol[31m[39m
+[31m>>> referenced by napi_init.cpp:6 (/work/ProbeNative/entry/src/main/cpp/napi_init.cpp:6)[31m[39m
+[31m>>>               CMakeFiles/entry.dir/napi_init.cpp.o:(Add(napi_env__*, napi_callback_info__*))[31m[39m
+[31mclang++: error: linker command failed with exit code 1 (use -v to see invocation)[31m[39m
+[31mninja: build stopped: subcommand failed.[31m[39m
+[31mA 'undefined symbol' error has occurred.
+* Try the following:
+  > Troubleshoot the errors according to the following guidelines.
+  > More info: https://developer.huawei.com/consumer/en/doc/harmonyos-faqs/faqs-compiling-and-building-116[31m[39m
+
+[31m* Try:
+> Run with --debug option to get more log output.
+[39m
+> hvigor [91mERROR: Error: Exceptions happened while executing /home/user/setup-ohos-sdk/linux/20/native/build-tools/cmake/bin/ninja -C /work/ProbeNative/entry/.cxx/default/default/debug/arm64-v8a.
+[32mninja: Entering directory `/work/ProbeNative/entry/.cxx/default/default/debug/arm64-v8a'[32m[39m
+[32m[1/2] Building CXX object CMakeFiles/entry.dir/napi_init.cpp.o[32m[39m
+[33mclang++: warning: argument unused during compilation: '--gcc-toolchain=/home/user/setup-ohos-sdk/linux/20/native/llvm' [-Wunused-command-line-argument][33m[39m
+[32m[2/2] Linking CXX shared library /work/ProbeNative/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libentry.so[32m[39m
+[31mFAILED: /work/ProbeNative/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libentry.so [31m[39m
+[31m: && /home/user/setup-ohos-sdk/linux/20/native/llvm/bin/clang++ --target=aarch64-linux-ohos --gcc-toolchain=/home/user/setup-ohos-sdk/linux/20/native/llvm --sysroot=/home/user/setup-ohos-sdk/linux/20/native/sysroot -fPIC -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -fno-addrsig -Wa,--noexecstack -Wformat -Werror=format-security   -D__MUSL__ -O0 -g -fno-limit-debug-info  --rtlib=compiler-rt -fuse-ld=lld -Wl,--build-id=sha1 -Wl,--warn-shared-textrel -Wl,--fatal-warnings -lunwind -Wl,--no-undefined -Qunused-arguments -Wl,-z,noexecstack -shared -Wl,-soname,libentry.so -o /work/ProbeNative/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libentry.so CMakeFiles/entry.dir/napi_init.cpp.o  -lace_napi.z  -lm && :[31m[39m
+[31mld.lld: error: undefined symbol: missingSymbol[31m[39m
+[31m>>> referenced by napi_init.cpp:6 (/work/ProbeNative/entry/src/main/cpp/napi_init.cpp:6)[31m[39m
+[31m>>>               CMakeFiles/entry.dir/napi_init.cpp.o:(Add(napi_env__*, napi_callback_info__*))[31m[39m
+[31mclang++: error: linker command failed with exit code 1 (use -v to see invocation)[31m[39m
+[31mninja: build stopped: subcommand failed.[31m[39m
+[31mA 'undefined symbol' error has occurred.
+* Try the following:
+  > Troubleshoot the errors according to the following guidelines.
+  > More info: https://developer.huawei.com/consumer/en/doc/harmonyos-faqs/faqs-compiling-and-building-116[31m[39m
+    at ChildProcess.<anonymous> (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/src/tasks/abstract-build-native.js:1:2767)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)[39m
+> hvigor [91mERROR: BUILD FAILED in 2 s 77 ms [39m
