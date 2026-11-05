@@ -299,6 +299,38 @@ Prints three tables (pages, routes, placeholders) and any warnings (a page `main
 | --- | --- |
 | `--json` | Print the inventory: `pages` (`name`, `module`, `file`, `line`, `component`, `entry`, `kind` (`entry` or `navDestination`), `registered`, `contentNodes`, `routesOut`), `routes` (`from`, `to`, `file`, `line`, `via`, `dynamic`), `placeholders` (`file`, `line`, `text`, `kind`: `comment`, `text`, `resource`, `empty-build`, `no-content`), `warnings`, `modules`, `projectDir`; `{ "error": ... }` when the project cannot be read. |
 
+#### `api search` / `api show` — look up the SDK's declarations
+
+What the SDK at one API level declares, read from its own typings: the ArkTS API (`ets/api`, `ets/arkts`), the global ArkUI components and decorators (`ets/component`), with the kit that re-exports each symbol (`ets/kits/@kit.*.d.ts`), and the Node-API C headers (`native/sysroot/usr/include/{node_api*,js_native_api*}.h`, `napi/*.h`). Use it to check that an API exists, at the API level the project compiles with, before writing code against it.
+
+- `api search <query...>` ranks symbols: every word must match a name (exact name, then prefix, then a camelCase or snake_case part such as `Path` in `pushPathByName`, then a substring), the class or namespace it belongs to, or its doc line. A dotted word matches qualified names (`router.pushUrl`); a leading `@` is ignored (`@Local`). Overloads are one hit. Exits 1 when nothing matches.
+- `api show <symbol>` is an exact lookup by qualified name (`NavPathStack.pushPathByName`, `router.pushUrl`, `Column`, `@Local`, `napi_create_threadsafe_function`), else by dotted suffix (`Preferences.get`). It prints every declaration and exits 0 when the SDK declares it; otherwise it exits 1 and names the other installed SDKs that declare it (with their `@since`) and the closest names this SDK does declare.
+- `api index` builds or refreshes the index and prints its size (for warming a cache in CI).
+
+Each hit prints the qualified name, kind (`namespace`, `class`, `interface`, `enum`, `enumMember`, `type`, `function`, `method`, `constructor`, `property`, `variable`, `component`, `decorator`, and for C `macro`, `typedef`, `struct`), kit, `since` (the lowest `@since` of its doc comments, counted from when it became public for a former system API), `@deprecated` with `@useinstead`, `@systemapi`, the declaration text, the first doc line, `file:line`, the module, and how to import it (`import { router } from '@kit.ArkUI'`, or `global, no import` for the ArkUI component declarations).
+
+```
+$ oniro-app api show NavPathStack.getPathStack --api 18
+NavPathStack.getPathStack is not declared in API 18 (5.1.0.107).
+  declared in the installed API 23 SDK (@since 19)
+```
+
+The SDK is `--sdk <dir>`, else `<sdk home>/<--api>`, else the one the project's `compileSdkVersion` names (the project in the current directory or `--project`, looked up the way hvigor does), else the newest installed. The index is built on the first use of an SDK (about 3 s for API 23, parsing with the SDK's own TypeScript) and cached under `~/.oniro/cache/api-index/` (`ONIRO_CACHE_DIR`), keyed by the SDK directory and its `oh-uni-package.json` mtimes, so a reinstalled SDK is re-indexed.
+
+| Flag | Description |
+| --- | --- |
+| `--api <level>` | The SDK API level to read. |
+| `--sdk <dir>` | An SDK API directory (holding `ets/`) to read instead. |
+| `--project <dir>` | The project whose `compileSdkVersion` picks the SDK (default: the current directory). |
+| `--rebuild` | Rebuild the index even when the cached one is current. |
+| `--kit <name>` | Only symbols this kit exports (`ArkUI` or `@kit.ArkUI`). |
+| `--kind <kinds...>` | `search` only: only these kinds. |
+| `--lang <arkts\|c>` | `search` only: only ArkTS declarations, or only the Node-API headers. |
+| `--limit <n>` | `search` only: at most n hits (default 20). |
+| `--no-deprecated` / `--no-systemapi` | `search` only: leave out `@deprecated` / `@systemapi` symbols. |
+| `--no-other-sdks` | `show` only: on a miss, do not look in the other installed SDKs. |
+| `--json` | `search`: `sdk` (`dir`, `api`, `version`, `source`), `query`, `total`, `hits` (the fields above as `name`, `qualifiedName`, `kind`, `kit`, `import`, `global`, `module`, `since`, `sinceText`, `deprecated`, `deprecatedSince`, `useInstead`, `syscap`, `systemApi`, `file`, `path`, `line`, `signature`, `doc`, `overloads`, `score`). `show`: `sdk`, `symbol`, `found`, `entries`, and on a miss `alsoIn` (`[{ api, since }]`) and `suggestions`. |
+
 #### `lint` — run the OpenHarmony codelinter
 
 `lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0, although codelinter itself exits 1 for them. When codelinter says its report is incomplete, for example because the command-line tools' flavour (see `cmdtools status`) does not match the project's `runtimeOS`, it exits 2: it skipped checks, so a clean report is not evidence of clean code. Its notices, and a hint when the flavour is the cause, go to stderr.
@@ -573,7 +605,7 @@ oniro-app gesture --waypoints '[{"x":200,"y":600,"t":0},{"x":200,"y":200,"t":400
 
 ## Output & exit codes
 
-- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `screens`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
+- **Results → stdout.** Plain text by default; `--json` (where supported) writes `JSON.stringify(..., null, 2)`. Read/observe commands (`sdk list`, `cmdtools status`, `templates list`, `devices`, `wait --log` / `--target`, `watch`, `lint`, `check arkts`, `screens`, `api search`, `api show`, `app apply`, `build`, `test`) accept `--json` (and `screenshot` with `--contact-sheet` or `--diff`, `app launch` with `--smoke`); `dump` emits JSON unless `--flat`; action-only commands do not.
 - **Progress & logs → stderr.** stdout stays clean for machine consumers, so `oniro-app create … > path.txt` or `oniro-app devices --json | jq` work cleanly.
 - **Exit code.** `0` on success, non-zero on failure (the error message is written to stderr). `app launch --smoke` and `app apply --smoke` exit 1 when the smoke verdict fails. Set `ONIRO_DEBUG=1` to also print full stack traces.
 - **Global options go before the command** (`oniro-app --version`), so `hdc` can pass its arguments through untouched.
@@ -600,6 +632,7 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 | `ONIRO_HARMONYOS_SDK_PATH` | autodetected | HarmonyOS SDK: a DevEco Studio or HarmonyOS command-line-tools install, or its `sdk` directory |
 | `ONIRO_HARMONYOS_AUTH_DIR` | `~/.oniro/harmonyos` | Where the encrypted Huawei account token is stored |
 | `ONIRO_HARMONYOS_SIGNING_DIR` | `~/.ohos/config` | Where generated HarmonyOS signing material (p12/csr/cer/p7b) is written |
+| `ONIRO_CACHE_DIR` | `~/.oniro/cache` | Where caches go: the SDK declaration index of `api search` / `api show` |
 | `ONIRO_DEBUG` | (unset) | Set to `1` for full stack traces on error |
 
 ### Temporary space

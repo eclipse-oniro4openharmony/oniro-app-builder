@@ -32,7 +32,10 @@ export type ConfigKey =
   | 'harmonyosAuthDir'
   // Generated HarmonyOS signing material (p12/csr/cer/p7b). Default `~/.ohos/config`,
   // where DevEco Studio keeps its own.
-  | 'harmonyosSigningDir';
+  | 'harmonyosSigningDir'
+  // Caches core rebuilds when stale (the SDK declaration index of `api search`).
+  // Default `~/.oniro/cache`.
+  | 'cacheDir';
 
 export interface ConfigProvider {
   /**
@@ -52,6 +55,7 @@ export const defaultPaths = {
   emulatorDir: () => path.join(os.homedir(), 'oniro-emulator'),
   harmonyosAuthDir: () => path.join(os.homedir(), '.oniro', 'harmonyos'),
   harmonyosSigningDir: () => path.join(os.homedir(), '.ohos', 'config'),
+  cacheDir: () => path.join(os.homedir(), '.oniro', 'cache'),
   hapPath: 'entry/build/default/outputs/default/entry-default-signed.hap',
   emulatorUrl:
     'https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/latest/download/oniro_emulator.zip',
