@@ -280,6 +280,21 @@ Pure functions over decoded greyscale pixels (`GreyImage`: `{ width, height, dat
 | `sendRawTouch` | `(SendRawTouchOptions) => Promise<void>` | Low-level `uinput -T` down/move/up events. |
 | `buildInputCommand` / `buildGestureCommands` / `buildRawTouchCommand` / `resolveKeyEvent` | — | Pure command builders (unit-testable). |
 
+### Flows — record and replay
+
+The flow file format of `oniro-app record` / `replay` (see the CLI README, "Flow files"), its replay through `performInput` and `waitForTarget`, and the conversion of uitest's recorder output.
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `Flow` / `FlowStep` / `FLOW_VERSION` / `FLOW_ACTIONS` | — | Version 1: `bundle`, `ability`, `device` (`api`, `display`), `steps` (`action`: click, longClick, doubleClick, swipe, inputText, keyEvent, wait; `selector`, `fallback` `{fx, fy}`, `text`, `clear`, `key`, `to`, `speed`, `gone`, `expect`, `waitMs`, `timeoutMs`, `note`). |
+| `parseFlow` / `readFlowFile` / `formatFlow` | `(doc, file?) => Flow` / `(file) => Flow` / `(Flow) => string` | Validate a flow, listing every problem with its path (unknown fields, missing per-action fields, selectors that do not parse) in a `FlowFormatError` (`problems`). |
+| `replayFlow` | `(ReplayFlowOptions) => Promise<ReplayReport>` | Per step: wait for its selector, act on it (or its fallback point, with `fallback`), pause `waitMs`, wait for `expect`; `from` / `to`, `stepTimeoutMs`, `screenshotsDir`, `launch`, `wake`, `onStep`. Stops at the first failure with `outcome: 'diverged'`, `failedStep`, `reason` (`not-found`, `expect-not-found`, `wrong-screen`, `ambiguous`, `covered`, `action-failed`), `message`, `selector`, `screenshot`, `layout` and `nearMatches`; `outcome: 'error'` when it could not run (no device, bad range). Never throws for those. |
+| `nearMatches` / `summarizeDivergenceLayout` | — | Pure: elements failing exactly one clause of a DSL selector; what is on screen, focused on the flow's app (`appOnScreen`, `lockScreen`, `keyboard`, `elements`). |
+| `recordFlow` | `(RecordFlowOptions) => Promise<RecordFlowResult>` | Run `uitest uiRecord record -l` in the background until `durationMs` or `abortSignal`, stop it with SIGINT, follow the multimodal input hilog domain for touch-down times, pull `record.csv` and the layouts, dump the screen before and after, and convert (`flowFromRecording`). `rawDir` keeps the raw recording. Returns `{ flow, warnings, events }`. |
+| `flowFromRecording` | `(FlowFromRecordingInput) => FlowFromRecordingResult` | Pure conversion. uitest writes an event (and hit-tests its widget and dumps its layout) only once the next touch has started, so with `times` each touch is matched to the last layout written before it (`alignTouches`); the element under the touch (`elementAt`, uitest's widget when it is there) gets `selectorFor`'s selector, the point is the `fallback`, and `expectFor` names what appeared after it. Soft-keyboard taps and keystrokes become one `inputText` on the focused field (`fieldSelector`); other keys, Back and Home, `keyEvent`. |
+| `parseUiRecordLines` / `alignTouches` / `elementAt` / `fieldSelector` / `expectFor` / `keystrokeChar` / `keystrokeName` | — | Pure helpers: `record.csv` (JSON Lines) → `UiRecordEvent[]`; pointer events → touch-down times; the topmost uncovered element under a point; a field selector that ignores its text; a selector for an element new in `after`; KeyCode ids → a typed character or a key name. |
+| `parseDeviceTime` / `parseTouchDowns` / `parseRecorderForeground` / `UI_RECORD_CSV` | — | Pure: `date` / `stat %y` timestamps → epoch ms; `ServerMsgHandler: [P:D:…]` hilog lines → touch-down times; the recorder's `Current ForAbility` line; `/data/local/tmp/record.csv`. |
+
 ### hdc — logging (hilog)
 
 | Export | Signature | Description |

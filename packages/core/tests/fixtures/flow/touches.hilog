@@ -1,0 +1,6 @@
+11-05 14:42:00.689  2401  2694 I C02801/ServerMsgHandler: [P:D:2138|334]Check : current PointerEvent's info :Id=>2138, pointerId=>10000
+11-05 14:42:02.425  2401  2694 I C02801/ServerMsgHandler: [P:D:2140|334]Check : current PointerEvent's info :Id=>2140, pointerId=>10000
+11-05 14:42:03.464  2401  2694 I C02801/ServerMsgHandler: [P:D:2142|334]Check : current PointerEvent's info :Id=>2142, pointerId=>10000
+11-05 14:42:04.513  2401  2694 I C02801/ServerMsgHandler: [P:D:2144|334]Check : current PointerEvent's info :Id=>2144, pointerId=>10000
+11-05 14:42:06.257  2401  2694 I C02801/ServerMsgHandler: [P:D:2146|334]Check : current PointerEvent's info :Id=>2146, pointerId=>10000
+11-05 14:42:08.500  2401  2694 I C02801/ServerMsgHandler: [P:D:2148|334]Check : current PointerEvent's info :Id=>2148, pointerId=>10000
