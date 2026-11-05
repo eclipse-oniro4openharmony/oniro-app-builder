@@ -179,7 +179,32 @@ for HarmonyOS is refused with a pointer to `--harmonyos`.
 
 #### `build` — build the app via `hvigorw`
 
-`build [project-dir]` (defaults to the current directory). Modules build in parallel by default. An OpenHarmony project whose `compileSdkVersion` SDK is not installed fails before anything runs, naming the release to install. When the compiler output shows system-API errors (`'…' is not exported from Kit '…'`), the error adds a hint about the full SDK.
+`build [project-dir]` (defaults to the current directory). Modules build in parallel by default. An OpenHarmony project whose `compileSdkVersion` SDK is not installed fails before anything runs, naming the release to install. A failed build lists its errors on stderr, one per line (`file:line:col error source code: message (rule)`), after hvigor's own output. When the project uses kit symbols that its SDK lacks but a newer installed SDK declares, the error names that API level; when no installed SDK has them (`'…' is not exported from Kit '…'`), it adds a hint about the full SDK, which carries the system APIs.
+
+With `--json`, stdout gets one object whether the build passes or fails, and a failed build still exits 1:
+
+```json
+{
+  "ok": false, "exitCode": 255, "durationMs": 7221,
+  "failedTask": ":entry:default@CompileArkTS",
+  "diagnostics": [
+    { "severity": "error", "source": "arkts", "code": "10605008", "rule": "arkts-no-any-unknown",
+      "message": "Use explicit types instead of \"any\", \"unknown\"",
+      "file": "entry/src/main/ets/pages/Index.ets", "line": 5, "column": 24,
+      "task": ":entry:default@CompileArkTS" }
+  ],
+  "summary": { "errors": 1, "warnings": 0, "reportedErrors": 2, "reportedWarnings": 1 },
+  "discoveredHaps": {}, "warnings": [],
+  "error": "hvigorw exited with code 255",
+  "rawTail": "last 200 lines of build output, colour codes removed"
+}
+```
+
+- `source` is `arkts` (the ArkTS compiler), `hvigor` (configuration and task errors such as `00303060`), `native` (clang and lld, one diagnostic per undefined symbol), `ohpm` (the dependency install before the build; `failedTask` is then `ohpm install --all`) or `sdk`. An `sdk` diagnostic carries `api`, the API level the build needs: the SDK the project compiles against is not installed (the object also has `missingSdk: { api, version, expectedPath }`), or a newer installed SDK declares the symbols the build could not find.
+- `file` is relative to the project when it lies inside it. hvigor prints the ArkTS block twice; each diagnostic is listed once.
+- `summary.reportedErrors` and `reportedWarnings` are hvigor's own `COMPILE RESULT` counts. They can exceed the distinct diagnostics (hvigor counts 3 errors for the two above), so use them as a cross-check, not as the length of the list.
+- A build that passes has `ok: true`, `discoveredHaps` (HAPs grouped by module) and its compiler warnings in `diagnostics`.
+- When the build cannot run at all (no command-line tools, not a project), the object is `{ ok: false, exitCode: 1, error, diagnostics: [] }`.
 
 | Flag | Description |
 | --- | --- |
@@ -190,7 +215,7 @@ for HarmonyOS is refused with a pointer to `--harmonyos`.
 | `--no-deps` | Skip the automatic `ohpm install --all` when `oh_modules/` is missing. |
 | `--no-parallel` | Build modules serially. |
 | `--install-sdk` | Install the missing OpenHarmony SDK the project compiles against, then build. |
-| `--json` | Emit the result (discovered HAPs grouped by module, warnings) as JSON. |
+| `--json` | Print the result as one JSON object, described above, whether the build passes or fails. |
 
 #### `lint` — run the OpenHarmony codelinter
 

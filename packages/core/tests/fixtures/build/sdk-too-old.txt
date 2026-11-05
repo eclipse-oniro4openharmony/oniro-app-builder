@@ -1,0 +1,77 @@
+> hvigor [32mFinished :entry:clean... after 2 ms [39m
+> hvigor [33mWARN: The project has not explicitly set the 'targetSdkVersion' version at build-profile.json5. It is recommended to configure it. Reference: https://developer.huawei.com/consumer/en/doc/harmonyos-guides/ide-hvigor-build-profile-app#section45865492619[39m
+> hvigor [32mFinished :entry:default@PreBuild... after 116 ms [39m
+> hvigor [32mFinished :entry:default@CreateModuleInfo... after 1 ms [39m
+> hvigor [32mFinished :entry:default@GenerateMetadata... after 2 ms [39m
+> hvigor [32mFinished :entry:default@ConfigureCmake... after 1 ms [39m
+> hvigor [32mFinished :entry:default@MergeProfile... after 3 ms [39m
+> hvigor [32mFinished :entry:default@CreateBuildProfile... after 1 ms [39m
+> hvigor [32mFinished :entry:default@PreCheckSyscap... after 1 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 3 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgSdkInfo... after 2 ms [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 1 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mFinished :entry:default@MakePackInfo... after 2 ms [39m
+> hvigor [32mFinished :entry:default@ProcessProfile... after 64 ms [39m
+> hvigor [32mFinished :entry:default@ProcessRouterMap... after 2 ms [39m
+> hvigor [32mFinished :entry:default@ProcessShareConfig... after 1 ms [39m
+> hvigor [32mFinished :entry:default@ProcessStartupConfig... after 1 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mFinished :entry:default@ProcessResource... after 2 ms [39m
+> hvigor [32mFinished :entry:default@GenerateLoaderJson... after 4 ms [39m
+> hvigor [32mFinished :entry:default@ProcessLibs... after 4 ms [39m
+> hvigor [32mFinished :entry:default@CompileResource... after 73 ms [39m
+> hvigor [32mFinished :entry:default@DoNativeStrip... after 2 ms [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 1 ms [39m
+> hvigor [32mFinished :entry:default@SyscapTransform... after 24 ms [39m
+> hvigor [32mFinished :entry:default@CacheNativeLibs... after 6 ms [39m
+> hvigor [91mERROR: Failed :entry:default@CompileArkTS... [39m
+> hvigor [91mERROR: ArkTS Compiler Error
+[31m1 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: '"@kit.ArkUI"' has no exported member named 'BorderRadiusMode'. Did you mean 'borderRadiuses'? At File: /work/Probe18/entry/src/main/ets/pages/Index.ets:1:10
+[39m
+[39m
+[31m2 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: '"@kit.AbilityKit"' has no exported member named 'AppServiceExtensionAbility'. Did you mean 'ShareExtensionAbility'? At File: /work/Probe18/entry/src/main/ets/pages/Index.ets:2:10
+[39m
+[39m
+[31m3 ERROR: [31mArkTS:ERROR File: /work/Probe18/entry/src/main/ets/pages/Index.ets:1:10
+ ERROR Code: 10311006 ArkTS: ERROR
+Error Message: 'BorderRadiusMode' is not exported from Kit '@kit.ArkUI'.
+
+* Try the following: 
+  > Please make sure the Kit apis are consistent with SDK and there's no local modification on Kit apis.
+  > For more details on Kit apis, please refer to https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/development-intro-api-V5.
+[39m
+[39m
+[31mCOMPILE RESULT:FAIL {ERROR:4}[39m
+
+[31m* Try:
+> Run with --debug option to get more log output.
+[39m
+> hvigor [91mERROR: Error: ArkTS Compiler Error
+[31m1 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: '"@kit.ArkUI"' has no exported member named 'BorderRadiusMode'. Did you mean 'borderRadiuses'? At File: /work/Probe18/entry/src/main/ets/pages/Index.ets:1:10
+[39m
+[39m
+[31m2 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: '"@kit.AbilityKit"' has no exported member named 'AppServiceExtensionAbility'. Did you mean 'ShareExtensionAbility'? At File: /work/Probe18/entry/src/main/ets/pages/Index.ets:2:10
+[39m
+[39m
+[31m3 ERROR: [31mArkTS:ERROR File: /work/Probe18/entry/src/main/ets/pages/Index.ets:1:10
+ ERROR Code: 10311006 ArkTS: ERROR
+Error Message: 'BorderRadiusMode' is not exported from Kit '@kit.ArkUI'.
+
+* Try the following: 
+  > Please make sure the Kit apis are consistent with SDK and there's no local modification on Kit apis.
+  > For more details on Kit apis, please refer to https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/development-intro-api-V5.
+[39m
+[39m
+[31mCOMPILE RESULT:FAIL {ERROR:4}[39m
+    at runArkPack (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/arkts-pack.js:1:5076)
+ArkTSCompilerError: ArkTS Compiler Error
+    at throwArkTsCompilerError (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/data/compose-error.js:1:423)
+    at throwErrorIfHasErrorInfo (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/plugins/common-plugin.js:1:4923)
+    at Object.handler (/home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/plugins/common-plugin.js:1:3018)
+    at /home/user/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-base/node_modules/rollup/dist/shared/rollup.js:27864:40[39m
+> hvigor [91mERROR: BUILD FAILED in 7 s 11 ms [39m

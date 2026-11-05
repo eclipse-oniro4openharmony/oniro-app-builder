@@ -246,7 +246,10 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `buildHap` | `(BuildHapOptions) => Promise<BuildHapResult>` | High-level orchestration: ensure deps → `hvigorw` → discover built HAPs. The call most consumers want. Throws `SdkNotInstalledError` (with the `version` to install) up front when an OpenHarmony project's SDK is missing; `diagnoseBuildFailure` adds a hint for system-API errors. |
+| `buildHap` | `(BuildHapOptions) => Promise<BuildHapResult>` | High-level orchestration: ensure deps → `hvigorw` → discover built HAPs. Throws `SdkNotInstalledError` (with the `version` to install) up front when an OpenHarmony project's SDK is missing, and `BuildFailedError { exitCode, failedTask, diagnostics, summary, rawTail, hint }` when ohpm or hvigor fails. The result carries the build's warnings as `diagnostics`. |
+| `buildWithDiagnostics` | `(BuildHapOptions) => Promise<BuildReport>` | `buildHap` that returns `ok: false` with the diagnostics instead of throwing for a failed build or a missing SDK (`missingSdk`). Still throws when the build cannot run at all. The shape `build --json` prints. |
+| `parseBuildOutput` | `(output, { projectDir? }) => ParsedBuildOutput` | Pure parser of hvigor output: ArkTS, hvigor, native (clang, lld) and ohpm errors as `BuildDiagnostic { severity, source, code, rule, message, file, line, column, task }`, de-duplicated, plus `failedTask` and hvigor's `COMPILE RESULT` counts. |
+| `sdkTooOldDiagnostic` / `missingSdkSymbols` | — | The `sdk` diagnostic naming the installed API level that declares the kit symbols a build could not find. `diagnoseBuildFailure` gives the hint for other causes (system APIs, an SDK path hvigor cannot find). |
 | `runHvigorw` | `(RunHvigorwOptions) => Promise<RunHvigorwResult>` | Raw single `hvigorw` spawn. Parallel by default; `parallel: false` adds `--no-parallel`. |
 | `buildHvigorwArgs` | `(opts) => string[]` | Pure argv builder (unit-testable). |
 | `discoverHaps` | `(DiscoverHapsOptions) => Promise<Record<string, ModuleHaps>>` | Group `*-signed`/`*-unsigned` HAPs by module, newest first. |

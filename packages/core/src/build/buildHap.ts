@@ -1,25 +1,33 @@
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger, scopedLogger } from '../ports/logger.js';
-import { OniroError } from '../ports/errors.js';
+import { CommandFailedError, OniroError, SdkNotInstalledError } from '../ports/errors.js';
 import { runHvigorw } from './runHvigorw.js';
 import { ensureOhModules } from './ohpm.js';
 import { discoverHaps, type ModuleHaps } from './discoverHaps.js';
-import { toLongPath } from '../sdk/paths.js';
-import { findMissingProjectSdk } from '../sdk/detectProjectSdk.js';
+import { getOhosBaseSdkHome, toLongPath } from '../sdk/paths.js';
+import { detectProjectSdkVersion, findMissingProjectSdk } from '../sdk/detectProjectSdk.js';
 import { OHOS_DAILY_BUILDS_URL } from '../sdk/constants.js';
 import { detectRuntimeOs } from '../harmonyos/target.js';
 import { findHarmonyOsSdk, findHarmonyOsTool } from '../harmonyos/sdk.js';
+import {
+  buildOutputTail,
+  parseBuildOutput,
+  sdkTooOldDiagnostic,
+  type BuildDiagnostic,
+} from './diagnostics.js';
 
 /** How much of the build output is kept for {@link diagnoseBuildFailure}, from the end. */
 const DIAGNOSIS_OUTPUT_LIMIT = 2_000_000;
 
 /**
  * A hint for build output whose cause the compiler errors do not name, or
- * undefined. Pure/testable.
+ * undefined. Pure/testable. A symbol missing from a kit reads as a system API
+ * unless `newerSdkHasIt`, when a newer installed SDK declares it (see
+ * {@link sdkTooOldDiagnostic}).
  */
-export function diagnoseBuildFailure(output: string): string | undefined {
-  if (/is not exported from Kit|has no exported member .*@systemapi/i.test(output)) {
+export function diagnoseBuildFailure(output: string, newerSdkHasIt = false): string | undefined {
+  if (!newerSdkHasIt && /is not exported from Kit|has no exported member .*@systemapi/i.test(output)) {
     return (
       'The project calls system APIs (`@systemapi`), which the public SDK leaves out. Build against the ' +
       `full OpenHarmony SDK: download an \`ohos-sdk-full\` archive from ${OHOS_DAILY_BUILDS_URL} and ` +
@@ -28,7 +36,9 @@ export function diagnoseBuildFailure(output: string): string | undefined {
       'needs privileged signing (`oniro-app sign --apl system_core --acls … --app-privilege-capabilities …`).'
     );
   }
-  if (/00308018|SDK path does not exist|SDK license agreement is not accepted/i.test(output)) {
+  // 00308018 is hvigor's catch-all ("Unknown Error", also around every failed
+  // native build), so it only counts when its message is about the SDK.
+  if (/SDK path does not exist|SDK license agreement is not accepted/i.test(output) || /00308018[^\n]*\n[^\n]*\bSDK\b/.test(output)) {
     return 'hvigor cannot find the SDK the project compiles against: check `oniro-app sdk list` against compileSdkVersion.';
   }
   return undefined;
@@ -52,12 +62,56 @@ export interface BuildHapOptions {
   logger?: Logger;
 }
 
+export interface BuildSummary {
+  /** Distinct error diagnostics. */
+  errors: number;
+  /** Distinct warning diagnostics. */
+  warnings: number;
+  /** hvigor's `COMPILE RESULT` error count, which can exceed `errors`. */
+  reportedErrors?: number;
+  reportedWarnings?: number;
+}
+
 export interface BuildHapResult {
   exitCode: number;
   durationMs: number;
   /** Built HAPs grouped by module folder. */
   discoveredHaps: Record<string, ModuleHaps>;
   warnings: string[];
+  /** Compiler warnings (and errors, for a failed build) parsed from the output. */
+  diagnostics: BuildDiagnostic[];
+  summary: BuildSummary;
+}
+
+/**
+ * The build ran and failed: hvigor (or the `ohpm install` before it) exited
+ * non-zero. Carries what {@link parseBuildOutput} found, so callers need not
+ * scrape the output.
+ */
+export class BuildFailedError extends OniroError {
+  constructor(
+    message: string,
+    public readonly exitCode: number,
+    public readonly diagnostics: BuildDiagnostic[],
+    public readonly summary: BuildSummary,
+    public readonly rawTail: string,
+    public readonly failedTask?: string,
+    public readonly hint?: string,
+    cause?: unknown,
+  ) {
+    super(message, cause);
+    this.name = 'BuildFailedError';
+  }
+}
+
+function summarise(diagnostics: readonly BuildDiagnostic[], parsed: { reportedErrors?: number; reportedWarnings?: number }): BuildSummary {
+  const summary: BuildSummary = {
+    errors: diagnostics.filter((d) => d.severity === 'error').length,
+    warnings: diagnostics.filter((d) => d.severity === 'warning').length,
+  };
+  if (parsed.reportedErrors !== undefined) summary.reportedErrors = parsed.reportedErrors;
+  if (parsed.reportedWarnings !== undefined) summary.reportedWarnings = parsed.reportedWarnings;
+  return summary;
 }
 
 /**
@@ -82,15 +136,37 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
   if (opts.autoInstallDeps !== false) {
     // HarmonyOS projects install dependencies with their own install's ohpm.
     const harmonySdk = isHarmonyOs ? findHarmonyOsSdk({ config: opts.config, logger: opts.logger }) : null;
-    const r = await ensureOhModules({
-      config: opts.config,
-      projectDir,
-      ohpmPath: (harmonySdk && findHarmonyOsTool(harmonySdk, 'ohpm')) ?? undefined,
-      abortSignal: opts.abortSignal,
-      onOutput: opts.onOutput,
-      logger: opts.logger,
-    });
-    if (r.installed) logger.info('ran ohpm install --all (oh_modules was missing)');
+    let ohpmOutput = '';
+    try {
+      const r = await ensureOhModules({
+        config: opts.config,
+        projectDir,
+        ohpmPath: (harmonySdk && findHarmonyOsTool(harmonySdk, 'ohpm')) ?? undefined,
+        abortSignal: opts.abortSignal,
+        onOutput: (chunk, stream) => {
+          ohpmOutput = (ohpmOutput + chunk).slice(-DIAGNOSIS_OUTPUT_LIMIT);
+          opts.onOutput?.(chunk, stream);
+        },
+        logger: opts.logger,
+      });
+      if (r.installed) logger.info('ran ohpm install --all (oh_modules was missing)');
+    } catch (err) {
+      if (!(err instanceof CommandFailedError)) throw err;
+      const parsed = parseBuildOutput(ohpmOutput || err.stderr, { projectDir });
+      const diagnostics = parsed.diagnostics.length
+        ? parsed.diagnostics
+        : [{ severity: 'error' as const, source: 'ohpm' as const, message: err.message.split('\n')[0]! }];
+      throw new BuildFailedError(
+        err.message,
+        err.exitCode,
+        diagnostics,
+        summarise(diagnostics, parsed),
+        buildOutputTail(ohpmOutput || err.stderr),
+        'ohpm install --all',
+        undefined,
+        err,
+      );
+    }
   }
 
   let output = '';
@@ -112,9 +188,26 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
       logger: opts.logger,
     }));
   } catch (err) {
-    const hint = diagnoseBuildFailure(output);
-    if (hint && err instanceof OniroError) throw new OniroError(`${err.message}\n${hint}`, err);
-    throw err;
+    // Not run at all (cancelled, hvigorw missing, not a project): no build output to read.
+    if (!(err instanceof OniroError) || !/^hvigorw exited with code (\d+)/.test(err.message)) throw err;
+    const exitCode = Number(/code (\d+)/.exec(err.message)![1]);
+    const parsed = parseBuildOutput(output, { projectDir });
+    const diagnostics = [...parsed.diagnostics];
+    const tooOld = isHarmonyOs
+      ? null
+      : sdkTooOldDiagnostic(diagnostics, getOhosBaseSdkHome(opts.config), detectProjectSdkVersion(projectDir));
+    if (tooOld) diagnostics.push(tooOld);
+    const hint = tooOld?.message ?? diagnoseBuildFailure(output);
+    throw new BuildFailedError(
+      hint ? `${err.message}\n${hint}` : err.message,
+      exitCode,
+      diagnostics,
+      summarise(diagnostics, parsed),
+      buildOutputTail(output),
+      parsed.failedTask,
+      hint,
+      err,
+    );
   }
 
   const discoveredHaps = await discoverHaps({ projectDir });
@@ -129,5 +222,80 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
     );
   }
 
-  return { exitCode, durationMs: Date.now() - start, discoveredHaps, warnings };
+  const parsed = parseBuildOutput(output, { projectDir });
+  return {
+    exitCode,
+    durationMs: Date.now() - start,
+    discoveredHaps,
+    warnings,
+    diagnostics: parsed.diagnostics,
+    summary: summarise(parsed.diagnostics, parsed),
+  };
+}
+
+/** What {@link buildWithDiagnostics} returns: one shape for a build that passed and one that failed. */
+export interface BuildReport {
+  ok: boolean;
+  exitCode: number;
+  durationMs: number;
+  /** The first task hvigor reported failed, or `ohpm install --all`. */
+  failedTask?: string;
+  diagnostics: BuildDiagnostic[];
+  summary: BuildSummary;
+  /** Built HAPs grouped by module folder; empty when the build failed. */
+  discoveredHaps: Record<string, ModuleHaps>;
+  warnings: string[];
+  /** The error message the build failed with (what `oniro-app build` prints). */
+  error?: string;
+  /** The SDK the project compiles against is not installed: install it and build again. */
+  missingSdk?: { api: string; version?: string; expectedPath: string };
+  /** The last 200 lines of build output, colour codes removed. Empty for a successful build. */
+  rawTail: string;
+}
+
+/**
+ * {@link buildHap}, but a build that fails returns `ok: false` with the parsed
+ * diagnostics instead of throwing, as does a project whose SDK is not installed
+ * (one `sdk` diagnostic, plus `missingSdk`). Errors that mean the build could not
+ * run at all (no command-line tools, not a project, cancelled) still throw.
+ */
+export async function buildWithDiagnostics(opts: BuildHapOptions): Promise<BuildReport> {
+  const start = Date.now();
+  try {
+    const r = await buildHap(opts);
+    return { ok: true, ...r, rawTail: '' };
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    if (err instanceof BuildFailedError) {
+      const report: BuildReport = {
+        ok: false,
+        exitCode: err.exitCode,
+        durationMs,
+        diagnostics: err.diagnostics,
+        summary: err.summary,
+        discoveredHaps: {},
+        warnings: [],
+        error: err.message,
+        rawTail: err.rawTail,
+      };
+      if (err.failedTask) report.failedTask = err.failedTask;
+      return report;
+    }
+    if (err instanceof SdkNotInstalledError) {
+      const diagnostic: BuildDiagnostic = { severity: 'error', source: 'sdk', api: err.api, message: err.message };
+      return {
+        ok: false,
+        exitCode: 1,
+        durationMs,
+        diagnostics: [diagnostic],
+        summary: { errors: 1, warnings: 0 },
+        discoveredHaps: {},
+        warnings: [],
+        error: err.message,
+        missingSdk: { api: err.api, expectedPath: err.expectedPath, ...(err.version ? { version: err.version } : {}) },
+        rawTail: '',
+      };
+    }
+    throw err;
+  }
 }
