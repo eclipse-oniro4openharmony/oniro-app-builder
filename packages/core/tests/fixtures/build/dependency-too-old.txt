@@ -1,0 +1,24 @@
+> hvigor [91mERROR: Failed :entry:default@CompileArkTS... [39m
+> hvigor [91mERROR: ArkTS Compiler Error
+[31m1 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Property 'isCapsLockOn' does not exist on type 'KeyEvent'. At File: /work/App/oh_modules/.ohpm/@demo+caps@m4xsxjf0vpktvo3vhuvwtqqbwyl8otka+cixyjfwe6w=/oh_modules/@demo/caps/src/main/ets/Caps.ets:2:12
+[39m
+[39m
+[31mCOMPILE RESULT:FAIL {ERROR:2}[39m
+
+[31m* Try:
+> Run with --debug option to get more log output.
+[39m
+> hvigor [91mERROR: Error: ArkTS Compiler Error
+[31m1 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Property 'isCapsLockOn' does not exist on type 'KeyEvent'. At File: /work/App/oh_modules/.ohpm/@demo+caps@m4xsxjf0vpktvo3vhuvwtqqbwyl8otka+cixyjfwe6w=/oh_modules/@demo/caps/src/main/ets/Caps.ets:2:12
+[39m
+[39m
+[31mCOMPILE RESULT:FAIL {ERROR:2}[39m
+    at runArkPack (/home/francesco/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/arkts-pack.js:1:5076)
+ArkTSCompilerError: ArkTS Compiler Error
+    at throwArkTsCompilerError (/home/francesco/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/data/compose-error.js:1:423)
+    at throwErrorIfHasErrorInfo (/home/francesco/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/plugins/common-plugin.js:1:4923)
+    at Object.handler (/home/francesco/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-compose/dist/src/plugins/common-plugin.js:1:3018)
+    at /home/francesco/command-line-tools/hvigor/hvigor-ohos-plugin/node_modules/@ohos/hvigor-arkts-base/node_modules/rollup/dist/shared/rollup.js:27864:40[39m
+> hvigor [91mERROR: BUILD FAILED in 6 s 659 ms [39m

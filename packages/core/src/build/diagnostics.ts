@@ -377,3 +377,59 @@ export function sdkTooOldDiagnostic(
       'or stop using the newer API.',
   };
 }
+
+/** Compiler messages that a symbol an SDK lacks produces: a missing property or name. */
+const MISSING_API_RE = /\bProperty '[^']+' does not exist on type\b|\bCannot find name '[^']+'/;
+const OH_MODULES_RE = /(?:^|[\\/])oh_modules[\\/]/;
+
+/**
+ * The package an `oh_modules/` path belongs to, e.g. `@ohos/flutter_ohos` for
+ * `oh_modules/.ohpm/@ohos+flutter_ohos@1.0.0/oh_modules/@ohos/flutter_ohos/src/…`.
+ */
+export function ohModulesPackage(file: string): string | undefined {
+  const parts = file.split(/[\\/]/);
+  const at = parts.lastIndexOf('oh_modules');
+  if (at < 0) return undefined;
+  const first = parts[at + 1];
+  if (!first) return undefined;
+  if (first === '.ohpm') {
+    // `.ohpm/@scope+name@version…`: the store entry, when no nested oh_modules follows.
+    const entry = parts[at + 2];
+    const m = entry ? /^(@?[^@]+)@/.exec(entry) : null;
+    return m ? m[1]!.replace('+', '/') : undefined;
+  }
+  return first.startsWith('@') && parts[at + 2] ? `${first}/${parts[at + 2]}` : first;
+}
+
+/**
+ * A hint when the ArkTS errors are missing properties or names inside
+ * `oh_modules/`: a dependency calling an API newer than the SDK the build used
+ * (#22). Message-level only; it does not read the dependencies. `sdkLabel` names
+ * that SDK (`HarmonyOS 5.1.0 (API 18) at …`) and `remedy` how to get a newer one.
+ * Null when no such error is there.
+ */
+export function dependencyApiDiagnostic(
+  diagnostics: readonly BuildDiagnostic[],
+  sdkLabel: string | undefined,
+  remedy: string,
+): BuildDiagnostic | null {
+  const hits = diagnostics.filter(
+    (d) =>
+      d.severity === 'error' &&
+      d.source === 'arkts' &&
+      !!d.file &&
+      OH_MODULES_RE.test(d.file) &&
+      MISSING_API_RE.test(d.message),
+  );
+  if (hits.length === 0) return null;
+  const packages = [...new Set(hits.map((d) => ohModulesPackage(d.file!)).filter((p): p is string => !!p))];
+  const where = packages.length ? `dependencies (${packages.join(', ')})` : 'dependencies under oh_modules/';
+  return {
+    severity: 'warning',
+    source: 'sdk',
+    message:
+      `${hits.length} error${hits.length === 1 ? '' : 's'} in ${where} report${hits.length === 1 ? 's' : ''} a ` +
+      `property or name the SDK does not declare${sdkLabel ? `; the build used ${sdkLabel}` : ''}. A dependency ` +
+      `may need a newer API level: ${remedy}`,
+  };
+}
