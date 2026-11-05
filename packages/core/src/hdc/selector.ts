@@ -236,6 +236,9 @@ export function parseSelector(input: string): ElementSelector {
   return parseDsl(input);
 }
 
+/** Each `/=` clause's compiled pattern, so matching a large layout compiles it once. */
+const clauseRegex = new WeakMap<SelectorClause, RegExp>();
+
 /** Whether one clause holds on a node. String comparisons are case-sensitive. */
 export function clauseMatches(n: FlatLayoutNode, clause: SelectorClause): boolean {
   const v = selectorAttribute(n, clause.key);
@@ -249,8 +252,11 @@ export function clauseMatches(n: FlatLayoutNode, clause: SelectorClause): boolea
       return v.startsWith(clause.value);
     case '$=':
       return v.endsWith(clause.value);
-    case '/=':
-      return new RegExp(clause.value, clause.flags).test(v);
+    case '/=': {
+      let re = clauseRegex.get(clause);
+      if (!re) clauseRegex.set(clause, (re = new RegExp(clause.value, clause.flags)));
+      return re.test(v);
+    }
   }
 }
 

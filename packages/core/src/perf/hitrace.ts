@@ -76,7 +76,11 @@ export interface TraceModel {
   markerCount: number;
   /** `sched_switch` events seen (0: the sched category was off). */
   schedSwitchCount: number;
-  /** CPU time of main threads (tid == tgid), ms, from sched_switch. Empty without sched data. */
+  /**
+   * CPU time per thread id, ms, from sched_switch (empty without sched data). A
+   * process's main thread has tid == pid, so its entry is `get(pid)`; this needs no
+   * tgid column.
+   */
   mainThreadCpuMs: Map<number, number>;
   /**
    * RenderService surface name → the pid that owns it, from
@@ -172,7 +176,7 @@ export class TraceParser {
     this.bound(ts);
     if (fn === 'sched_switch') {
       this.model.schedSwitchCount++;
-      this.schedSwitch(tid, tgidCol, ts, body);
+      this.schedSwitch(tid, ts, body);
       return;
     }
     if (fn !== 'tracing_mark_write') return;
@@ -186,13 +190,11 @@ export class TraceParser {
     if (Number.isNaN(this.model.endMs) || ts > this.model.endMs) this.model.endMs = ts;
   }
 
-  private schedSwitch(prevTid: number, prevTgid: number | undefined, ts: number, body: string): void {
+  private schedSwitch(prevTid: number, ts: number, body: string): void {
     const next = /next_pid=(\d+)/.exec(body);
-    if (prevTgid !== undefined && prevTid === prevTgid) {
-      const since = this.switchedIn.get(prevTid);
-      if (since !== undefined) {
-        this.model.mainThreadCpuMs.set(prevTid, (this.model.mainThreadCpuMs.get(prevTid) ?? 0) + (ts - since));
-      }
+    const since = this.switchedIn.get(prevTid);
+    if (since !== undefined) {
+      this.model.mainThreadCpuMs.set(prevTid, (this.model.mainThreadCpuMs.get(prevTid) ?? 0) + (ts - since));
     }
     this.switchedIn.delete(prevTid);
     if (next) this.switchedIn.set(Number(next[1]), ts);
