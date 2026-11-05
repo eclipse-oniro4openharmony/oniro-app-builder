@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { staticConfig } from '../src/ports/config.js';
 import { InsufficientSpaceError } from '../src/ports/errors.js';
-import { installCmdTools } from '../src/cmdTools/install.js';
+import { describeReplacement, installCmdTools, type CmdToolsInfo } from '../src/cmdTools/install.js';
 import { movePath } from '../src/sdk/move.js';
 import { makeStoredZip } from './_helpers/storedZip.js';
 
@@ -140,5 +140,83 @@ describe('installCmdTools', () => {
     fs.mkdirSync(path.join(target, '.oniro-previous-def456'), { recursive: true });
     await installCmdTools({ config, localZipPath: v2Zip });
     expect(snapshot(target)).toEqual(V2);
+  });
+
+  describe('reporting the version change (#25)', () => {
+    /** A HarmonyOS tools release as version.txt and sdk-pkg.json describe it. */
+    const release = (version: string, hvigor: string, platform: string, api: string): Record<string, string> => ({
+      'bin/ohpm': 'ohpm',
+      'version.txt': `# Command Line Tools(linux-x64)\n# Version: ${version}\n\nhvigor       : ${hvigor}\napiVersion   : ${api}\n`,
+      'sdk/default/hms/.keep': '',
+      'sdk/default/sdk-pkg.json': JSON.stringify({
+        data: { displayName: `HarmonyOS ${platform}`, platformVersion: platform, apiVersion: api },
+      }),
+    });
+    const logs = (): { lines: string[]; logger: { debug(): void; info(m: string): void; warn(m: string): void; error(m: string): void } } => {
+      const lines: string[] = [];
+      return { lines, logger: { debug() {}, info: (m) => lines.push(m), warn: (m) => lines.push(m), error: (m) => lines.push(m) } };
+    };
+
+    it('says what replaces what before the old tools go, and returns both', async () => {
+      await installCmdTools({ config, localZipPath: toolsZip(dir, 'old.zip', release('5.1.0.840', '5.18.5', '5.1.0', '18')) });
+      const { lines, logger } = logs();
+      const result = await installCmdTools({
+        config,
+        logger,
+        localZipPath: toolsZip(dir, 'new.zip', release('6.1.1.280', '6.24.2', '6.1.1', '24')),
+      });
+      expect(lines).toContain(
+        'Replacing command-line tools 5.1.0.840 (HarmonyOS 5.1.0, API 18, hvigor 5.18.5) with ' +
+          '6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2).',
+      );
+      expect(lines.some((l) => l.startsWith('hvigor changes major version (5.18.5 -> 6.24.2)'))).toBe(true);
+      expect(result.path).toBe(target);
+      expect(result.previous).toMatchObject({ version: '5.1.0.840', flavour: 'HarmonyOS', sdk: { apiVersion: '18' } });
+      expect(result.installed).toMatchObject({
+        version: '6.1.1.280',
+        flavour: 'HarmonyOS',
+        sdk: { path: path.join(target, 'sdk'), displayName: 'HarmonyOS 6.1.1', apiVersion: '24' },
+        tools: { hvigor: '6.24.2' },
+      });
+    });
+
+    it('reports no previous install for a fresh one', async () => {
+      const { lines, logger } = logs();
+      const result = await installCmdTools({ config, logger, localZipPath: v2Zip });
+      expect(result.previous).toBeUndefined();
+      expect(lines.some((l) => l.startsWith('Replacing'))).toBe(false);
+    });
+  });
+});
+
+describe('describeReplacement', () => {
+  const info = (version: string, hvigor: string, api: string): CmdToolsInfo => ({
+    version,
+    flavour: 'HarmonyOS',
+    sdk: { path: '/t/sdk', displayName: `HarmonyOS ${version.split('.').slice(0, 3).join('.')}`, apiVersion: api },
+    tools: { hvigor },
+  });
+
+  it('flags a downgrade, and does not mention hvigor within one major version', () => {
+    const lines = describeReplacement(info('6.1.1.280', '6.24.2', '24'), info('6.0.0.868', '6.20.0', '20'));
+    expect(lines[0]).toBe(
+      'Replacing command-line tools 6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2) with ' +
+        '6.0.0.868 (HarmonyOS 6.0.0, API 20, hvigor 6.20.0).',
+    );
+    expect(lines).toContain('6.0.0.868 is older than the 6.1.1.280 it replaces.');
+    expect(lines.some((l) => l.startsWith('hvigor'))).toBe(false);
+    expect(lines.some((l) => l.includes('--from-zip <zip> --force'))).toBe(true);
+  });
+
+  it('calls the same release a reinstall', () => {
+    expect(describeReplacement(info('6.1.1.280', '6.24.2', '24'), info('6.1.1.280', '6.24.2', '24'))).toEqual([
+      'Reinstalling command-line tools 6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2).',
+    ]);
+  });
+
+  it('names a partial install it replaces as of unknown version', () => {
+    expect(describeReplacement({ flavour: 'OpenHarmony', tools: {} }, info('6.1.1.280', '6.24.2', '24'))[0]).toBe(
+      'Replacing command-line tools unknown version with 6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2).',
+    );
   });
 });

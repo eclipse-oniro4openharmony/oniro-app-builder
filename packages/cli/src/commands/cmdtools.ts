@@ -3,7 +3,6 @@ import {
   describeCmdTools,
   getCmdToolsStatus,
   installCmdTools,
-  isCmdToolsInstalled,
   removeCmdTools,
   type CmdToolsSdk,
 } from '@oniroproject/core';
@@ -38,13 +37,17 @@ export function registerCmdToolsCommand(program: Command): void {
     )
     .action(async (opts: { fromZip?: string; force?: boolean; tmpDir?: string }) => {
       const { config, logger, progress } = getRuntime();
-      if (isCmdToolsInstalled(config) && !opts.force) {
-        logger.info('Command-line tools already installed; pass --force to reinstall.');
+      const current = getCmdToolsStatus(config);
+      if (current.installed && !opts.force) {
+        logger.info(
+          `Command-line tools ${describeCmdTools(current)} already installed at ${current.path}; ` +
+            'pass --force to replace them.',
+        );
         return;
       }
       logger.info('Installing command-line tools...');
-      await installCmdTools({ config, progress, logger, localZipPath: opts.fromZip, tmpDir: opts.tmpDir });
-      logger.info('Command-line tools installed.');
+      const result = await installCmdTools({ config, progress, logger, localZipPath: opts.fromZip, tmpDir: opts.tmpDir });
+      logger.info(`Command-line tools ${describeCmdTools(result.installed)} installed at ${result.path}.`);
     });
 
   cmdtools
