@@ -145,6 +145,7 @@ case "$1" in
       'stat '*) cat "$R/rec/stat.txt" ;;
       hilog*) cat "$R/rec/touches.hilog" ;;
       'param get const.ohos.apiversion') echo 26 ;;
+      *snapshot_display*) echo "__ONIRO_SNAPSHOT_OK__" ;;
       *) : ;;
     esac
     exit 0 ;;
