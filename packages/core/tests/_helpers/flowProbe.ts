@@ -127,7 +127,7 @@ case "$1" in
       'uitest dumpLayout'*)
         echo $(( $(cat "$R/dumpcount") + 1 )) > "$R/dumpcount"
         echo "DumpLayout saved to:/data/local/tmp/fake_layout.json" ;;
-      'hidumper -s 10 -a screen') echo "render resolution=1080x2400" ;;
+      'hidumper -s 10 -a screen'*) echo "render resolution=1080x2400" ;;
       'hidumper -s 3301'*) echo "Current State: AWAKE" ;;
       hidumper*) : ;;
       'uitest uiInput'*)
