@@ -387,6 +387,35 @@ The SDK is `--sdk <dir>`, else `<sdk home>/<--api>`, else the one the project's 
 | `--no-other-sdks` | `show` only: on a miss, do not look in the other installed SDKs. |
 | `--json` | `search`: `sdk` (`dir`, `api`, `version`, `source`), `query`, `total`, `hits` (the fields above as `name`, `qualifiedName`, `kind`, `kit`, `import`, `global`, `module`, `since`, `sinceText`, `deprecated`, `deprecatedSince`, `useInstead`, `syscap`, `systemApi`, `file`, `path`, `line`, `signature`, `doc`, `overloads`, `score`). `show`: `sdk`, `symbol`, `found`, `entries`, and on a miss `alsoIn` (`[{ api, since }]`) and `suggestions`. |
 
+#### `docs sync` / `docs search` / `docs show` — read the OpenHarmony documentation
+
+The application-development documentation of the OpenHarmony release matching the SDK (`en/application-dev` of [gitcode.com/openharmony/docs](https://gitcode.com/openharmony/docs)): usage guides (ArkUI components, navigation, state management, data storage, abilities), kit API prose, the business error codes each kit throws and platform behaviour (lifecycle, permissions, threads). `api search` says whether a symbol exists and with what signature; this says how it is used.
+
+- `docs sync` clones the release's tree once: a partial, sparse clone without figures, about 100 MB (a plain clone of the tree is 2 GB), under `<sdkRootDir>/docs/<branch>` (`ONIRO_DOCS_DIR`). The branch comes from the SDK's version (`6.1.0.31` → `OpenHarmony-6.1-Release`, `5.1.0.107` → `OpenHarmony-5.1.0-Release`) or `--ref`. A second `sync` brings the clone up to date. Needs `git`.
+- `docs search <query...>` ranks documents that contain every word (any word when none does) by where the words occur: title, headings, path, body; a camelCase or dotted identifier also matches by its parts (`NavPathStack` → nav, path, stack, weighing less). A document whose title is exactly a query word, or that holds the whole query in a title or heading, ranks higher; the generated API reference a little below the guides; system-API pages and tables of contents below everything. Each hit prints the path, the title, the matching sections with their line numbers and the first line. Exits 1 when nothing matches. The index is built in memory on first use (about 3 s for 5,000 documents) and answers in milliseconds.
+- `docs show <path>` prints one document (a path `search` printed, relative to `en/application-dev`), or one section of it with `--heading` (a heading or a distinctive part of it, case-insensitive: from that heading to the next of the same or a higher level). Image lines and inline HTML are dropped; a long document is cut at `--lines` (default 250) with the list of its sections, so ask for a heading rather than the whole file. Exits 1 when the document or heading does not exist, suggesting close paths or the document's headings.
+
+```
+$ oniro-app docs search --api 23 relationalStore insert
+reference/apis-arkdata/arkts-apis-data-relationalStore-RdbStore.md  —  Interface (RdbStore)
+  sections: "insert" (line 94), "insert10+" (line 178), "insertSync12+" (line 443), …
+  Provides APIs for managing data in an RDB store.
+…
+$ oniro-app docs show --api 23 reference/apis-arkdata/errorcode-data-rdb.md --heading 14800011
+## 14800011 Database File Corrupted
+…
+```
+
+| Flag | Description |
+| --- | --- |
+| `--api <level>` / `--sdk <dir>` / `--project <dir>` | The SDK whose release picks the docs, as for `api search`. |
+| `--ref <branch>` | A docs branch or tag (`OpenHarmony-6.1-Release`, `master`) instead of the SDK-chosen one. |
+| `--limit <n>` | `search` only: at most n hits (default 8). |
+| `--section <dir>` | `search` only: only documents under this subtree (`ui`, `database`, `reference/errorcodes`, `application-models`). |
+| `--heading <text>` | `show` only: only that section. |
+| `--lines <n>` | `show` only: at most n lines (default 250). |
+| `--json` | `sync`: `docs` (`ref`, `dir`, `tree`, `sdk`), `files`, `updated`, `commit`. `search`: `docs`, `query`, `terms`, `total`, `hits` (`path`, `title`, `score`, `headings` `[{ line, text }]`, `snippet`). `show`: `docs`, `found`, `path`, `text`, `truncated`, `lines`, `headings`; on a miss `error` and `suggestions`. |
+
 #### `lint` — run the OpenHarmony codelinter
 
 `lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0, although codelinter itself exits 1 for them. When codelinter says its report is incomplete, for example because the command-line tools' flavour (see `cmdtools status`) does not match the project's `runtimeOS`, it exits 2: it skipped checks, so a clean report is not evidence of clean code. Its notices, and a hint when the flavour is the cause, go to stderr.
@@ -1005,10 +1034,12 @@ Tools (the inputs are the command's flags in camelCase, with the same defaults; 
 | `screens` | `screens --json` | `project` |
 | `api_search` | `api search --json` | `query` (required), `kit`, `kind[]`, `lang`, `limit`, `deprecated`, `systemapi`, `api`, `sdk`, `project`, `rebuild` |
 | `api_show` | `api show --json` | `symbol` (required), `kit`, `otherSdks`, `api`, `sdk`, `project`, `rebuild` |
+| `docs_search` | `docs search --json` | `query` (required), `limit`, `section`, `api`, `sdk`, `ref`, `project` |
+| `docs_show` | `docs show --json` | `path` (required), `heading`, `maxLines`, `api`, `sdk`, `ref`, `project` |
 | `doctor` | `doctor --json` | `project`, `fix`, `device` (boolean, as `--no-device`), `serial`, `arktsCheck` |
 | `devices` | `devices --json` | `long`; the array comes wrapped as `{ "devices": [...] }` |
 
-- **Errors.** A tool result has `isError: true` when the command would exit non-zero: a failed build, `check_arkts` with an error or one that could not run, a failed or incomplete test run, a failed smoke check, a `perf_trace` threshold exceeded or capture failed, an `api_show` miss or an `api_search` without hits, a failing `doctor` check, or a tool that threw (no device, a timeout, bad arguments). The JSON is still there to read. `logs_crash` is not an error when there was no crash; check `crashed`. JSON-RPC errors are kept for protocol problems (an unknown tool or method).
+- **Errors.** A tool result has `isError: true` when the command would exit non-zero: a failed build, `check_arkts` with an error or one that could not run, a failed or incomplete test run, a failed smoke check, a `perf_trace` threshold exceeded or capture failed, an `api_show` miss or an `api_search` without hits, a `docs_search` without hits, a `docs_show` of a missing document or heading, or either when the release's docs are not synced (the text says to run `docs sync`), a failing `doctor` check, or a tool that threw (no device, a timeout, bad arguments). The JSON is still there to read. `logs_crash` is not an error when there was no crash; check `crashed`. JSON-RPC errors are kept for protocol problems (an unknown tool or method).
 - **Images.** `screenshot` returns the capture as an `image/jpeg` content block downscaled to `maxDim` (with `grid`, the 10x10 coordinate grid), plus its dimensions as JSON; `crop` and `target*` return a full-resolution crop, `contactSheet` the tiled burst, `diff` the comparison and the current screen. `output` also writes the image to a file (with `diff`, the full-resolution capture, usable as a later baseline).
 - **Layouts.** `dump_layout` without `flat` or `summary` returns the whole tree; `flat` (text) is the cheap way to read a screen. `output` saves what is returned, so `{ "output": "before.json" }` then `{ "diff": "before.json" }` compares two moments.
 

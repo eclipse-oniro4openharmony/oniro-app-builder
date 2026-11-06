@@ -392,6 +392,17 @@ Adapted in part from deveco-cli's `faultlog/` module (MIT); see `src/faultlog/NO
 | `resolveApiSdk` / `installedApiLevels` / `getApiIndexCacheDir` | — | The SDK to read (`sdkDir`, else `<sdk home>/<api>`, else the enclosing project's `compileSdkVersion`, else the newest installed); the installed API levels; the `cacheDir` config key (default `~/.oniro/cache`). |
 | `serializeApiIndex` / `deserializeApiIndex` / `apiIndexCachePath` / `parseDocBlock` / `mergeDocBlocks` | — | The compact stored form, the cache file of an SDK, and the doc-comment tag reader. |
 
+### Documentation search
+
+| Export | Signature | Description |
+| --- | --- | --- |
+| `syncDocs` | `(SyncDocsOptions) => Promise<SyncDocsResult>` | Clone or update one release of the OpenHarmony documentation (`oniro-app docs sync`): a partial (`--filter=blob:none`), depth-1, sparse clone of `en/application-dev` without its figures (about 100 MB), or on an existing clone a fetch of the branch head and a reset to it. Needs `git`. Returns `dir`, `ref`, `files`, `updated`, `commit`. |
+| `docsRefFor` / `readSdkRelease` | `({ api?, version? }) => string` / `(sdkDir) => { api?, version? }` | The release branch for an SDK: from its version (`6.1.0.31` → `OpenHarmony-6.1-Release`, `5.1.0.107` → `OpenHarmony-5.1.0-Release`), else from the API level (18 → 5.1.0, 20 → 6.0, 23 → 6.1, 26 → 7.0), else `master`; and the SDK's `{ api, version }` from `ets/oh-uni-package.json`. |
+| `getDocsRootDir` / `docsDirFor` / `docsTree` | — | The `docsDir` config key (default `<sdkRootDir>/docs`); `<docs root>/<ref>`; the `en/application-dev` tree of a clone, or null when it is not synced. |
+| `DocsIndex.load` | `(tree) => DocsIndex` | The index of a tree, built on the first call of a process (titles, headings, an inverted word index over the words of each file and its path; identifiers also by their dotted parts and without a trailing API-level suffix) and kept; `DocsIndex.forget(tree)` after a sync. |
+| `DocsIndex#search` | `(query, { limit?, section? }) => DocSearchResult` | Documents containing every query word (any when none does), scored by where the words occur (title, headings, path, body); the parts of camelCase and dotted identifiers count less and are not required; exact-title and whole-phrase bonuses; the API reference slightly, system-API pages and tables of contents strongly demoted. Each hit: `path`, `title`, `score`, the matching `headings` `[{ line, text }]`, `snippet`. |
+| `DocsIndex#show` | `(path, { heading?, maxLines? }) => DocShowResult` | One document or one section (from the heading that matches, exactly else by substring, to the next of the same or a higher level), image lines and inline HTML dropped, cut at `maxLines` (default 250); `found: false` with `suggestions` (close paths, or the headings) on a miss. Paths stay inside the tree. |
+
 ### Tests
 
 | Export | Signature | Description |

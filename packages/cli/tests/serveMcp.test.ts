@@ -119,7 +119,7 @@ describe('MCP protocol', () => {
     const tools = r.result?.tools as Array<{ name: string; inputSchema: { type: string }; annotations: object; description: string }>;
     expect(tools.map((t) => t.name)).toEqual([
       'build', 'check_arkts', 'test', 'apply', 'launch', 'dump_layout', 'input', 'screenshot', 'wait',
-      'logs_crash', 'perf_trace', 'screens', 'api_search', 'api_show', 'doctor', 'devices',
+      'logs_crash', 'perf_trace', 'screens', 'api_search', 'api_show', 'docs_search', 'docs_show', 'doctor', 'devices',
     ]);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');

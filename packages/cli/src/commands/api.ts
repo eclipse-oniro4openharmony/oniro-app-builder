@@ -78,7 +78,8 @@ function parseKinds(values: string[] | undefined): ApiSymbolKind[] | undefined {
   return out;
 }
 
-function selectSdk(opts: SdkOpts): ApiSdkSelection {
+/** The SDK `--sdk`, `--api` or the project names (shared with `docs`). */
+export function selectSdk(opts: SdkOpts): ApiSdkSelection {
   const { config, logger } = getRuntime();
   const selection = resolveApiSdk(config, {
     sdkDir: opts.sdk,

@@ -25,6 +25,7 @@ import { registerInputCommand } from '../commands/input.js';
 import { registerLogsCommand } from '../commands/logs.js';
 import { registerHdcCommand } from '../commands/hdc.js';
 import { registerApiCommand } from '../commands/api.js';
+import { registerDocsCommand } from '../commands/docs.js';
 import { registerServeCommand } from '../commands/serve.js';
 import { registerRecordCommand } from '../commands/record.js';
 import { registerReplayCommand } from '../commands/replay.js';
@@ -72,6 +73,7 @@ function buildProgram(): Command {
   registerDoctorCommand(program);
   registerScreensCommand(program);
   registerApiCommand(program);
+  registerDocsCommand(program);
   registerTestCommand(program);
   registerInputCommand(program);
   registerRecordCommand(program);
