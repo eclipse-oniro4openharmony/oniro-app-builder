@@ -1,5 +1,35 @@
 # @oniroproject/oniro-app
 
+## 0.20.0
+
+### Minor Changes
+
+- 4918af9: New `store` command group: publish apps to the Oniro App Store from a terminal or CI job.
+
+  - `store login --token <oas_…>` checks an API token created on the store website and saves it
+    (`~/.oniro/store/credentials.json`, mode 0600, keyed by store URL); `store logout` and
+    `store whoami` manage it. `ONIRO_STORE_TOKEN` wins over the saved token, and `ONIRO_STORE_URL`
+    or `--url` picks the store (default `https://store.iparo.app`).
+  - `store publish <file.hap|file.app>` reads the bundle name from the package, creates the listing
+    on the first publish (`--name`, `--description`, `--category`, `--tags`, `--icon`, `--vendor`,
+    `--source-url`) and adds a new version afterwards.
+  - `store register-release --repo owner/name --tag v1.2.0 --asset app.app` publishes a package
+    that stays hosted on a public GitHub release; its sha256 comes from GitHub's digest, a local
+    `--file`, or a download.
+  - Requests honour `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`, and wait up to 15 minutes for the
+    store to check a large package. A token with stray spaces or line breaks is refused without
+    being echoed.
+
+### Patch Changes
+
+- 11043ad: `screenshot`: when every capture attempt fails, the error no longer blames a
+  2 s RenderService stall. It says RenderService returned no image each time and
+  shows how to read the reason from the device log (`hilog`). The end-to-end CI
+  failure this hint was written for was in fact an emulator image bug (fixed in
+  Oniro Emulator v7.0.1).
+- Updated dependencies [11043ad]
+  - @oniroproject/core@0.18.3
+
 ## 0.19.2
 
 ### Patch Changes
