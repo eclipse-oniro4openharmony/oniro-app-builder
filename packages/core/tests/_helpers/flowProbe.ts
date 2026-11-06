@@ -85,6 +85,8 @@ export interface FakeDevice {
   queue(...raws: RawLayoutNode[]): void;
   /** The `uitest uiInput …` commands sent so far. */
   inputs(): string[];
+  /** How many `uitest dumpLayout` the device has served. */
+  dumps(): number;
   /** Make `hdc list targets` report no device. */
   disconnect(): void;
   cleanup(): void;
@@ -163,6 +165,7 @@ exit 0
       for (const raw of raws) write(path.join(root, 'queue', String(++queued)), raw);
     },
     inputs: () => fs.readFileSync(path.join(root, 'inputs.log'), 'utf8').split('\n').filter(Boolean),
+    dumps: () => Number(fs.readFileSync(path.join(root, 'dumpcount'), 'utf8').trim()),
     disconnect: () => fs.writeFileSync(path.join(root, 'targets.txt'), '[Empty]\n'),
     cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
   };

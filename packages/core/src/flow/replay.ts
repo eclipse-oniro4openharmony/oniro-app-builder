@@ -9,6 +9,7 @@ import { selectDevice } from '../hdc/devices.js';
 import {
   describeLayoutNode,
   dumpLayout,
+  findVisibleMatch,
   flattenLayout,
   listLayoutWindows,
   TargetNotFoundError,
@@ -16,7 +17,7 @@ import {
   type FlatLayoutNode,
 } from '../hdc/dump.js';
 import { clauseMatches, parseSelector, type ElementSelector } from '../hdc/selector.js';
-import { performInput, selectableTree, waitForTarget, type PerformInputOptions } from '../hdc/uiActions.js';
+import { performInput, selectableTree, waitForTargetLayout, type PerformInputOptions } from '../hdc/uiActions.js';
 import { takeScreenshot } from '../hdc/screen.js';
 import { forceStop, launchApp } from '../hdc/app.js';
 import { holdScreenOn, isLockScreenShown, wakeAndUnlock } from '../hdc/power.js';
@@ -107,6 +108,13 @@ export interface ReplayFlowOptions {
   stepTimeoutMs?: number;
   /** Poll interval of those waits, ms. Default 500. */
   pollMs?: number;
+  /**
+   * A layout dumped within this many ms after an action (or the launch) may show a screen
+   * still in transition, so before a step acts on an element found in such a dump the
+   * screen is dumped again and the element must be the same node at the same place.
+   * Default 1500; 0 trusts every dump.
+   */
+  settleMs?: number;
   /** Save a screenshot after every step here (`step-<i>.jpeg`); the divergence screenshot goes here too. */
   screenshotsDir?: string;
   /** Act on a step's fallback point when its selector is not found, instead of diverging. */
@@ -134,6 +142,16 @@ class Divergence extends Error {
 }
 
 const MAX_ELEMENTS = 40;
+
+interface TimedLayout {
+  layout: DumpLayoutResult;
+  at: number;
+}
+
+/** The same element in two dumps: type, id, text and bounds agree. */
+function sameNode(a: FlatLayoutNode, b: FlatLayoutNode): boolean {
+  return a.type === b.type && a.id === b.id && a.text === b.text && JSON.stringify(a.b) === JSON.stringify(b.b);
+}
 
 /** Elements matching every clause of a DSL selector but one, for the divergence report. Pure. */
 export function nearMatches(tree: DumpLayoutResult['tree'], selector: ElementSelector, limit = 5): NearMatch[] {
@@ -204,6 +222,7 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
   }
   const stepTimeoutMs = opts.stepTimeoutMs ?? 10_000;
   const pollMs = opts.pollMs ?? 500;
+  const settleMs = opts.settleMs ?? 1500;
 
   let deviceSerial: string;
   try {
@@ -217,6 +236,12 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
   let restoreScreen: (() => Promise<void>) | undefined;
   let index = from;
   let stepStarted = Date.now();
+  // The last dump that shows the current screen: taken by a wait that succeeded and nothing
+  // acted since. The next step's selector is looked up in it before the screen is dumped
+  // again, and an action locates its target in it; a dump costs about a second on a phone.
+  let seen: TimedLayout | undefined;
+  let actedAt = Date.now();
+  const tree = (l: DumpLayoutResult): DumpLayoutResult['tree'] => selectableTree(l) ?? { children: [] };
   try {
     if (opts.wake !== false) {
       const screen = await wakeAndUnlock(device);
@@ -233,6 +258,7 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
       }
       await forceStop({ ...device, bundle: flow.bundle }).catch(() => undefined);
       await launchApp({ ...device, bundleName: flow.bundle, abilityName: flow.ability });
+      actedAt = Date.now();
     }
 
     for (index = from; index <= to; index++) {
@@ -246,9 +272,12 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
 
       const selector = step.selector ? parseSelector(step.selector) : undefined;
       let useFallback = !selector;
-      if (selector) {
+      // The dump that shows the step's selector: the cached one when it does, else a wait's.
+      let shows = selector && seen && !step.gone && findVisibleMatch(tree(seen.layout), selector) ? seen : undefined;
+      if (selector && !shows) {
+        seen = undefined;
         try {
-          await waitForTarget({ ...device, selector, gone: step.gone, timeoutMs, pollMs, abortSignal: opts.abortSignal });
+          shows = seen = { layout: (await waitForTargetLayout({ ...device, selector, gone: step.gone, timeoutMs, pollMs, abortSignal: opts.abortSignal })).layout, at: Date.now() };
         } catch (err) {
           if (err instanceof CancelledError) throw err;
           const pointed = step.action !== 'wait' && step.action !== 'keyEvent';
@@ -270,8 +299,33 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
         // keyEvent and inputText without a selector act on whatever has focus; the selector only gates them.
         const targeted = step.action !== 'keyEvent' && !useFallback && selector;
         const at = useFallback && step.fallback && step.action !== 'keyEvent' ? { fx: step.fallback.fx, fy: step.fallback.fy } : {};
+        // A dump taken while the screen may still be moving (within settleMs of the last action:
+        // a page being popped still shows the old page's elements) is confirmed by a second one
+        // before the step acts on it: the element must be the same node at the same place, else
+        // the newer dump is the candidate, waited for again when the element is not in it.
+        const settled = async (d: TimedLayout, sel: ElementSelector): Promise<DumpLayoutResult> => {
+          let cur = d;
+          while (cur.at - actedAt < settleMs && Date.now() - stepStarted < timeoutMs) {
+            const fresh = await dumpLayout({ ...device, detectKeyboard: true }).catch(() => undefined); // a transient hdc failure: wait again below
+            const again: TimedLayout | undefined = fresh ? { layout: fresh, at: Date.now() } : undefined;
+            const a = findVisibleMatch(tree(cur.layout), sel);
+            const b = again ? findVisibleMatch(tree(again.layout), sel) : null;
+            if (again && a && b && sameNode(a, b)) return again.layout;
+            if (again && b) { cur = again; continue; }
+            try {
+              cur = { layout: (await waitForTargetLayout({ ...device, selector: sel, timeoutMs, pollMs, abortSignal: opts.abortSignal })).layout, at: Date.now() };
+            } catch (err) {
+              if (err instanceof CancelledError) throw err;
+              throw new Divergence('not-found', `An element matching ${step.selector} was on screen, then gone before the step could act on it.`, step.selector);
+            }
+          }
+          return cur.layout;
+        };
+        const layout = targeted && shows ? await settled(shows, selector) : undefined;
+        seen = undefined; // whatever the action does, the screen is no longer what the dump showed
         try {
-          const done = await performInput({ ...device, ...stepInput(step), ...(targeted ? { target: selector } : {}), ...at });
+          const done = await performInput({ ...device, ...stepInput(step), ...(targeted ? { target: selector, layout } : {}), ...at });
+          actedAt = Date.now();
           if (done.target) result.target = describeLayoutNode(done.target);
         } catch (err) {
           if (err instanceof TargetNotFoundError) {
@@ -286,7 +340,7 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
       if (step.waitMs) await sleep(step.waitMs);
       if (step.expect) {
         try {
-          await waitForTarget({ ...device, selector: parseSelector(step.expect), timeoutMs, pollMs, abortSignal: opts.abortSignal });
+          seen = { layout: (await waitForTargetLayout({ ...device, selector: parseSelector(step.expect), timeoutMs, pollMs, abortSignal: opts.abortSignal })).layout, at: Date.now() };
         } catch (err) {
           if (err instanceof CancelledError) throw err;
           throw new Divergence(

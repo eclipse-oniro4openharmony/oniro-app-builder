@@ -42,7 +42,7 @@ describe('divergence helpers', () => {
 
 describe.skipIf(isWin)('replayFlow (stand-in hdc)', () => {
   let dev: FakeDevice;
-  const opts = () => ({ config: staticConfig({ hdcPath: dev.hdc }), wake: false, stepTimeoutMs: 400, pollMs: 20 });
+  const opts = () => ({ config: staticConfig({ hdcPath: dev.hdc }), wake: false, stepTimeoutMs: 400, pollMs: 20, settleMs: 0 });
 
   beforeEach(() => {
     dev = fakeDevice();
@@ -68,6 +68,33 @@ describe.skipIf(isWin)('replayFlow (stand-in hdc)', () => {
       'Text "Banana" at 0.500,0.339',
     ]);
     expect(fs.readdirSync(shots).sort()).toEqual(['step-00.jpeg', 'step-01.jpeg', 'step-02.jpeg']);
+    // One dump per observation, none repeated: step 0 waits (1) and acts in that dump; step 1 waits
+    // after the action (2), acts in it, its expect dumps (3); step 2 finds Banana in that dump, acts
+    // in it, and its expect dumps (4). Before the reuse every step dumped the same screen 2–3 times.
+    expect(dev.dumps()).toBe(4);
+  });
+
+  it('confirms a dump taken right after an action with a second one before acting on it', async () => {
+    // The stand-in device answers in milliseconds, so with the default settle window every
+    // dump is young: each action costs its wait dump plus one confirming dump.
+    const two: Flow = { version: 1, bundle: APP, steps: [flow.steps[1]!, flow.steps[2]!] };
+    dev.show(rawPage1('Ann', false));
+    dev.queue(rawPage2('Ann', 'none'), rawPage2('Ann', 'Banana'));
+    const r = await replayFlow({ ...opts(), settleMs: 1500, flow: two });
+    expect(r).toMatchObject({ ok: true, outcome: 'passed' });
+    expect(dev.inputs()).toEqual(['uitest uiInput click 540 732', 'uitest uiInput click 540 814']);
+    expect(dev.dumps()).toBe(5); // wait, confirm, expect; (Banana found in the expect dump) confirm, expect
+  });
+
+  it('waits again when the confirming dump no longer shows the element (a screen in transition)', async () => {
+    dev.show(rawPage1('Ann', false));
+    fs.writeFileSync(path.join(dev.root, 'dumps', '2.json'), JSON.stringify(rawHome())); // the 2nd dump: another screen
+    dev.queue(rawPage2('Ann', 'none'));
+    const one: Flow = { version: 1, bundle: APP, steps: [flow.steps[1]!] };
+    const r = await replayFlow({ ...opts(), settleMs: 1500, flow: one });
+    expect(r).toMatchObject({ ok: true, outcome: 'passed' });
+    expect(dev.inputs()).toEqual(['uitest uiInput click 540 732']);
+    expect(dev.dumps()).toBe(5); // wait, confirm (gone), wait again, confirm (same), expect
   });
 
   it('stops where the selector is not found, with near matches, the screen and a screenshot', async () => {
