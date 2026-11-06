@@ -1,5 +1,23 @@
 # @oniroproject/core
 
+## 0.18.2
+
+### Patch Changes
+
+- 110751b: `replayFlow` no longer dumps the same screen two or three times per step: the dump in which a step's selector (or the previous step's `expect`) was found is reused to locate the element the step acts on, and the next step's selector is looked up in it before the screen is dumped again. A dump taken within `settleMs` (default 1500) of the last action may show a screen in transition, so before a step acts on an element found in one the screen is dumped once more and the element must be the same node at the same place. On a phone a dump costs about a second, so flows replay noticeably faster with the same outcomes. `locateTarget` and `performInput` take an optional `layout` to look in first; `waitForTargetLayout` is `waitForTarget` returning the dump too.
+- 7ea39ed: Fixes:
+
+  - `screenshot` retries a capture that wrote no file instead of failing with
+    `hdc file recv ... no such file or directory`. `snapshot_display` gives up when
+    RenderService does not deliver a frame within 2 s, which happens now and then
+    while an app starts on the emulator (the flaky screenshot step of the
+    end-to-end CI). Up to three attempts are made, `--burst` retries each frame the
+    same way, and when every attempt fails the error quotes `snapshot_display`'s
+    own message.
+  - Each screenshot uses its own file on the device. With one fixed name, the
+    background clean-up of a previous capture in the same process (`serve`) could
+    delete the next capture before it was pulled.
+
 ## 0.18.1
 
 ### Patch Changes
