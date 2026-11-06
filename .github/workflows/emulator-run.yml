@@ -243,20 +243,18 @@ jobs:
             echo "Waiting for $BUNDLE to reach the foreground (attempt $i)..."
             sleep 1
           done
-          ONIRO_DEBUG=1 oniro-app screenshot -o "$GITHUB_WORKSPACE/emulator_screenshot.jpeg" || {
-            hdc shell "snapshot_display -f /data/local/tmp/diag0.jpeg; echo rc=\$?" || true
-            exit 1
-          }
+          ONIRO_DEBUG=1 oniro-app screenshot -o "$GITHUB_WORKSPACE/emulator_screenshot.jpeg"
 
       # When the capture fails, record what the device saw: the raw snapshot_display
-      # output over a few seconds (does it recover, and when?), the display / screen
-      # state from DMS and RenderService, and the hilog buffer around the failure.
+      # output over a few seconds (does it recover?), the display / screen state from
+      # DMS and RenderService, and the hilog buffer around the failure (RenderService
+      # logs why it refused the capture under RSSurfaceCaptureTaskParallel).
       - name: Collect screenshot diagnostics
         if: failure()
         continue-on-error: true
         run: |
           d="$GITHUB_WORKSPACE/diag"; mkdir -p "$d"
-          for delay in 0 0.2 0.5 1 2 4 8; do
+          for delay in 0 1 4; do
             sleep "$delay"
             echo "=== $(date +%T.%N) after sleep $delay" >> "$d/snapshot_retries.txt"
             hdc shell "snapshot_display -f /data/local/tmp/diag.jpeg; echo rc=\$?" >> "$d/snapshot_retries.txt" 2>&1 || true

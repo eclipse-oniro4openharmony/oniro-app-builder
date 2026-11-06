@@ -29,10 +29,12 @@ function tmpName(ext: string): string {
 }
 
 /**
- * `snapshot_display` asks RenderService for a frame and gives up when none comes
- * within 2 s: it prints "error: snapshot display …" and writes no file. A busy
- * compositor (an app starting on a software-rendered emulator) can miss that
- * window now and then, so a capture that leaves no file is retried.
+ * `snapshot_display` prints "error: snapshot display …" and writes no file when
+ * RenderService hands back no image: it waits at most 2 s for the frame, so a
+ * compositor that is busy for a moment (an app starting on a software-rendered
+ * emulator) can miss it, and a capture that leaves no file is retried. A failure
+ * that persists across attempts is on the device side (the image's RenderService
+ * refuses the capture; its hilog says why, see RSSurfaceCaptureTaskParallel).
  */
 export const SNAPSHOT_ATTEMPTS = 3;
 const SNAPSHOT_RETRY_DELAY_MS = 500;
@@ -68,7 +70,8 @@ async function captureOnDevice(opts: ScreenshotOptions, remote: string, timeoutM
   }
   throw new OniroError(
     `Screenshot failed: snapshot_display wrote no file in ${SNAPSHOT_ATTEMPTS} attempts.\n${detail}\n` +
-      'RenderService did not deliver a frame within its 2 s limit; the compositor may be busy (an app starting).',
+      'RenderService returned no image every time. Its reason is in the device log: ' +
+      '`hdc shell "hilog -x" | grep -E "RSSurfaceCapture|GetScreenSnapshot"`.',
   );
 }
 
