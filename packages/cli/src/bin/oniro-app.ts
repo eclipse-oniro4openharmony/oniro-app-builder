@@ -30,6 +30,7 @@ import { registerServeCommand } from '../commands/serve.js';
 import { registerRecordCommand } from '../commands/record.js';
 import { registerReplayCommand } from '../commands/replay.js';
 import { registerPerfCommand } from '../commands/perf.js';
+import { registerStoreCommand } from '../commands/store.js';
 
 declare const __CLI_VERSION__: string;
 const CLI_VERSION = __CLI_VERSION__;
@@ -82,6 +83,7 @@ function buildProgram(): Command {
   registerLogsCommand(program);
   registerHdcCommand(program);
   registerServeCommand(program);
+  registerStoreCommand(program);
 
   return program;
 }
