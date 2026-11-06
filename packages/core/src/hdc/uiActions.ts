@@ -77,6 +77,11 @@ export interface LocateTargetOptions extends DeviceOptions {
    * dismiss the keyboard and look again. Default true.
    */
   hideKeyboard?: boolean;
+  /**
+   * A layout dumped a moment ago (a wait that just found the element): the target is
+   * looked up in it first, and a fresh dump is taken only when it is not there.
+   */
+  layout?: DumpLayoutResult;
 }
 
 export interface LocatedTarget {
@@ -102,17 +107,28 @@ export async function locateTarget(opts: LocateTargetOptions): Promise<LocatedTa
     deviceSerial: opts.deviceSerial,
     logger: opts.logger,
   };
-  let layout = await dumpLayout(dumpOpts);
+  let layout = opts.layout ?? (await dumpLayout(dumpOpts));
   // Without the display size no node has a position, and every match would look missing.
   if (!layout.display) throw new OniroError('Could not read the display size to locate the element.');
   let keyboardHidden = false;
   let node: FlatLayoutNode | undefined;
   let failure: unknown;
-  try {
-    node = pickTarget(selectableTree(layout, opts.windowId), opts.selector, opts.index);
-  } catch (err) {
-    if (!(err instanceof TargetNotFoundError) || err.reason === 'ambiguous') throw err;
-    failure = err;
+  const look = (): void => {
+    try {
+      node = pickTarget(selectableTree(layout, opts.windowId), opts.selector, opts.index);
+      failure = undefined;
+    } catch (err) {
+      if (!(err instanceof TargetNotFoundError) || err.reason === 'ambiguous') throw err;
+      failure = err;
+      node = undefined;
+    }
+  };
+  look();
+  if (!node && opts.layout) {
+    // Not in the dump the caller had: the screen may have moved on since; look at it now.
+    layout = await dumpLayout(dumpOpts);
+    if (!layout.display) throw new OniroError('Could not read the display size to locate the element.');
+    look();
   }
   if ((!node || !node.click) && layout.keyboard?.shown && opts.hideKeyboard !== false) {
     opts.logger?.debug('target not reachable while the keyboard is up; dismissing it and looking again');
@@ -150,6 +166,8 @@ export interface PerformInputOptions extends DeviceOptions {
   targetIndex?: number;
   /** Look for `target` only in this window. */
   windowId?: number;
+  /** A layout dumped a moment ago to find `target` in first (see {@link LocateTargetOptions.layout}). */
+  layout?: DumpLayoutResult;
   /** Velocity for swipe/drag/fling. */
   speed?: number;
   /** Key for keyEvent (see `resolveKeyEvent`). */
@@ -211,7 +229,7 @@ export async function performInput(opts: PerformInputOptions): Promise<PerformIn
   const result: PerformInputResult = { keyboardHidden: false };
   let start = startPx;
   if (opts.target) {
-    const located = await locateTarget({ ...device, selector: opts.target, index: opts.targetIndex, windowId: opts.windowId });
+    const located = await locateTarget({ ...device, selector: opts.target, index: opts.targetIndex, windowId: opts.windowId, layout: opts.layout });
     display = located.display;
     start = [located.x, located.y];
     result.target = located.node;
@@ -287,9 +305,19 @@ export interface WaitForTargetOptions extends DeviceOptions {
  * timeout.
  */
 export async function waitForTarget(opts: WaitForTargetOptions): Promise<FlatLayoutNode | null> {
+  return (await waitForTargetLayout(opts)).node;
+}
+
+/**
+ * {@link waitForTarget}, also returning the layout dump the condition was met in, so
+ * that the caller can act on it (a replay locates the next step's target in it)
+ * instead of dumping the same screen again.
+ */
+export async function waitForTargetLayout(opts: WaitForTargetOptions): Promise<{ node: FlatLayoutNode | null; layout: DumpLayoutResult }> {
   const { selector } = opts;
   assertLayoutSelector(selector);
   let found = null as FlatLayoutNode | null;
+  let last: DumpLayoutResult | undefined;
   await waitForCondition({
     probe: async () => {
       const layout = await dumpLayout({
@@ -298,6 +326,7 @@ export async function waitForTarget(opts: WaitForTargetOptions): Promise<FlatLay
         deviceSerial: opts.deviceSerial,
         logger: opts.logger,
       });
+      last = layout;
       let tree: DumpLayoutResult['tree'] | null = layout.tree;
       if (opts.windowId !== undefined) tree = windowSubtree(layout.tree, opts.windowId);
       else tree = selectableTree(layout);
@@ -312,5 +341,5 @@ export async function waitForTarget(opts: WaitForTargetOptions): Promise<FlatLay
       ? `An element matching the selector was still on screen after ${opts.timeoutMs}ms.`
       : `No element matching the selector appeared within ${opts.timeoutMs}ms.`,
   });
-  return opts.gone ? null : found;
+  return { node: opts.gone ? null : found, layout: last! };
 }
