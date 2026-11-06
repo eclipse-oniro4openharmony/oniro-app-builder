@@ -983,6 +983,57 @@ com.example.perfprobe (pid 22334): 11.8 s captured, display 60.6 Hz (16.5 ms per
 GATE FAILED: Jank rate 0.14 (28/200 frames) is above 0.02.
 ```
 
+### App Store
+
+#### `store` — publish to the Oniro App Store
+
+Publishes apps to the [Oniro App Store](https://store.iparo.app) without a browser, from a terminal or a CI job. Every command authenticates with an **API token** created on the store website at `/publisher/tokens` (*Publish from CI* on your publisher page): `ONIRO_STORE_TOKEN` when set, else the token `store login` saved for that store. The store is `--url`, else `ONIRO_STORE_URL`, else `https://store.iparo.app`; plain `http` is refused except for `localhost`, since every request carries the token. Requests honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`.
+
+| Command | Description |
+| --- | --- |
+| `store login --token <token> [--url] [--json]` | Checks the token against the store (`GET /api/v1/auth/me`), saves it and prints the publisher it belongs to. `--token -` reads it from stdin, which keeps it out of the shell history. |
+| `store logout [--url]` | Deletes the saved token. It keeps working until it expires: revoke it on the store website. |
+| `store whoami [--url] [--json]` | Prints the publisher the token belongs to and where the token came from. Exits non-zero without a valid token. |
+| `store publish <file.hap\|file.app> [flags]` | Uploads a signed package. The first publish of a bundle name creates its listing (`--name` required); later ones add a new version, whose `versionCode` must be higher than the last. Prints the store page URL. |
+| `store register-release --repo <owner/name> --tag <tag> --asset <name\|id> [flags]` | Publishes a package that stays hosted on a public GitHub release: the store downloads the asset once to check it (parse, signatures, sha256), then sends devices to GitHub for it. Registering the same asset twice is a no-op. The token's publisher must own the repository or have uploaded the asset; an asset a bot uploaded to an organisation's repository is refused (`ASSET_NOT_YOURS`), so publish those with the reusable workflow below. |
+
+| `store publish` flag | Description |
+| --- | --- |
+| `--name <name>` | Display name of a new listing. Required on the first publish. |
+| `--description <text>` | Description of a new listing. |
+| `--category <app\|game>` | Category of a new listing (store default `app`). |
+| `--tags <list>` | Comma-separated tags of a new listing, at most 10. |
+| `--icon <png>` | Icon of a new listing. Default: the icon inside the package. |
+| `--vendor <vendor>` | Vendor of a new listing. Default: the package's vendor. |
+| `--source-url <url>` | Source code link of a new listing. |
+| `--json` | Print `{ action: "created" \| "version", packageName, url, … }` instead of the URL. |
+
+The bundle name is read from the package itself (`module.json` of a `.hap`, `pack.info` of an `.app`). The listing flags only describe a new listing: on a later publish they are ignored with a warning — edit the listing on the website. A package over the store's size limit (`GET /api/v1/limits`) is refused before the upload starts. Every module must be signed (`oniro-app sign` before `build`); hvigor's `.app` leaves the modules inside it unsigned, so zip the individually signed modules with `pack.info` instead. The store answers with `{ error: { code, message } }`, which the command prints as `The store answered <status> <code>: <message>`.
+
+| `store register-release` flag | Description |
+| --- | --- |
+| `--repo <owner/name>` | Repository holding the release. It must be public: devices download the asset from GitHub. |
+| `--tag <tag>` | Tag of the release. Draft releases are refused. |
+| `--asset <name\|id>` | Asset file name, or its numeric id. |
+| `--file <path>` | A local copy of the asset to hash instead of downloading it. Without it the sha256 is GitHub's recorded `digest`, or that of a download. |
+| `--name`, `--description`, `--category`, `--tags` | Listing of a new app; ignored when the bundle name is already in the store. |
+| `--json` | Print the store's answer (`packageName`, `versionCode`, `versionName`, `status`, `format`, `hosting`, `buildKind`, `created`, `appCreated`, `downloadUrl`) with the store page `url`. |
+
+`GITHUB_TOKEN` (or `GH_TOKEN`), when set, authenticates the GitHub API calls, which raises their rate limit.
+
+`store login` writes the token to `credentials.json` in `ONIRO_STORE_AUTH_DIR` (default `~/.oniro/store`), keyed by store URL so a token is only ever sent to the store that issued it. The directory is created `0700` and the file `0600`; the token is not encrypted and the OS keychain is not used, so treat that file as a credential. API tokens expire (one year by default) and can be revoked on the store website.
+
+In CI, pass the token as a secret instead of logging in:
+
+```yaml
+- run: npm install -g @oniroproject/oniro-app
+- run: oniro-app store publish path/to/app.app
+  env:
+    ONIRO_STORE_TOKEN: ${{ secrets.ONIRO_STORE_TOKEN }}
+```
+
+or, in one line, `ONIRO_STORE_TOKEN=${{ secrets.ONIRO_STORE_TOKEN }} oniro-app store publish path/to/app.app`. To have the store build the app from source instead — no token, and a **Built from source** badge on the listing — use the reusable workflow in [`eclipse-oniro4openharmony/oniro-app-store-actions`](https://github.com/eclipse-oniro4openharmony/oniro-app-store-actions).
+
 ### Agents
 
 #### `serve mcp` — the gate commands as MCP tools
@@ -1072,6 +1123,9 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 | `ONIRO_HARMONYOS_SDK_PATH` | autodetected | HarmonyOS SDK: a DevEco Studio or HarmonyOS command-line-tools install, or its `sdk` directory |
 | `ONIRO_HARMONYOS_AUTH_DIR` | `~/.oniro/harmonyos` | Where the encrypted Huawei account token is stored |
 | `ONIRO_HARMONYOS_SIGNING_DIR` | `~/.ohos/config` | Where generated HarmonyOS signing material (p12/csr/cer/p7b) is written |
+| `ONIRO_STORE_URL` | `https://store.iparo.app` | Oniro App Store the `store` commands talk to (`--url` overrides it) |
+| `ONIRO_STORE_TOKEN` | (unset) | App Store API token for the `store` commands; wins over the one `store login` saved |
+| `ONIRO_STORE_AUTH_DIR` | `~/.oniro/store` | Where `store login` saves tokens (`credentials.json`, mode `0600`) |
 | `ONIRO_CACHE_DIR` | `~/.oniro/cache` | Where caches go: the SDK declaration index of `api search` / `api show` |
 | `ONIRO_DEBUG` | (unset) | Set to `1` for full stack traces on error |
 
