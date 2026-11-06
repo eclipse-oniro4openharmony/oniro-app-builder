@@ -180,6 +180,8 @@ jobs:
             fi
           fi
           echo "Home bundle: $home"
+          # Keep enough hilog for the failure diagnostics below: no flow control, 16 MB.
+          hdc shell "hilog -Q pidoff; hilog -Q domainoff; hilog -G 16M" || true
           echo "HOME_BUNDLE=$home" >> "$GITHUB_ENV"
 
       - name: Wait until the device accepts launches (keyguard auto-dismiss)
@@ -241,7 +243,32 @@ jobs:
             echo "Waiting for $BUNDLE to reach the foreground (attempt $i)..."
             sleep 1
           done
-          oniro-app screenshot -o "$GITHUB_WORKSPACE/emulator_screenshot.jpeg"
+          ONIRO_DEBUG=1 oniro-app screenshot -o "$GITHUB_WORKSPACE/emulator_screenshot.jpeg" || {
+            hdc shell "snapshot_display -f /data/local/tmp/diag0.jpeg; echo rc=\$?" || true
+            exit 1
+          }
+
+      # When the capture fails, record what the device saw: the raw snapshot_display
+      # output over a few seconds (does it recover, and when?), the display / screen
+      # state from DMS and RenderService, and the hilog buffer around the failure.
+      - name: Collect screenshot diagnostics
+        if: failure()
+        continue-on-error: true
+        run: |
+          d="$GITHUB_WORKSPACE/diag"; mkdir -p "$d"
+          for delay in 0 0.2 0.5 1 2 4 8; do
+            sleep "$delay"
+            echo "=== $(date +%T.%N) after sleep $delay" >> "$d/snapshot_retries.txt"
+            hdc shell "snapshot_display -f /data/local/tmp/diag.jpeg; echo rc=\$?" >> "$d/snapshot_retries.txt" 2>&1 || true
+          done
+          cat "$d/snapshot_retries.txt"
+          hdc shell "hilog -x" > "$d/hilog.txt" 2>&1 || true
+          hdc shell "hidumper -s RenderService -a screen" > "$d/rs_screen.txt" 2>&1 || true
+          hdc shell "hidumper -s RenderService -a allInfo" > "$d/rs_allinfo.txt" 2>&1 || true
+          hdc shell "hidumper -s DisplayManagerService -a -a" > "$d/dms.txt" 2>&1 || true
+          hdc shell "hidumper -s WindowManagerService -a '-a'" > "$d/wms.txt" 2>&1 || true
+          hdc shell "power-shell dump -a; param get | grep -iE 'screen|display|power'" > "$d/power.txt" 2>&1 || true
+          grep -nE 'GetScreenSnapshot|GetDisplaySnapshot|TakeSurfaceCapture|SurfaceCapture|snapshot_display|pixelmap|displayNode' "$d/hilog.txt" | tail -80 || true
 
       - name: Dump UI layout of the running app (dump layout)
         run: oniro-app dump layout > "$GITHUB_WORKSPACE/layout.json"
@@ -327,6 +354,7 @@ jobs:
             layout.json
             watch.json
             test.json
+            diag/
           if-no-files-found: ignore
 
       - name: Upload emulator log
