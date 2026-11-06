@@ -21,3 +21,4 @@ export * from './apiIndex/index.js';
 export * from './faultlog/index.js';
 export * from './flow/index.js';
 export * from './perf/index.js';
+export * from './docs/index.js';

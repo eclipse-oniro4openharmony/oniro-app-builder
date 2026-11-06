@@ -40,6 +40,7 @@ import { arktsCheckExitCode, arktsCheckOrError } from '../commands/check.js';
 import { testExitCode } from '../commands/test.js';
 import { applyWithSmoke, launchWithSmoke } from '../commands/app.js';
 import { runApiSearch, runApiShow } from '../commands/api.js';
+import { runDocsSearch, runDocsShow } from '../commands/docs.js';
 import { doctorExitCode } from '../commands/doctor.js';
 import { devicesJson, queryDevices } from '../commands/devices.js';
 import { perfExitCode } from '../commands/perf.js';
@@ -56,7 +57,7 @@ import {
   renderWithGrid,
   type CropRect,
 } from '../lib/screenshotImage.js';
-import type { McpTool, ToolContent, ToolResult } from './protocol.js';
+import { errorResult, type McpTool, type ToolContent, type ToolResult } from './protocol.js';
 import type { JsonSchema } from './schema.js';
 import { selectorFromArgs, targetIndexFromArgs, targetProperties, windowFromArgs, windowProperty } from './target.js';
 
@@ -932,6 +933,92 @@ const apiShow: Tool = {
   },
 };
 
+const DOCS_PROPS: Record<string, JsonSchema> = {
+  api: int("The SDK API level whose release picks the docs (default: the project's compileSdkVersion, else the newest installed SDK)."),
+  sdk: str('An SDK API directory (holding ets/) whose version picks the docs.'),
+  ref: str('A docs branch or tag (`OpenHarmony-6.1-Release`, `master`) instead of the SDK-chosen one.'),
+  ...PROJECT,
+};
+
+function docsOpts(a: Args, ctx: ToolContext): { api?: string; sdk?: string; ref?: string; project: string } {
+  return {
+    api: a.api !== undefined ? String(a.api) : undefined,
+    sdk: pathArg(a, 'sdk', ctx),
+    ref: a.ref as string | undefined,
+    project: projectOf(a, ctx),
+  };
+}
+
+const docsSearch: Tool = {
+  name: 'docs_search',
+  title: 'Search the OpenHarmony docs',
+  description:
+    'Ranked search of the OpenHarmony application-development documentation of the release matching the SDK ' +
+    '(`oniro-app docs search --json`): usage guides (ArkUI components, navigation, state management, data storage, ' +
+    'abilities), kit API prose, business error codes and platform behaviour, which the SDK typings behind api_search ' +
+    'do not say. Documents containing every word rank by where the words occur (title, headings, path, body); each hit ' +
+    'names the matching sections, to read with docs_show. Use domain words (a component, kit or decorator name, an ' +
+    'error code), not sentences. Returns docs (ref, dir, tree, sdk), query, terms, total, hits (path, title, score, ' +
+    'headings [{line, text}], snippet). isError when nothing matches, or when the docs are not synced ' +
+    '(`oniro-app docs sync`).',
+  inputSchema: object(
+    {
+      query: str('The search words, e.g. "LazyForEach reuse", "relationalStore insert", "14800011".'),
+      limit: int('At most n hits.', { minimum: 1, maximum: 30, default: 8 }),
+      section: str('Only documents under this subtree: `ui`, `database`, `reference/errorcodes`, `application-models`.'),
+      ...DOCS_PROPS,
+    },
+    ['query'],
+  ),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  changesDevice: false,
+  async call(a, ctx) {
+    try {
+      const run = runDocsSearch(a.query as string, {
+        ...docsOpts(a, ctx),
+        limit: a.limit !== undefined ? String(a.limit) : undefined,
+        section: a.section as string | undefined,
+      });
+      return jsonResult(run.json, run.result.total === 0);
+    } catch (err) {
+      return errorResult(message(err));
+    }
+  },
+};
+
+const docsShow: Tool = {
+  name: 'docs_show',
+  title: 'Read one OpenHarmony doc',
+  description:
+    'One documentation file (a path docs_search returned, relative to en/application-dev), or one section of it by ' +
+    'heading (`oniro-app docs show --json`). Images and inline HTML are dropped; a long document is cut at maxLines ' +
+    'with the list of its sections, so ask for a heading rather than the whole file. Returns docs, found, path, text, ' +
+    'truncated, lines, headings; isError with suggestions (close paths, or the headings when the heading did not match).',
+  inputSchema: object(
+    {
+      path: str('The document path, e.g. `ui/arkts-navigation-jump.md`.'),
+      heading: str('A heading (or a distinctive part of it, case-insensitive): only that section.'),
+      maxLines: int('At most n lines.', { minimum: 20, maximum: 1200, default: 250 }),
+      ...DOCS_PROPS,
+    },
+    ['path'],
+  ),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  changesDevice: false,
+  async call(a, ctx) {
+    try {
+      const run = runDocsShow(a.path as string, {
+        ...docsOpts(a, ctx),
+        heading: a.heading as string | undefined,
+        lines: a.maxLines !== undefined ? String(a.maxLines) : undefined,
+      });
+      return jsonResult(run.json, !run.result.found);
+    } catch (err) {
+      return errorResult(message(err));
+    }
+  },
+};
+
 const doctor: Tool = {
   name: 'doctor',
   title: 'Check the toolchain',
@@ -1005,6 +1092,8 @@ export const ALL_TOOLS: readonly Tool[] = [
   screens,
   apiSearch,
   apiShow,
+  docsSearch,
+  docsShow,
   doctor,
   devices,
 ];

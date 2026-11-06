@@ -35,7 +35,10 @@ export type ConfigKey =
   | 'harmonyosSigningDir'
   // Caches core rebuilds when stale (the SDK declaration index of `api search`).
   // Default `~/.oniro/cache`.
-  | 'cacheDir';
+  | 'cacheDir'
+  // Where `docs sync` clones the OpenHarmony documentation, one release per
+  // subdirectory. Default `<sdkRootDir>/docs`.
+  | 'docsDir';
 
 export interface ConfigProvider {
   /**
