@@ -148,7 +148,7 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
 
   // Fail before ohpm and hvigor run, with the release to install, rather than on
   // hvigor's own late and vaguer error.
-  const missingSdk = isHarmonyOs ? null : findMissingProjectSdk(opts.config, projectDir);
+  const missingSdk = isHarmonyOs ? null : findMissingProjectSdk(opts.config, projectDir, opts.product);
   if (missingSdk) throw missingSdk;
 
   if (opts.autoInstallDeps !== false) {
@@ -213,11 +213,16 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
     const diagnostics = [...parsed.diagnostics];
     const tooOld = isHarmonyOs
       ? null
-      : sdkTooOldDiagnostic(diagnostics, getOhosBaseSdkHome(opts.config), detectProjectSdkVersion(projectDir));
+      : sdkTooOldDiagnostic(diagnostics, getOhosBaseSdkHome(opts.config), detectProjectSdkVersion(projectDir, noopLogger, opts.product));
     if (tooOld) diagnostics.push(tooOld);
     // Name the SDK used: an SDK too old for a dependency otherwise shows only as
     // ArkTS errors deep inside oh_modules/ (#22).
-    const sdk = resolveBuildSdk({ config: opts.config, projectDir, runtimeOS: isHarmonyOs ? 'HarmonyOS' : 'OpenHarmony' });
+    const sdk = resolveBuildSdk({
+      config: opts.config,
+      projectDir,
+      product: opts.product,
+      runtimeOS: isHarmonyOs ? 'HarmonyOS' : 'OpenHarmony',
+    });
     const sdkLabel = sdk ? describeBuildSdk(sdk) : undefined;
     const depHint = dependencyApiDiagnostic(
       diagnostics,
@@ -263,7 +268,7 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
     warnings.push(mismatch);
     diagnostics.push({ severity: 'warning', source: 'signing', message: mismatch, file: 'build-profile.json5' });
   }
-  const sdk = resolveBuildSdk({ config: opts.config, projectDir, runtimeOS });
+  const sdk = resolveBuildSdk({ config: opts.config, projectDir, product: opts.product, runtimeOS });
   return {
     exitCode,
     durationMs: Date.now() - start,

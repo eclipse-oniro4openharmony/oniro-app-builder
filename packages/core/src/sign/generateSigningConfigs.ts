@@ -112,6 +112,12 @@ export interface GenerateSigningConfigsOptions {
    * instead of the inlined cert. May also be sourced from `config.applicationCertPath`.
    */
   applicationCertPath?: string;
+  /**
+   * hvigor product whose `compileSdkVersion` picks the SDK the signing files come
+   * from. Defaults to the first product, which in a project that also targets
+   * HarmonyOS may be a HarmonyOS product with no numeric API level.
+   */
+  product?: string;
   /** Optional logger; defaults to no-op. */
   logger?: Logger;
 }
@@ -455,10 +461,12 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
     );
   }
 
-  const sdkVersion = detectProjectSdkVersion(projectDir, logger);
+  const sdkVersion = detectProjectSdkVersion(projectDir, logger, options.product);
   if (!sdkVersion) {
     throw new OniroError(
-      'Could not detect project SDK version (compileSdkVersion missing in build-profile.json5).',
+      `Could not detect project SDK version (compileSdkVersion missing ${
+        options.product ? `for product '${options.product}' ` : ''
+      }in build-profile.json5).`,
     );
   }
 

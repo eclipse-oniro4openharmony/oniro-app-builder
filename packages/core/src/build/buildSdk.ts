@@ -40,11 +40,13 @@ function readOhUniPackage(apiDir: string): { apiVersion?: string; version?: stri
 /**
  * The SDK a build of `projectDir` uses, found the way the build finds it: the
  * HarmonyOS SDK for a HarmonyOS product, else the OpenHarmony API folder for the
- * project's compileSdkVersion. Undefined when it cannot be told.
+ * compileSdkVersion of the product built. Undefined when it cannot be told.
  */
 export function resolveBuildSdk(opts: {
   config: ConfigProvider;
   projectDir: string;
+  /** hvigor product being built; its compileSdkVersion picks the OpenHarmony SDK. */
+  product?: string;
   runtimeOS: RuntimeOs;
   logger?: Logger;
 }): BuildSdk | undefined {
@@ -57,7 +59,7 @@ export function resolveBuildSdk(opts: {
     if (sdk.apiVersion) out.api = sdk.apiVersion;
     return out;
   }
-  const dir = resolveProjectSdkDir(opts.config, opts.projectDir);
+  const dir = resolveProjectSdkDir(opts.config, opts.projectDir, opts.product);
   if (!dir) return undefined;
   const pkg = readOhUniPackage(dir);
   const api = pkg.apiVersion ?? path.basename(dir);
