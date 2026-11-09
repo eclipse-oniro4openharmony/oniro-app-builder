@@ -23,6 +23,40 @@ describe('detectProjectSdkVersion', () => {
     expect(detectProjectSdkVersion(projectDir)).toBe(23);
   });
 
+  it('reads compileSdkVersion from the named product', () => {
+    // A project that also targets HarmonyOS: its HarmonyOS product comes first,
+    // with the HarmonyOS-style string level, and the OpenHarmony one after it.
+    fs.writeFileSync(
+      path.join(projectDir, 'build-profile.json5'),
+      JSON.stringify({
+        app: {
+          products: [
+            { name: 'default', targetSdkVersion: '6.0.2(22)', runtimeOS: 'HarmonyOS' },
+            { name: 'oniro', compileSdkVersion: 23, runtimeOS: 'OpenHarmony' },
+          ],
+        },
+      }),
+    );
+    expect(detectProjectSdkVersion(projectDir)).toBeUndefined();
+    expect(detectProjectSdkVersion(projectDir, undefined, 'oniro')).toBe(23);
+  });
+
+  it('falls back to the first product when the named one is not declared', () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'build-profile.json5'),
+      JSON.stringify({ app: { products: [{ name: 'default', compileSdkVersion: 20 }] } }),
+    );
+    expect(detectProjectSdkVersion(projectDir, undefined, 'missing')).toBe(20);
+  });
+
+  it('does not take an unnamed product for an unnamed request', () => {
+    fs.writeFileSync(
+      path.join(projectDir, 'build-profile.json5'),
+      JSON.stringify({ app: { products: [{ name: 'default', compileSdkVersion: 20 }, { compileSdkVersion: 23 }] } }),
+    );
+    expect(detectProjectSdkVersion(projectDir)).toBe(20);
+  });
+
   it('returns undefined when build-profile.json5 is missing', () => {
     expect(detectProjectSdkVersion(projectDir)).toBeUndefined();
   });

@@ -15,6 +15,7 @@ export interface PrepareSigningOptions {
   acls?: string[];
   appPrivilegeCapabilities?: string[];
   passwords?: SigningPasswords;
+  product?: string;
   logger?: Logger;
 }
 
@@ -52,6 +53,7 @@ export function prepareSigning(opts: PrepareSigningOptions): PrepareSigningResul
     acls: opts.acls,
     appPrivilegeCapabilities: opts.appPrivilegeCapabilities,
     passwords: opts.passwords,
+    product: opts.product,
     logger: opts.logger,
   });
   return { source: 'fresh' };

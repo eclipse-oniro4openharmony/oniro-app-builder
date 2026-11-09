@@ -225,7 +225,7 @@ The last line names what was made: `Signing configs generated (release profile, 
 | `--hap <file>` | Sign a prebuilt `.hap` instead of a project and write a signed copy. See [Signing a prebuilt HAP for OpenHarmony](#signing-a-prebuilt-hap-for-openharmony), and with `--harmonyos`, [for HarmonyOS](#signing-a-prebuilt-hap). |
 | `--out <file>` | With `--hap`: where to write the signed HAP (default: next to the input, named `<name>-signed.hap`, or `<name>-resigned.hap` for a `*-signed.hap` input). |
 | `--team-id <id>` | With `--harmonyos`: AGC team to sign under. |
-| `--product <name>` | With `--harmonyos`: product to sign (default `default`). |
+| `--product <name>` | Product to sign for. OpenHarmony: its `runtimeOS` and `compileSdkVersion` pick the certificate and the SDK the signing files come from (default: the first product), so a project that also has a HarmonyOS product names its OpenHarmony one. With `--harmonyos`: product whose signingConfig is written (default `default`). |
 | `--force` | With `--harmonyos`: regenerate even when the existing material is still valid. |
 | `--store-password <pwd>` / `--key-password <pwd>` | Keystore passwords (default `123456`, the SDK keystore password). |
 

@@ -95,7 +95,10 @@ export function registerSignCommand(program: Command): void {
       'With --hap: where to write the signed HAP. Default: next to the input, `<name>-unsigned.hap` → `<name>-signed.hap`, `<name>.hap` → `<name>-signed.hap`, `<name>-signed.hap` → `<name>-resigned.hap`. Name the input itself to re-sign it in place.',
     )
     .option('--team-id <id>', 'With --harmonyos: the AGC team to sign under. Default: the account\'s own (`oniro-app auth team list`).')
-    .option('--product <name>', 'With --harmonyos: the product to sign. Default `default`.')
+    .option(
+      '--product <name>',
+      'The product to sign for. OpenHarmony: its runtimeOS and compileSdkVersion pick the certificate and the SDK the signing files come from (default: the first product). With --harmonyos: the product whose signingConfig is written (default `default`).',
+    )
     .option('--force', 'With --harmonyos: regenerate the certificate and profile even when they are still valid.')
     .option('--bootstrap', 'No-op if signing material is already present; otherwise generate it.')
     .option('--store-password <pwd>', 'Keystore store password (default 123456 — the SDK keystore password).')
@@ -206,6 +209,7 @@ export function registerSignCommand(program: Command): void {
             acls: opts.acls,
             appPrivilegeCapabilities: opts.appPrivilegeCapabilities,
             passwords,
+            product: opts.product,
             logger,
           });
           logger.info(result.source === 'present' ? 'Signing material already present.' : 'Signing configs generated.');
@@ -222,6 +226,7 @@ export function registerSignCommand(program: Command): void {
           acls: opts.acls,
           appPrivilegeCapabilities: opts.appPrivilegeCapabilities,
           passwords,
+          product: opts.product,
           logger,
         });
         logger.info(`Signing configs generated${materialSuffix(generated)}.`);

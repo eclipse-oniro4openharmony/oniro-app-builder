@@ -10,7 +10,7 @@ import {
   updateBuildProfile,
 } from '../src/sign/generateSigningConfigs.js';
 import { createMaterial, generateSigningConfigs } from '../src/sign/index.js';
-import { OniroError } from '../src/ports/errors.js';
+import { OniroError, SdkNotInstalledError } from '../src/ports/errors.js';
 import { noopLogger } from '../src/ports/logger.js';
 
 interface BundleInfo {
@@ -331,5 +331,32 @@ describe('generateSigningConfigs option validation', () => {
         appFeature: 'hos_made_up_app',
       }),
     ).toThrow(OniroError);
+  });
+  it("reads the SDK level from the product it is given, not only the first one", () => {
+    // HarmonyOS product first (no numeric compileSdkVersion), OpenHarmony one after.
+    fs.writeFileSync(
+      path.join(projectDir, 'build-profile.json5'),
+      JSON.stringify({
+        app: {
+          products: [
+            { name: 'default', targetSdkVersion: '6.0.2(22)', runtimeOS: 'HarmonyOS' },
+            { name: 'oniro', compileSdkVersion: 23, runtimeOS: 'OpenHarmony' },
+          ],
+        },
+      }),
+    );
+    expect(() => generateSigningConfigs({ projectDir, sdkHome })).toThrow(/compileSdkVersion missing in/);
+    expect(() => generateSigningConfigs({ projectDir, sdkHome, product: 'default' })).toThrow(
+      /compileSdkVersion missing for product 'default'/,
+    );
+    // sdkHome is empty, so a product naming API 23 gets as far as the SDK lookup.
+    let err: unknown;
+    try {
+      generateSigningConfigs({ projectDir, sdkHome, product: 'oniro' });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(SdkNotInstalledError);
+    expect((err as SdkNotInstalledError).api).toBe('23');
   });
 });
