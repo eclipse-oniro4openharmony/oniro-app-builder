@@ -16,10 +16,17 @@ jobs:
           sudo lsof -nP -iTCP -sTCP:LISTEN | head -50 || true
           sudo lsof -nP -iTCP:55555 || true
       - run: |
-          for spec in "tcp:127.0.0.1:55555-:55555" "tcp:127.0.0.1:55556-:55555" "tcp::55557-:55555" "tcp:127.0.0.1:55558-10.0.2.15:55555"; do
+          set +e
+          brew info qemu | head -3; brew list --versions libslirp
+          for spec in "tcp:127.0.0.1:55555-:55555" "tcp:127.0.0.1:55556-10.0.2.15:55555" "tcp::55557-:55555" "tcp:0.0.0.0:55558-:55555" "tcp:127.0.0.1:2222-:22"; do
             echo "=== $spec"
             qemu-system-aarch64 -M virt -accel tcg -cpu max -m 256 -display none -serial none -monitor none \
               -netdev "user,id=n0,hostfwd=$spec" -device virtio-net-pci,netdev=n0,romfile= -S &
             pid=$!; sleep 4
-            if kill -0 $pid 2>/dev/null; then echo "OK: running"; lsof -nP -p $pid -iTCP -sTCP:LISTEN || true; kill $pid; else wait $pid; echo "exit=$?"; fi
+            if kill -0 $pid 2>/dev/null; then echo "OK: running"; lsof -nP -p $pid -iTCP -sTCP:LISTEN; kill $pid; else wait $pid; echo "exit=$?"; fi
           done
+          echo "=== no hostfwd"
+          qemu-system-aarch64 -M virt -accel tcg -cpu max -m 256 -display none -serial none -monitor none -netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile= -S & pid=$!; sleep 4; kill -0 $pid && echo OK && kill $pid
+          echo "=== python bind 127.0.0.1:55555"
+          python3 -c "import socket;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('127.0.0.1',55555));s.listen();print('bound')"
+          echo "=== ulimit / sandbox"; ulimit -n; csrutil status
