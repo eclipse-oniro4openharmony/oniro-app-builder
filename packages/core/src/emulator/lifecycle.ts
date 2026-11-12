@@ -31,6 +31,19 @@ export async function attemptHdcConnection(
   }
 }
 
+/**
+ * The address hdc dials for the default emulator started with `connect` (the
+ * launcher's port-forward bind address, `--connect`). A wildcard bind host
+ * (`0.0.0.0`) is reached on the loopback. Pure/testable.
+ */
+export function emulatorHdcAddress(connect: string | undefined): string {
+  if (!connect) return '127.0.0.1:55555';
+  const m = /^(.*):(\d+)$/.exec(connect);
+  if (!m) return connect;
+  const host = m[1] === '0.0.0.0' || m[1] === '' ? '127.0.0.1' : m[1];
+  return `${host}:${m[2]}`;
+}
+
 interface LauncherSpec {
   /** Executable to spawn (e.g. `bash` on POSIX, `cmd.exe` on Windows). */
   command: string;
@@ -143,7 +156,7 @@ export async function startEmulator(opts: StartEmulatorOptions): Promise<void> {
     // launch a second emulator on the same read-write images).
     logger.info(`Emulator already running (PID ${runningPid}); not starting another.`);
     if (opts.waitForHdcSeconds && opts.waitForHdcSeconds > 0) {
-      await waitForHdc(config, opts.waitForHdcSeconds, opts.hdcPollIntervalMs ?? 5000, logger, opts.abortSignal);
+      await waitForHdc(config, emulatorHdcAddress(opts.connect), opts.waitForHdcSeconds, opts.hdcPollIntervalMs ?? 5000, logger, opts.abortSignal);
     }
     if (opts.waitReadySeconds && opts.waitReadySeconds > 0) {
       await waitForBootCompleted(config, opts, logger);
@@ -213,7 +226,7 @@ export async function startEmulator(opts: StartEmulatorOptions): Promise<void> {
   }
 
   if (opts.waitForHdcSeconds && opts.waitForHdcSeconds > 0) {
-    await waitForHdc(config, opts.waitForHdcSeconds, opts.hdcPollIntervalMs ?? 5000, logger, opts.abortSignal, logPath);
+    await waitForHdc(config, emulatorHdcAddress(opts.connect), opts.waitForHdcSeconds, opts.hdcPollIntervalMs ?? 5000, logger, opts.abortSignal, logPath);
   }
   if (opts.waitReadySeconds && opts.waitReadySeconds > 0) {
     await waitForBootCompleted(config, opts, logger, logPath);
@@ -227,7 +240,7 @@ async function waitForBootCompleted(
   logger: Logger,
   logPathForDiagnostics?: string,
 ): Promise<void> {
-  const address = opts.connect ?? '127.0.0.1:55555';
+  const address = emulatorHdcAddress(opts.connect);
   const timeoutSeconds = opts.waitReadySeconds!;
   const deadline = Date.now() + timeoutSeconds * 1000;
   const started = Date.now();
@@ -247,6 +260,7 @@ async function waitForBootCompleted(
 
 async function waitForHdc(
   config: ConfigProvider,
+  address: string,
   timeoutSeconds: number,
   pollIntervalMs: number,
   logger: Logger,
@@ -258,7 +272,7 @@ async function waitForHdc(
   while (Date.now() < deadline) {
     if (abortSignal?.aborted) throw new CancelledError('hdc wait cancelled.');
     attempt++;
-    if (await attemptHdcConnection(config, undefined, noopLogger)) {
+    if (await attemptHdcConnection(config, address, noopLogger)) {
       logger.info(`hdc connected on attempt ${attempt}.`);
       return;
     }

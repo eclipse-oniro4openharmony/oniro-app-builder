@@ -14,3 +14,6 @@ The arm64 Oniro emulator:
 - `emulator stop` and `emulator status` also find `qemu-system-aarch64`.
 - Pool instances (`--instance`) stay x86_64-only and say so when the installed
   emulator is arm64.
+- `emulator start --connect <host:port> --wait-for-hdc` waits on that address;
+  it always polled 127.0.0.1:55555 before, so a non-default port never
+  connected. A wildcard bind host (`0.0.0.0`) is dialled on the loopback.
