@@ -222,6 +222,12 @@ jobs:
           [ -n "$ONIRO_EMULATOR_URL" ] || unset ONIRO_EMULATOR_URL
           oniro-app emulator install ${EMULATOR_ARCH:+--arch "$EMULATOR_ARCH"}
 
+      - name: Capture the guest's serial console
+        # In the background for the rest of the job: run.sh's headless mode serves
+        # the console on telnet port 4444 once QEMU is up. Uploaded with qemu.log.
+        run: |
+          nohup bash -c 'for i in $(seq 1 900); do nc 127.0.0.1 4444 >> "$GITHUB_WORKSPACE/serial.log" 2>/dev/null && break; sleep 2; done' >/dev/null 2>&1 &
+
       - name: Start emulator (headless) and wait for hdc
         env:
           # GitHub's macOS runners are VMs without Hypervisor.framework (no nested
@@ -443,5 +449,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.emulator_log_artifact }}
-          path: qemu.log
+          path: |
+            qemu.log
+            serial.log
           if-no-files-found: ignore
