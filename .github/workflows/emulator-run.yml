@@ -62,6 +62,36 @@ on:
       hdc_wait_seconds:
         type: number
         default: 420
+      runner:
+        type: string
+        default: oniro-runner
+        description: >-
+          Runner label. oniro-runner (self-hosted, KVM) runs the x86_64 emulator at full
+          speed; a GitHub-hosted runner such as ubuntu-24.04 runs the arm64 emulator under
+          TCG (no runner offers KVM for an arm64 guest).
+      emulator_arch:
+        type: string
+        default: ''
+        description: >-
+          Emulator to install: x86_64 or arm64 (`emulator install --arch`). Empty: the
+          runner's own architecture.
+      emulator_url:
+        type: string
+        default: ''
+        description: >-
+          Install the emulator from this URL instead of the latest release (ONIRO_EMULATOR_URL),
+          e.g. a prerelease asset under validation.
+      slow_factor:
+        type: number
+        default: 1
+        description: >-
+          Multiplier for the boot and readiness waits. A TCG-emulated guest boots several
+          times slower than one under KVM; use about 8 for the arm64 emulator on a
+          GitHub-hosted runner.
+      emulator_log_artifact:
+        type: string
+        default: emulator-log
+        description: Name of the uploaded QEMU log artifact (unique per job of a run).
 
 jobs:
   emulator:
@@ -69,8 +99,11 @@ jobs:
     # reliably here. That removes the reasons emulator runs were previously pinned to
     # ubuntu-22.04 (qemu slirp backend) and marked continue-on-error (hostfwd blocked
     # on GitHub-hosted runners).
-    runs-on: oniro-runner
+    runs-on: ${{ inputs.runner }}
     env:
+      EMULATOR_ARCH: ${{ inputs.emulator_arch }}
+      ONIRO_EMULATOR_URL: ${{ inputs.emulator_url }}
+      SLOW: ${{ inputs.slow_factor }}
       BUNDLE: ${{ inputs.bundle_name }}
       ENTRY_ABILITY: ${{ inputs.entry_ability }}
       LAUNCHER_BUNDLE: ${{ inputs.launcher_bundle }}
@@ -110,11 +143,17 @@ jobs:
         run: echo "$HOME/command-line-tools/sdk/default/openharmony/toolchains" >> "$GITHUB_PATH"
 
       - name: Ensure emulator host dependencies
-        # No-op when already present on the runner. qemu runs the emulator;
-        # libatomic1 is a runtime dependency of the hdc binary.
+        # No-op when already present on the runner. qemu runs the emulator
+        # (qemu-system-arm has qemu-system-aarch64); libatomic1 is a runtime
+        # dependency of the hdc binary.
         run: |
+          if [ "$EMULATOR_ARCH" = arm64 ] || { [ -z "$EMULATOR_ARCH" ] && [ "$(uname -m)" = aarch64 ]; }; then
+            qemu_pkg=qemu-system-arm
+          else
+            qemu_pkg=qemu-system-x86
+          fi
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 libatomic1
+          sudo apt-get install -y --no-install-recommends "$qemu_pkg" libatomic1
 
       - name: Download scaffolded project
         uses: actions/download-artifact@v4
@@ -141,7 +180,10 @@ jobs:
           if [ -e /dev/kvm ] && [ ! -w /dev/kvm ]; then sudo chmod 666 /dev/kvm || true; fi
 
       - name: Install Oniro emulator
-        run: oniro-app emulator install
+        run: |
+          # An unset ONIRO_EMULATOR_URL must not reach the CLI as an empty string.
+          [ -n "$ONIRO_EMULATOR_URL" ] || unset ONIRO_EMULATOR_URL
+          oniro-app emulator install ${EMULATOR_ARCH:+--arch "$EMULATOR_ARCH"}
 
       - name: Start emulator (headless) and wait for hdc
         run: oniro-app emulator start --headless --log "$GITHUB_WORKSPACE/qemu.log" --wait-for-hdc ${{ inputs.hdc_wait_seconds }}
@@ -155,14 +197,14 @@ jobs:
           grep -q '"serial"' devices.json
 
       - name: Wait for boot (wait --boot)
-        run: oniro-app wait --boot --timeout 120000
+        run: oniro-app wait --boot --timeout $((120000 * SLOW))
 
       - name: Wait for boot to complete and find the home bundle
         run: |
           # wait --boot only proves hdc answers. On a first boot the system is still
           # installing its apps after that, so wait for bootevent.boot.completed before
           # looking at the installed bundles.
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 $((60 * SLOW))); do
             if [ "$(hdc shell param get bootevent.boot.completed | tr -d '\r\n ')" = true ]; then
               echo "Boot completed (after attempt $attempt)."
               break
@@ -194,7 +236,7 @@ jobs:
           # SceneBoard images). Once Settings comes up, the screen is unlocked and the
           # test-app launch below will not race the keyguard.
           hdc shell power-shell wakeup || true
-          for attempt in $(seq 1 20); do
+          for attempt in $(seq 1 $((20 * SLOW))); do
             if oniro-app app launch --bundle "$PROBE_BUNDLE"; then
               echo "Device unlocked and accepting launches (after attempt $attempt)."
               exit 0
@@ -225,7 +267,7 @@ jobs:
           exit 1
 
       - name: Wait for the app to be running (wait --bundle)
-        run: oniro-app wait --bundle "$BUNDLE" --timeout 30000
+        run: oniro-app wait --bundle "$BUNDLE" --timeout $((30000 * SLOW))
 
       # Capture BEFORE `app apply` below: apply runs `hdc install -r`, which kills the
       # running app and does not relaunch it — so a screenshot taken after apply shows
@@ -235,7 +277,7 @@ jobs:
           # wait --bundle only proves the process has a pid; the compositor may need a
           # beat to bring the ability window to the front. Poll the UI tree until the
           # app owns a window, then capture — so the shot shows the app, not the launcher.
-          for i in $(seq 1 15); do
+          for i in $(seq 1 $((15 * SLOW))); do
             if oniro-app dump layout 2>/dev/null | grep -q "$BUNDLE"; then
               echo "App $BUNDLE is in the foreground."
               break
@@ -335,7 +377,7 @@ jobs:
         continue-on-error: true
         # --device makes the target a TCP serial so the post-reboot wait reconnects via
         # `hdc tconn` (hdc does not auto-reconnect TCP sessions across a reboot).
-        run: oniro-app reboot --mode system --wait-bundle "$HOME_BUNDLE" --device "$DEVICE" --timeout 300000
+        run: oniro-app reboot --mode system --wait-bundle "$HOME_BUNDLE" --device "$DEVICE" --timeout $((300000 * SLOW))
 
       - name: Stop emulator
         if: always()
@@ -359,6 +401,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emulator-log
+          name: ${{ inputs.emulator_log_artifact }}
           path: qemu.log
           if-no-files-found: ignore

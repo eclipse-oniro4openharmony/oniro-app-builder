@@ -60,8 +60,12 @@ export const defaultPaths = {
   harmonyosSigningDir: () => path.join(os.homedir(), '.ohos', 'config'),
   cacheDir: () => path.join(os.homedir(), '.oniro', 'cache'),
   hapPath: 'entry/build/default/outputs/default/entry-default-signed.hap',
+  // x86_64 emulator. The asset keeps its original name, which older CLIs download.
   emulatorUrl:
     'https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/latest/download/oniro_emulator.zip',
+  // arm64 emulator: runs under HVF on Apple Silicon Macs and KVM on arm64 Linux.
+  emulatorUrlArm64:
+    'https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/latest/download/oniro_emulator_arm64.zip',
   // The Huawei mirror only hosts a public Linux build of the command-line tools.
   // Windows and macOS require a manual download from the Huawei developer portal
   // (https://developer.huawei.com/...); pass the resulting ZIP to `cmdtools install --from-zip <path>`

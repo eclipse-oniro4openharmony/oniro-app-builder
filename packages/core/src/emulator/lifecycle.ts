@@ -314,13 +314,15 @@ export async function stopEmulator(logger: Logger = noopLogger): Promise<void> {
 
   // pkill / taskkill exit non-zero when nothing matched — runProcess resolves on any
   // exit code, so we simply ignore that. The try/catch only guards a missing binary.
-  const [killCmd, ...killArgs] = os.platform() === 'win32'
-    ? ['taskkill', '/IM', 'qemu-system-x86_64.exe', '/F']
-    : ['pkill', '-f', 'qemu-system-x86_64'];
-  try {
-    await runProcess({ command: killCmd!, args: killArgs, logger });
-  } catch (err) {
-    logger.warn(`[emulator] could not run ${killCmd}: ${(err as Error).message}`);
+  const killCmds = os.platform() === 'win32'
+    ? QEMU_BINARIES.map((b) => ['taskkill', '/IM', `${b}.exe`, '/F'])
+    : [['pkill', '-f', QEMU_PROCESS_PATTERN]];
+  for (const [killCmd, ...killArgs] of killCmds) {
+    try {
+      await runProcess({ command: killCmd!, args: killArgs, logger });
+    } catch (err) {
+      logger.warn(`[emulator] could not run ${killCmd}: ${(err as Error).message}`);
+    }
   }
 
   fs.rm(PID_FILE, { force: true }, (err) => {
@@ -345,8 +347,13 @@ export interface EmulatorStatus {
   instances: EmulatorInstanceStatus[];
 }
 
+/** The QEMU binaries that run an emulator: the x86_64 and the arm64 one. */
+export const QEMU_BINARIES = ['qemu-system-x86_64', 'qemu-system-aarch64'] as const;
+/** pgrep/pkill -f pattern (extended regex) matching either binary. */
+export const QEMU_PROCESS_PATTERN = 'qemu-system-(x86_64|aarch64)';
+
 /**
- * Whether a `qemu-system-x86_64` process is alive: the PID file from `startEmulator`
+ * Whether an emulator QEMU process is alive: the PID file from `startEmulator`
  * (POSIX only, as there), else a process-table scan.
  */
 async function isQemuRunning(config: ConfigProvider, logger: Logger): Promise<boolean> {
@@ -362,14 +369,14 @@ async function isQemuRunning(config: ConfigProvider, logger: Logger): Promise<bo
     }
   }
   const [cmd, ...args] = os.platform() === 'win32'
-    ? ['tasklist', '/FI', 'IMAGENAME eq qemu-system-x86_64.exe', '/NH']
-    : ['pgrep', '-f', 'qemu-system-x86_64'];
+    ? ['tasklist', '/FI', 'IMAGENAME eq qemu-system-*', '/NH']
+    : ['pgrep', '-f', QEMU_PROCESS_PATTERN];
   // Pool instances are QEMU processes too; they are not the default emulator.
   const poolPids = new Set(livePoolPids(config).values());
   try {
     const res = await runProcess({ command: cmd!, args, timeoutMs: 10_000, logger });
     const pids = os.platform() === 'win32'
-      ? res.stdout.split(/\r?\n/).filter((l) => /qemu-system-x86_64/i.test(l)).map((l) => Number(l.trim().split(/\s+/)[1]))
+      ? res.stdout.split(/\r?\n/).filter((l) => /qemu-system-(x86_64|aarch64)/i.test(l)).map((l) => Number(l.trim().split(/\s+/)[1]))
       : res.code === 0 ? res.stdout.split(/\s+/).filter(Boolean).map(Number) : [];
     return pids.some((pid) => !poolPids.has(pid));
   } catch {

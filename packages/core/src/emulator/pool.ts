@@ -574,6 +574,12 @@ export async function startPoolInstance(opts: StartPoolInstanceOptions): Promise
   }
 
   const missing = POOL_REQUIRED_IMAGES.filter((f) => !fs.existsSync(path.join(imagesDir, f)));
+  if (missing.includes('bzImage') && fs.existsSync(path.join(imagesDir, 'Image'))) {
+    throw new OniroError(
+      'Pool instances run the x86_64 emulator only, and the installed one is arm64. Start it without ' +
+        '--instance, or install the x86_64 emulator with `oniro-app emulator install --force --arch x86_64`.',
+    );
+  }
   if (missing.length > 0) {
     throw new OniroError(
       `Missing emulator image(s) in ${imagesDir}: ${missing.join(', ')}. Run \`oniro-app emulator install\` first.`,
