@@ -1,0 +1,25 @@
+# Temporary: probe QEMU user-mode host forwarding on the macOS arm64 runner.
+name: mac-qemu-debug
+on:
+  push:
+    branches: [emulator-arm64]
+    paths: ['.github/workflows/mac-qemu-debug.yml']
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - run: brew install qemu
+      - run: |
+          set -x
+          sw_vers; uname -m; sysctl -n kern.hv_support || true
+          qemu-system-aarch64 --version
+          sudo lsof -nP -iTCP -sTCP:LISTEN | head -50 || true
+          sudo lsof -nP -iTCP:55555 || true
+      - run: |
+          for spec in "tcp:127.0.0.1:55555-:55555" "tcp:127.0.0.1:55556-:55555" "tcp::55557-:55555" "tcp:127.0.0.1:55558-10.0.2.15:55555"; do
+            echo "=== $spec"
+            qemu-system-aarch64 -M virt -accel tcg -cpu max -m 256 -display none -serial none -monitor none \
+              -netdev "user,id=n0,hostfwd=$spec" -device virtio-net-pci,netdev=n0,romfile= -S &
+            pid=$!; sleep 4
+            if kill -0 $pid 2>/dev/null; then echo "OK: running"; lsof -nP -p $pid -iTCP -sTCP:LISTEN || true; kill $pid; else wait $pid; echo "exit=$?"; fi
+          done
