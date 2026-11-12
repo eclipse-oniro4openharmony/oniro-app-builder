@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { staticConfig } from '../src/ports/config.js';
+import { emulatorHdcAddress } from '../src/emulator/lifecycle.js';
 import {
   defaultEmulatorUrl,
   emulatorDownloadUrls,
@@ -82,5 +83,17 @@ describe('emulator architecture', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('emulatorHdcAddress', () => {
+  it('defaults to the launcher default', () => {
+    expect(emulatorHdcAddress(undefined)).toBe('127.0.0.1:55555');
+  });
+  it('dials the --connect address, so a non-default port is waited on', () => {
+    expect(emulatorHdcAddress('127.0.0.1:55565')).toBe('127.0.0.1:55565');
+  });
+  it('dials the loopback for a wildcard bind', () => {
+    expect(emulatorHdcAddress('0.0.0.0:55555')).toBe('127.0.0.1:55555');
   });
 });
