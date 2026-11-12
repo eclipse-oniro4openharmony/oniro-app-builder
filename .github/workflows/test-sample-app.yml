@@ -86,6 +86,27 @@ jobs:
       device_artifacts: emulator-device-artifacts-arm64
       emulator_log_artifact: emulator-log-arm64
 
+  # The arm64 emulator on an Apple Silicon (M1) macOS runner: Homebrew QEMU, the
+  # macOS SDK's hdc and the launcher's macOS path. GitHub's macOS runners are VMs
+  # without nested virtualization, so this runs under TCG too, not HVF.
+  emulator-arm64-macos:
+    needs: [scaffold, build]
+    uses: ./.github/workflows/emulator-run.yml
+    with:
+      project_artifact: ${{ needs.scaffold.outputs.project_artifact }}
+      hap_artifact: ${{ needs.build.outputs.hap_artifact }}
+      hap_file: ${{ needs.build.outputs.hap_file }}
+      test_hap_file: ${{ needs.build.outputs.test_hap_file }}
+      bundle_name: com.example.sampleapp
+      entry_ability: EntryAbility
+      runner: macos-15
+      emulator_arch: arm64
+      emulator_url: ${{ inputs.emulator_url_arm64 || '' }}
+      slow_factor: 8
+      hdc_wait_seconds: 1800
+      device_artifacts: emulator-device-artifacts-arm64-macos
+      emulator_log_artifact: emulator-log-arm64-macos
+
   # Parallel chain: verify the NativeCpp template scaffolds and builds (native C++ via
   # CMake/N-API). Build success is the gate; emulator launch is already exercised by the
   # EmptyAbility chain above and omitted here to keep runner time down.
