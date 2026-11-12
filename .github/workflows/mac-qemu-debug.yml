@@ -27,18 +27,20 @@ jobs:
                 -netdev user,id=net0,hostfwd=tcp:127.0.0.1:55565-:55555 -device virtio-net-pci,netdev=net0,romfile= -device virtio-tablet-pci)
           MISC=(-name "Oniro Emulator" -boot c -vga none -rtc base=utc,clock=host)
           v() {
-            tag=$1; shift
-            echo "=== $tag"
-            qemu-system-aarch64 "$@" -append "$APPEND" -serial file:../ser-$tag.log -monitor unix:/tmp/m-$tag.sock,server,nowait < /dev/null > ../out-$tag.log 2>&1 &
-            pid=$!; sleep 45
+            tag=$1; ser=$2; reader=$3; shift 3
+            echo "=== $tag serial=$ser reader=$reader"
+            qemu-system-aarch64 "$@" -append "$APPEND" -serial "$ser" -monitor unix:/tmp/m-$tag.sock,server,nowait < /dev/null > ../out-$tag.log 2>&1 &
+            pid=$!; sleep 3
+            if [ "$reader" = nc ]; then (nc 127.0.0.1 4444 > ../ser-$tag.log 2>&1 &); fi
+            sleep 45
             printf 'info registers\n' | nc -U -w 2 /tmp/m-$tag.sock | strings | grep -E "PC=" | head -1
-            kill $pid; wait $pid 2>/dev/null
-            echo "--- serial: $(wc -l < ../ser-$tag.log) lines; qemu out: $(head -c 300 ../out-$tag.log)"; head -3 ../ser-$tag.log
+            kill $pid; wait $pid 2>/dev/null; pkill -f "nc 127.0.0.1 4444"
+            echo "--- serial: $(strings ../ser-$tag.log 2>/dev/null | wc -l) lines; qemu out: $(head -c 300 ../out-$tag.log)"
           }
-          v full         "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display none -nographic
-          v full-nonog   "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display none
-          v no-initrd    "${BASE[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display none
-          v no-devs      "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${MISC[@]}" -display none
-          v no-disks     "${BASE[@]}" "${INITRD[@]}" "${DEVS[@]}" "${MISC[@]}" -display none
-          v no-misc      "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" -display none
-          v vnc          "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display vnc=0.0.0.0:0
+          ALL=("${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display none)
+          v telnet-noreader "telnet:0.0.0.0:4444,server,nowait" none "${ALL[@]}"
+          v telnet-nc       "telnet:0.0.0.0:4444,server,nowait" nc   "${ALL[@]}"
+          v telnet-waitoff  "telnet:0.0.0.0:4444,server=on,wait=off" nc "${ALL[@]}"
+          v tcp-nc          "tcp:0.0.0.0:4444,server=on,wait=off" nc "${ALL[@]}"
+          v telnet-local    "telnet:127.0.0.1:4444,server=on,wait=off" nc "${ALL[@]}"
+          v file            "file:../ser-file.log" none "${ALL[@]}"
