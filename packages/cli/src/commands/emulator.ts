@@ -5,10 +5,12 @@ import {
   POOL_DEFAULT_RESOLUTION,
   POOL_DEFAULT_SMP,
   DEFAULT_BOOT_TIMEOUT_SECONDS,
+  EMULATOR_ARCHES,
   attemptHdcConnection,
   getEmulatorStatus,
   getPoolInstanceStatus,
   installEmulator,
+  installedEmulatorArch,
   isEmulatorInstalled,
   removeEmulator,
   startEmulator,
@@ -16,6 +18,7 @@ import {
   stopEmulator,
   stopPoolInstance,
   type EmulatorAccel,
+  type EmulatorArch,
   type EmulatorInstanceStatus,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
@@ -39,6 +42,13 @@ function parseSmp(v: string): number {
 }
 
 const ACCELS: readonly EmulatorAccel[] = ['auto', 'kvm', 'hvf', 'whpx', 'tcg'];
+
+function parseArch(v: string): EmulatorArch {
+  if (!(EMULATOR_ARCHES as readonly string[]).includes(v)) {
+    throw new InvalidArgumentError(`expected one of ${EMULATOR_ARCHES.join(', ')}.`);
+  }
+  return v as EmulatorArch;
+}
 
 function parseAccel(v: string): EmulatorAccel {
   if (!(ACCELS as readonly string[]).includes(v)) throw new InvalidArgumentError(`expected one of ${ACCELS.join(', ')}.`);
@@ -88,19 +98,27 @@ export function registerEmulatorCommand(program: Command): void {
     .description('Download and install the Oniro emulator (QEMU-based). Skips if already installed.')
     .option('--force', 'Reinstall even if the emulator is already present.')
     .option(
+      '--arch <arch>',
+      `Guest architecture, one of ${EMULATOR_ARCHES.join(', ')}. Default: the host's (arm64 on Apple Silicon and ` +
+        'arm64 Linux, which run it with HVF/KVM), falling back to x86_64 when the release has no arm64 emulator. ' +
+        'Ignored when ONIRO_EMULATOR_URL is set.',
+      parseArch,
+    )
+    .option(
       '--tmp-dir <path>',
       'Directory for the downloaded ZIP (default: ONIRO_TMP_DIR, else .oniro-tmp next to the ' +
         'install target). Use this when that filesystem is short on space.',
     )
-    .action(async (opts: { force?: boolean; tmpDir?: string }) => {
+    .action(async (opts: { force?: boolean; tmpDir?: string; arch?: EmulatorArch }) => {
       const { config, logger, progress } = getRuntime();
       if (isEmulatorInstalled(config) && !opts.force) {
         logger.info('Emulator already installed; pass --force to reinstall.');
         return;
       }
       logger.info('Installing Oniro emulator...');
-      await installEmulator({ config, progress, logger, tmpDir: opts.tmpDir });
-      logger.info('Emulator installed.');
+      await installEmulator({ config, progress, logger, tmpDir: opts.tmpDir, arch: opts.arch });
+      const arch = installedEmulatorArch(config);
+      logger.info(arch ? `Emulator installed (${arch}).` : 'Emulator installed.');
     });
 
   emu
@@ -123,7 +141,7 @@ export function registerEmulatorCommand(program: Command): void {
     .option('--window', 'Pool: show a local SDL window instead of VNC.')
     .option('--fresh', 'Pool: discard the instance\'s overlays first (factory reset).')
     .option('--boot-timeout <seconds>', `Pool: seconds after launch past which a boot that has not completed is reported stuck (default ${DEFAULT_BOOT_TIMEOUT_SECONDS}).`, parseSeconds)
-    .option('--qemu <path>', 'Pool: qemu-system-x86_64 binary (default QEMU_BIN, else PATH); qemu-img is looked up next to it.')
+    .option('--qemu <path>', 'Pool: qemu-system-x86_64 binary (default QEMU_BIN, else PATH); qemu-img is looked up next to it. Pool instances run the x86_64 emulator only.')
     .option('--accel <kind>', `Pool: accelerator, one of ${ACCELS.join(', ')} (default auto: KVM on Linux, as run.sh).`, parseAccel)
     .option('--json', 'Pool: print the instance\'s status as JSON when done.')
     .action(async (opts: StartOpts) => {
@@ -213,7 +231,7 @@ export function registerEmulatorCommand(program: Command): void {
   emu
     .command('stop')
     .description(
-      'Without --instance: kill running emulator processes (every qemu-system-x86_64, pool instances included). ' +
+      'Without --instance: kill running emulator processes (every qemu-system-x86_64 and qemu-system-aarch64, pool instances included). ' +
         'With --instance <n>: stop only that pool instance\'s QEMU and drop its target from hdc.',
     )
     .option('--instance <n>', 'Pool instance to stop (1..99).', parseInstance)

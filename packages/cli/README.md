@@ -89,7 +89,7 @@ It lands in `<ONIRO_SDK_ROOT_DIR>/<os>/<api>` like a downloaded release, so proj
 
 | Command | Description |
 | --- | --- |
-| `emulator install [--force] [--tmp-dir <path>]` | Download and install the emulator. `--tmp-dir` overrides where the downloaded ZIP goes (see [Temporary space](#temporary-space)). |
+| `emulator install [--arch x86_64\|arm64] [--force] [--tmp-dir <path>]` | Download and install the emulator. It comes in two builds: x86_64 (`oniro_emulator.zip`) and arm64 (`oniro_emulator_arm64.zip`). By default you get the one your host runs with a hypervisor: arm64 on Apple Silicon Macs (HVF) and arm64 Linux (KVM), x86_64 elsewhere; an arm64 host falls back to x86_64 while a release has no arm64 build. `--arch` asks for one explicitly (the other one runs, under emulation, several times slower). `--tmp-dir` overrides where the downloaded ZIP goes (see [Temporary space](#temporary-space)). Pool instances (`--instance`) need the x86_64 build. |
 | `emulator start [options]` | Start the emulator via the bundled launcher and detach, so the CLI can exit while it keeps running. With `--instance <n>` (1..99), start pool instance `n` instead (see [Emulator pool](#emulator-pool)). |
 | `emulator status [--address <host:port>] [--instance <n>] [--json]` | Report whether the emulator is installed, running, and connected to `hdc`, without starting it, then (when pool instances exist) one line per instance, the default emulator as `0`, with its [health](#emulator-pool). `--json` adds an `instances` array to the existing fields; with `--instance`, only that instance's object is printed. Exits non-zero when not installed. DevEco Studio's HarmonyOS emulator is not covered; it shows up in `devices`. |
 | `emulator stop [--instance <n> [--discard]]` | Without `--instance`: kill running emulator processes (every `qemu-system-x86_64`, pool instances included). With `--instance <n>`: stop only that pool instance's QEMU; `--discard` also deletes its overlays, log and state. |
@@ -1117,7 +1117,7 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 | `ONIRO_CMD_TOOLS_URL_LINUX` | Huawei mirror, x64 5.1.0.840 | Override the Linux cmd-tools URL |
 | `ONIRO_CMD_TOOLS_URL_WINDOWS` | (unset) | Self-hosted Windows cmd-tools URL |
 | `ONIRO_CMD_TOOLS_URL_MAC` | (unset) | Self-hosted macOS cmd-tools URL |
-| `ONIRO_EMULATOR_URL` | Latest `oniro_emulator.zip` | Emulator download URL |
+| `ONIRO_EMULATOR_URL` | Latest `oniro_emulator.zip` or `oniro_emulator_arm64.zip` (see `emulator install`) | Emulator download URL; overrides `--arch` |
 | `ONIRO_TMP_DIR` | `<install root>/.oniro-tmp` | Scratch directory for download/extract temporaries (see [Temporary space](#temporary-space)) |
 | `ONIRO_APPLICATION_CERT_PATH` | (unset) | External application-cert chain to use when signing system apps |
 | `ONIRO_HARMONYOS_SDK_PATH` | autodetected | HarmonyOS SDK: a DevEco Studio or HarmonyOS command-line-tools install, or its `sdk` directory |
