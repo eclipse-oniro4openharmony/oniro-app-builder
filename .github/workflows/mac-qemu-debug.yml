@@ -1,4 +1,4 @@
-# Temporary: why the arm64 emulator kernel prints nothing on the macOS arm64 runner.
+# Temporary: bisect the emulator's QEMU command line on the macOS arm64 runner.
 name: mac-qemu-debug
 on:
   push:
@@ -11,22 +11,34 @@ jobs:
       - run: brew install qemu
       - run: |
           curl -fsSL -o emu.zip https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/download/v7.0.3-rc2/oniro_emulator_arm64.zip
-          unzip -q emu.zip images/Image && ls -la images && file images/Image
-      - name: kernel-only boots
+          unzip -q emu.zip && ls -la images
+      - name: bisect
+        working-directory: images
         run: |
           set +e
-          k() {
+          APPEND="earlycon=pl011,0x9000000 ip=dhcp loglevel=8 video=Virtual-1:360x720 console=ttyAMA0,115200 panic=5 init=init root=/dev/ram0 rw ohos.boot.hardware=emulator ohos.boot.timeout_ratio=20 ohos.boot.appfreeze_ratio=9999 ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required"
+          BASE=(-machine virt,gic-version=3 -smp 4 -m 4096M -accel tcg,thread=multi -cpu max,pauth-impdef=on -kernel Image)
+          INITRD=(-initrd ramdisk.img)
+          DISKS=(-drive if=none,file=./updater.img,format=raw,id=updater,index=0 -device virtio-blk-pci,drive=updater
+                 -drive if=none,file=system.img,format=raw,id=system,index=1 -device virtio-blk-pci,drive=system
+                 -drive if=none,file=vendor.img,format=raw,id=vendor,index=2 -device virtio-blk-pci,drive=vendor
+                 -drive if=none,file=./userdata.img,format=raw,id=userdata,index=3 -device virtio-blk-pci,drive=userdata)
+          DEVS=(-device virtio-gpu-pci,xres=360,yres=720,max_outputs=1,addr=08.0 -audiodev none,id=snd0 -device es1370,audiodev=snd0
+                -netdev user,id=net0,hostfwd=tcp:127.0.0.1:55565-:55555 -device virtio-net-pci,netdev=net0,romfile= -device virtio-tablet-pci)
+          MISC=(-name "Oniro Emulator" -boot c -vga none -rtc base=utc,clock=host)
+          v() {
             tag=$1; shift
-            echo "=== $tag: $*"
-            qemu-system-aarch64 "$@" -kernel images/Image -append "earlycon=pl011,0x9000000 console=ttyAMA0 loglevel=8" \
-              -display none -serial file:ser-$tag.log -monitor unix:/tmp/m-$tag.sock,server,nowait &
-            pid=$!; sleep 40
-            printf 'info status\ninfo registers\n' | nc -U -w 2 /tmp/m-$tag.sock | strings | grep -E "PC=|status" | head -3
+            echo "=== $tag"
+            qemu-system-aarch64 "$@" -append "$APPEND" -serial file:../ser-$tag.log -monitor unix:/tmp/m-$tag.sock,server,nowait < /dev/null > ../out-$tag.log 2>&1 &
+            pid=$!; sleep 45
+            printf 'info registers\n' | nc -U -w 2 /tmp/m-$tag.sock | strings | grep -E "PC=" | head -1
             kill $pid; wait $pid 2>/dev/null
-            echo "--- serial: $(wc -l < ser-$tag.log) lines"; head -8 ser-$tag.log
+            echo "--- serial: $(wc -l < ../ser-$tag.log) lines; qemu out: $(head -c 300 ../out-$tag.log)"; head -3 ../ser-$tag.log
           }
-          k a -M virt,gic-version=3 -cpu max,pauth-impdef=on -m 4096 -accel tcg
-          k b -M virt,gic-version=3 -cpu max,pauth-impdef=on -m 1024 -accel tcg
-          k c -M virt -cpu cortex-a72 -m 1024 -accel tcg
-          k d -M virt,gic-version=3 -cpu max,pauth-impdef=on -m 1024 -accel tcg,thread=single
-          k e -M virt,gic-version=3,virtualization=off,highmem=off -cpu max,pauth-impdef=on -m 1024 -accel tcg
+          v full         "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display none -nographic
+          v full-nonog   "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display none
+          v no-initrd    "${BASE[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display none
+          v no-devs      "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${MISC[@]}" -display none
+          v no-disks     "${BASE[@]}" "${INITRD[@]}" "${DEVS[@]}" "${MISC[@]}" -display none
+          v no-misc      "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" -display none
+          v vnc          "${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display vnc=0.0.0.0:0
