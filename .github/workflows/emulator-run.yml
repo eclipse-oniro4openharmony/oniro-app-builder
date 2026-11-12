@@ -131,18 +131,45 @@ jobs:
           npm install -g ./packages/cli
 
       - name: Cache command-line tools
+        if: runner.os == 'Linux'
         uses: actions/cache@v4
         with:
           path: ~/command-line-tools
           key: ohos-cmdtools-${{ runner.os }}
 
       - name: Install command-line tools (provides hdc)
+        if: runner.os == 'Linux'
         run: oniro-app cmdtools install
 
       - name: Put hdc on PATH
+        if: runner.os == 'Linux'
         run: echo "$HOME/command-line-tools/sdk/default/openharmony/toolchains" >> "$GITHUB_PATH"
 
+      # macOS: the command-line tools are not downloadable there, but the OpenHarmony
+      # SDK for the host (the M1 build on Apple Silicon) has an hdc in its toolchains.
+      - name: Cache OpenHarmony SDK (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/setup-ohos-sdk
+          key: ohos-sdk-${{ runner.os }}-${{ runner.arch }}-6.1
+
+      - name: Install OpenHarmony SDK and use its hdc (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          oniro-app sdk install 6.1
+          hdc_bin=$(find "$HOME/setup-ohos-sdk/darwin" -path '*/toolchains/hdc' -type f | head -1)
+          [ -n "$hdc_bin" ] || { echo "no hdc in the SDK" >&2; exit 1; }
+          file "$hdc_bin"
+          echo "ONIRO_HDC=$hdc_bin" >> "$GITHUB_ENV"
+          dirname "$hdc_bin" >> "$GITHUB_PATH"
+
+      - name: Ensure emulator host dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install qemu
+
       - name: Ensure emulator host dependencies
+        if: runner.os == 'Linux'
         # No-op when already present on the runner. qemu runs the emulator
         # (qemu-system-arm has qemu-system-aarch64); libatomic1 is a runtime
         # dependency of the hdc binary.
@@ -171,6 +198,7 @@ jobs:
           path: hap
 
       - name: Host prep (USB stub + KVM permissions)
+        if: runner.os == 'Linux'
         run: |
           # hdc enumerates USB via libusb; a headless runner may have no USB subsystem,
           # so fake one node to let the hdc server initialize cleanly.
@@ -189,6 +217,10 @@ jobs:
           oniro-app emulator install ${EMULATOR_ARCH:+--arch "$EMULATOR_ARCH"}
 
       - name: Start emulator (headless) and wait for hdc
+        env:
+          # GitHub's macOS runners are VMs without Hypervisor.framework (no nested
+          # virtualization): run the guest under TCG there. Empty elsewhere: run.sh picks.
+          QEMU_ACCEL: ${{ runner.os == 'macOS' && 'tcg' || '' }}
         run: oniro-app emulator start --headless --log "$GITHUB_WORKSPACE/qemu.log" --wait-for-hdc ${{ inputs.hdc_wait_seconds }}
 
       - name: Verify hdc connection (emulator connect)
