@@ -88,6 +88,12 @@ on:
           Multiplier for the boot and readiness waits. A TCG-emulated guest boots several
           times slower than one under KVM; use about 8 for the arm64 emulator on a
           GitHub-hosted runner.
+      hdc_port:
+        type: number
+        default: 55555
+        description: >-
+          Host port the emulator forwards to the guest's hdc (run.sh -c 127.0.0.1:PORT).
+          GitHub's macOS runners already have something on 55555.
       emulator_log_artifact:
         type: string
         default: emulator-log
@@ -113,7 +119,7 @@ jobs:
       TEST_HAP_FILE: ${{ inputs.test_hap_file }}
       # hdc address of the emulator. Passed explicitly to `reboot` so the post-reboot
       # wait reconnects the TCP target (hdc does not auto-reconnect TCP across a reboot).
-      DEVICE: 127.0.0.1:55555
+      DEVICE: 127.0.0.1:${{ inputs.hdc_port }}
     steps:
       - name: Checkout repository (for the CLI sources)
         uses: actions/checkout@v4
@@ -221,7 +227,7 @@ jobs:
           # GitHub's macOS runners are VMs without Hypervisor.framework (no nested
           # virtualization): run the guest under TCG there. Empty elsewhere: run.sh picks.
           QEMU_ACCEL: ${{ runner.os == 'macOS' && 'tcg' || '' }}
-        run: oniro-app emulator start --headless --log "$GITHUB_WORKSPACE/qemu.log" --wait-for-hdc ${{ inputs.hdc_wait_seconds }}
+        run: oniro-app emulator start --headless --connect "$DEVICE" --log "$GITHUB_WORKSPACE/qemu.log" --wait-for-hdc ${{ inputs.hdc_wait_seconds }}
 
       - name: Verify hdc connection (emulator connect)
         run: oniro-app emulator connect --address "$DEVICE"

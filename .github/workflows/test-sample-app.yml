@@ -105,6 +105,7 @@ jobs:
       slow_factor: 8
       hdc_wait_seconds: 1800
       device_artifacts: emulator-device-artifacts-arm64-macos
+      hdc_port: 55565
       emulator_log_artifact: emulator-log-arm64-macos
 
   # Parallel chain: verify the NativeCpp template scaffolds and builds (native C++ via
