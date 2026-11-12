@@ -153,7 +153,10 @@ jobs:
             qemu_pkg=qemu-system-x86
           fi
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends "$qemu_pkg" libatomic1
+          # ipxe-qemu: the virtio NIC option ROM (efi-virtio.rom). qemu-system-x86
+          # depends on it; qemu-system-arm only recommends it, and emulator
+          # launchers older than 7.0.3 fail without it.
+          sudo apt-get install -y --no-install-recommends "$qemu_pkg" ipxe-qemu libatomic1
 
       - name: Download scaffolded project
         uses: actions/download-artifact@v4
