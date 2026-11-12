@@ -21,34 +21,37 @@ jobs:
           while [ $# -gt 0 ]; do
             a="$1"; shift
             case "$a" in
-              -append) args+=("$a" "earlycon=pl011,0x9000000 $1"); shift ;;
+              -append) args+=("$a" "earlycon=pl011,0x9000000 ${1/loglevel=4/loglevel=8}"); shift ;;
+              -accel) if [ -n "$QW_ACCEL" ]; then args+=("$a" "$QW_ACCEL"); shift; else args+=("$a"); fi ;;
               -cpu) if [ -n "$QW_CPU" ]; then args+=("$a" "$QW_CPU"); shift; else args+=("$a"); fi ;;
               -smp) if [ -n "$QW_SMP" ]; then args+=("$a" "$QW_SMP"); shift; else args+=("$a"); fi ;;
               *) args+=("$a") ;;
             esac
           done
           printf '%q ' qemu-system-aarch64 "${args[@]}" > "$GITHUB_WORKSPACE/qemu-cmd-$QW_TAG.txt"
-          exec qemu-system-aarch64 "${args[@]}"
+          exec qemu-system-aarch64 "${args[@]}" -monitor unix:/tmp/mon-$QW_TAG.sock,server,nowait
           W
           chmod +x qwrap.sh
       - name: probe variants
         run: |
           set +e
           run_variant() {
-            tag=$1; export QW_TAG=$tag QW_CPU=$2 QW_SMP=$3
+            tag=$1; export QW_TAG=$tag QW_CPU=$2 QW_SMP=$3 QW_ACCEL=$4
             echo "=== $tag cpu=${2:-default} smp=${3:-default}"
             QEMU_ACCEL=tcg QEMU_BIN="$PWD/qwrap.sh" nohup bash images/run.sh --headless --audio none -c 127.0.0.1:55565 images > "run-$tag.log" 2>&1 < /dev/null &
             rpid=$!
             sleep 5
             (nc 127.0.0.1 4444 > "serial-$tag.log" 2>&1 &)
-            sleep 240
+            sleep 60
+            echo "--- monitor @60s"; printf 'info status\ninfo cpus\n' | nc -U -w 3 /tmp/mon-$tag.sock | strings | tail -12
+            sleep 120
+            echo "--- monitor @180s"; printf 'info status\ninfo cpus\ninfo registers\n' | nc -U -w 3 /tmp/mon-$tag.sock | strings | head -30
             echo "--- run.sh log"; tail -5 "run-$tag.log"
             echo "--- serial lines: $(strings "serial-$tag.log" | wc -l)"; strings "serial-$tag.log" | head -40
             pkill -f qemu-system-aarch64; sleep 3; kill $rpid 2>/dev/null; pkill -f "nc 127.0.0.1 4444"
           }
-          run_variant default "" ""
-          run_variant a76 "cortex-a76" ""
-          run_variant smp2 "" "2"
+          run_variant default "" "" ""
+          run_variant single "" "2" "tcg,thread=single"
           cat qemu-cmd-default.txt
       - if: always()
         uses: actions/upload-artifact@v4
