@@ -25,6 +25,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      emulator_url_x86_64:
+        description: Install the x86_64 emulator from this URL (e.g. a prerelease asset) instead of the latest release
+        type: string
+        default: ''
+      emulator_url_arm64:
+        description: Install the arm64 emulator from this URL (e.g. a prerelease asset) instead of the latest release
+        type: string
+        default: ''
 
 jobs:
   scaffold:
@@ -54,6 +63,28 @@ jobs:
       test_hap_file: ${{ needs.build.outputs.test_hap_file }}
       bundle_name: com.example.sampleapp
       entry_ability: EntryAbility
+      emulator_url: ${{ inputs.emulator_url_x86_64 || '' }}
+
+  # The same device checks on the arm64 emulator (the one Apple Silicon Macs run with
+  # HVF). No GitHub-hosted runner gives an arm64 guest KVM, so it runs under TCG on a
+  # standard x86_64 runner, where the x86_64 hdc works, with longer waits.
+  emulator-arm64:
+    needs: [scaffold, build]
+    uses: ./.github/workflows/emulator-run.yml
+    with:
+      project_artifact: ${{ needs.scaffold.outputs.project_artifact }}
+      hap_artifact: ${{ needs.build.outputs.hap_artifact }}
+      hap_file: ${{ needs.build.outputs.hap_file }}
+      test_hap_file: ${{ needs.build.outputs.test_hap_file }}
+      bundle_name: com.example.sampleapp
+      entry_ability: EntryAbility
+      runner: ubuntu-24.04
+      emulator_arch: arm64
+      emulator_url: ${{ inputs.emulator_url_arm64 || '' }}
+      slow_factor: 8
+      hdc_wait_seconds: 1800
+      device_artifacts: emulator-device-artifacts-arm64
+      emulator_log_artifact: emulator-log-arm64
 
   # Parallel chain: verify the NativeCpp template scaffolds and builds (native C++ via
   # CMake/N-API). Build success is the gate; emulator launch is already exercised by the

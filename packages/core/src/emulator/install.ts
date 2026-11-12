@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ConfigProvider } from '../ports/config.js';
 import { defaultPaths } from '../ports/config.js';
@@ -10,8 +11,61 @@ import { downloadFile } from '../sdk/download.js';
 import { extractZipWithProgress } from '../sdk/extract.js';
 import { createInstallTempDir, removeTempWorkDir, toSpaceError } from '../sdk/tmp.js';
 
+/** Guest architecture of an Oniro emulator image. */
+export type EmulatorArch = 'x86_64' | 'arm64';
+
+export const EMULATOR_ARCHES: readonly EmulatorArch[] = ['x86_64', 'arm64'];
+
+/**
+ * The emulator architecture this host runs with a hypervisor: arm64 on Apple Silicon
+ * and other arm64 hosts, x86_64 everywhere else. Pure/testable.
+ */
+export function hostEmulatorArch(arch: string = os.arch()): EmulatorArch {
+  return arch === 'arm64' ? 'arm64' : 'x86_64';
+}
+
+/** The default download URL of the emulator for `arch`. */
+export function defaultEmulatorUrl(arch: EmulatorArch): string {
+  return arch === 'arm64' ? defaultPaths.emulatorUrlArm64 : defaultPaths.emulatorUrl;
+}
+
+/**
+ * The URLs `installEmulator` tries, in order. An explicit `emulatorUrl` (ONIRO_EMULATOR_URL)
+ * always wins. Without an explicit `arch` an arm64 host asks for the arm64 emulator and,
+ * while a release has no arm64 asset, falls back to the x86_64 one (which such hosts run
+ * under TCG, as before). Pure/testable.
+ */
+export function emulatorDownloadUrls(
+  configuredUrl: string,
+  arch: EmulatorArch | undefined,
+  hostArch: EmulatorArch = hostEmulatorArch(),
+): string[] {
+  if (configuredUrl) return [configuredUrl];
+  if (arch) return [defaultEmulatorUrl(arch)];
+  return hostArch === 'arm64'
+    ? [defaultEmulatorUrl('arm64'), defaultEmulatorUrl('x86_64')]
+    : [defaultEmulatorUrl('x86_64')];
+}
+
+/**
+ * The guest architecture of the installed emulator, from the kernel it ships: `Image`
+ * (arm64) or `bzImage` (x86_64). Undefined when neither is there.
+ */
+export function installedEmulatorArch(config: ConfigProvider): EmulatorArch | undefined {
+  const imagesDir = path.join(getEmulatorDir(config), 'images');
+  if (fs.existsSync(path.join(imagesDir, 'Image'))) return 'arm64';
+  if (fs.existsSync(path.join(imagesDir, 'bzImage'))) return 'x86_64';
+  return undefined;
+}
+
 export interface InstallEmulatorOptions {
   config: ConfigProvider;
+  /**
+   * Guest architecture to install. Default: the host's (arm64 on Apple Silicon), with a
+   * fallback to x86_64 when the release has no arm64 emulator. Ignored when
+   * `emulatorUrl` (ONIRO_EMULATOR_URL) is set.
+   */
+  arch?: EmulatorArch;
   progress?: ProgressReporter;
   abortSignal?: AbortSignal;
   logger?: Logger;
@@ -29,7 +83,7 @@ export async function installEmulator(opts: InstallEmulatorOptions): Promise<voi
   const { config, progress, abortSignal } = opts;
   const logger = opts.logger ?? noopLogger;
 
-  const url = config.get('emulatorUrl', defaultPaths.emulatorUrl);
+  const urls = emulatorDownloadUrls(config.get('emulatorUrl', ''), opts.arch);
   const emulatorDir = getEmulatorDir(config);
   const what = 'the emulator install';
   const { dir: tmpDir, root: tmpRoot } = createInstallTempDir({
@@ -45,7 +99,16 @@ export async function installEmulator(opts: InstallEmulatorOptions): Promise<voi
     fs.mkdirSync(emulatorDir, { recursive: true });
 
     progress?.report({ message: 'Downloading emulator...', increment: 0 });
-    await downloadFile({ url, dest: tmpZip, progress, abortSignal, start: 0, range: 50, what, tmpRoot });
+    for (const [i, url] of urls.entries()) {
+      try {
+        await downloadFile({ url, dest: tmpZip, progress, abortSignal, start: 0, range: 50, what, tmpRoot });
+        break;
+      } catch (err) {
+        const next = urls[i + 1];
+        if (!next || !/\(HTTP 404\)/.test((err as Error).message)) throw err;
+        logger.warn(`No emulator at ${url}; installing ${next} instead.`);
+      }
+    }
 
     progress?.report({ message: 'Extracting emulator...', increment: 0 });
     await extractZipWithProgress({ zipPath: tmpZip, dest: emulatorDir, progress, start: 50, range: 45, logger });
