@@ -404,7 +404,7 @@ jobs:
           mkdir -p "$out/default" "$out/ohosTest"
           cp "$HAP" "$out/default/"
           cp "$GITHUB_WORKSPACE/hap/$TEST_HAP_FILE" "$out/ohosTest/"
-          oniro-app test "$PROJECT" --no-build --json > "$GITHUB_WORKSPACE/test.json"
+          oniro-app test "$PROJECT" --no-build --timeout $((15000 * SLOW)) --json > "$GITHUB_WORKSPACE/test.json"
 
       - name: File send/recv round-trip (file send / file recv)
         run: |
