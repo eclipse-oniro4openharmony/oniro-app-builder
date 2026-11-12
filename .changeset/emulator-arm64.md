@@ -17,3 +17,6 @@ The arm64 Oniro emulator:
 - `emulator start --connect <host:port> --wait-for-hdc` waits on that address;
   it always polled 127.0.0.1:55555 before, so a non-default port never
   connected. A wildcard bind host (`0.0.0.0`) is dialled on the loopback.
+- `emulator connect` and `emulator start --wait-for-hdc` give a `tconn` up to
+  5 s to show up in `hdc list targets` instead of checking once: against a slow
+  (emulated) guest the session can come up after `tconn` returns.
