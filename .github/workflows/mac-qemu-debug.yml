@@ -1,0 +1,60 @@
+# Temporary: why the arm64 emulator prints nothing on the macOS arm64 runner.
+name: mac-qemu-debug
+on:
+  push:
+    branches: [emulator-arm64]
+    paths: ['.github/workflows/mac-qemu-debug.yml']
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - run: brew install qemu
+      - run: |
+          curl -fsSL -o emu.zip https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/download/v7.0.3-rc2/oniro_emulator_arm64.zip
+          unzip -q emu.zip && ls -la images
+      - name: wrapper
+        run: |
+          cat > qwrap.sh <<'W'
+          #!/bin/bash
+          # add earlycon and apply $QW_CPU / $QW_SMP overrides, log the final command
+          args=()
+          while [ $# -gt 0 ]; do
+            a="$1"; shift
+            case "$a" in
+              -append) args+=("$a" "earlycon=pl011,0x9000000 $1"); shift ;;
+              -cpu) if [ -n "$QW_CPU" ]; then args+=("$a" "$QW_CPU"); shift; else args+=("$a"); fi ;;
+              -smp) if [ -n "$QW_SMP" ]; then args+=("$a" "$QW_SMP"); shift; else args+=("$a"); fi ;;
+              *) args+=("$a") ;;
+            esac
+          done
+          printf '%q ' qemu-system-aarch64 "${args[@]}" > "$GITHUB_WORKSPACE/qemu-cmd-$QW_TAG.txt"
+          exec qemu-system-aarch64 "${args[@]}"
+          W
+          chmod +x qwrap.sh
+      - name: probe variants
+        run: |
+          set +e
+          run_variant() {
+            tag=$1; export QW_TAG=$tag QW_CPU=$2 QW_SMP=$3
+            echo "=== $tag cpu=${2:-default} smp=${3:-default}"
+            QEMU_ACCEL=tcg QEMU_BIN="$PWD/qwrap.sh" nohup bash images/run.sh --headless --audio none -c 127.0.0.1:55565 images > "run-$tag.log" 2>&1 < /dev/null &
+            rpid=$!
+            sleep 5
+            (nc 127.0.0.1 4444 > "serial-$tag.log" 2>&1 &)
+            sleep 240
+            echo "--- run.sh log"; tail -5 "run-$tag.log"
+            echo "--- serial lines: $(strings "serial-$tag.log" | wc -l)"; strings "serial-$tag.log" | head -40
+            pkill -f qemu-system-aarch64; sleep 3; kill $rpid 2>/dev/null; pkill -f "nc 127.0.0.1 4444"
+          }
+          run_variant default "" ""
+          run_variant a76 "cortex-a76" ""
+          run_variant smp2 "" "2"
+          cat qemu-cmd-default.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-qemu-debug
+          path: |
+            serial-*.log
+            run-*.log
+            qemu-cmd-*.txt
