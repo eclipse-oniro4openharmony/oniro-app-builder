@@ -9,6 +9,15 @@ jobs:
     runs-on: macos-15
     steps:
       - run: brew install qemu
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci && npm run build
+      - name: SDK hdc
+        run: |
+          node packages/cli/dist/oniro-app.js sdk install 6.1 > /dev/null
+          hdc_bin=$(find "$HOME/setup-ohos-sdk/darwin" -path '*/toolchains/hdc' -type f | head -1)
+          echo "HDC=$hdc_bin" >> "$GITHUB_ENV"; "$hdc_bin" -v
       - run: |
           curl -fsSL -o emu.zip https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/download/v7.0.3-rc2/oniro_emulator_arm64.zip
           unzip -q emu.zip && ls -la images
@@ -26,21 +35,19 @@ jobs:
           DEVS=(-device virtio-gpu-pci,xres=360,yres=720,max_outputs=1,addr=08.0 -audiodev none,id=snd0 -device es1370,audiodev=snd0
                 -netdev user,id=net0,hostfwd=tcp:127.0.0.1:55565-:55555 -device virtio-net-pci,netdev=net0,romfile= -device virtio-tablet-pci)
           MISC=(-name "Oniro Emulator" -boot c -vga none -rtc base=utc,clock=host)
-          v() {
-            tag=$1; ser=$2; reader=$3; shift 3
-            echo "=== $tag serial=$ser reader=$reader"
-            qemu-system-aarch64 "$@" -append "$APPEND" -serial "$ser" -monitor unix:/tmp/m-$tag.sock,server,nowait < /dev/null > ../out-$tag.log 2>&1 &
-            pid=$!; sleep 3
-            if [ "$reader" = nc ]; then (nc 127.0.0.1 4444 > ../ser-$tag.log 2>&1 &); fi
-            sleep 45
-            printf 'info registers\n' | nc -U -w 2 /tmp/m-$tag.sock | strings | grep -E "PC=" | head -1
-            kill $pid; wait $pid 2>/dev/null; pkill -f "nc 127.0.0.1 4444"
-            echo "--- serial: $(strings ../ser-$tag.log 2>/dev/null | wc -l) lines; qemu out: $(head -c 300 ../out-$tag.log)"
-          }
           ALL=("${BASE[@]}" "${INITRD[@]}" "${DISKS[@]}" "${DEVS[@]}" "${MISC[@]}" -display none)
-          v telnet-noreader "telnet:0.0.0.0:4444,server,nowait" none "${ALL[@]}"
-          v telnet-nc       "telnet:0.0.0.0:4444,server,nowait" nc   "${ALL[@]}"
-          v telnet-waitoff  "telnet:0.0.0.0:4444,server=on,wait=off" nc "${ALL[@]}"
-          v tcp-nc          "tcp:0.0.0.0:4444,server=on,wait=off" nc "${ALL[@]}"
-          v telnet-local    "telnet:127.0.0.1:4444,server=on,wait=off" nc "${ALL[@]}"
-          v file            "file:../ser-file.log" none "${ALL[@]}"
+          qemu-system-aarch64 "${ALL[@]}" -append "$APPEND" -serial file:../ser.log -monitor unix:/tmp/m.sock,server,nowait < /dev/null > ../out.log 2>&1 &
+          for t in 60 120 180 240; do
+            sleep 60
+            echo "=== t=${t}s"
+            grep -c . ../ser.log; grep -iE "hdcd|eth0|boot.completed|panic" ../ser.log | tail -3
+            nc -z -w 3 127.0.0.1 55565 && echo "port 55565 accepts" || echo "port 55565 refuses"
+            printf 'info usernet\n' | nc -U -w 2 /tmp/m.sock | strings | tail -6
+          done
+          echo "=== hdc"
+          "$HDC" kill; "$HDC" start; sleep 2
+          "$HDC" tconn 127.0.0.1:55565; sleep 5
+          "$HDC" list targets -v
+          "$HDC" -t 127.0.0.1:55565 shell "uname -a; param get bootevent.boot.completed"
+          ls -la ~/.hdc* /tmp/hdc* 2>/dev/null | head; cat "$TMPDIR"/hdc.log 2>/dev/null | tail -20
+          echo "=== raw tcp"; (printf 'x' ; sleep 2) | nc -w 5 127.0.0.1 55565 | xxd | head -5
