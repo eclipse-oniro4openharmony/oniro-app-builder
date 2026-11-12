@@ -15,6 +15,9 @@ import { getDefaultInstanceStatus, listPoolInstanceStatuses, probeEmulatorBoot, 
 /**
  * Try to connect hdc to the emulator. Resolves true on success, false otherwise.
  */
+const TCONN_SETTLE_POLLS = 5;
+const TCONN_SETTLE_INTERVAL_MS = 1000;
+
 export async function attemptHdcConnection(
   config: ConfigProvider,
   address = '127.0.0.1:55555',
@@ -23,8 +26,15 @@ export async function attemptHdcConnection(
   try {
     await hdcExec({ config, args: ['start', '-r'], logger });
     await hdcExec({ config, args: ['tconn', address], logger });
-    const targets = await hdcExec({ config, args: ['list', 'targets'], logger });
-    return targets.stdout.includes(address);
+    // tconn can return before the session is up (it may even print "Connect
+    // failed" and connect a moment later, e.g. against a slow emulated guest):
+    // give the target a few seconds to appear.
+    for (let i = 0; i < TCONN_SETTLE_POLLS; i++) {
+      const targets = await hdcExec({ config, args: ['list', 'targets'], logger });
+      if (targets.stdout.includes(address)) return true;
+      if (i + 1 < TCONN_SETTLE_POLLS) await new Promise((r) => setTimeout(r, TCONN_SETTLE_INTERVAL_MS));
+    }
+    return false;
   } catch (err) {
     logger.warn(`hdc connection attempt failed: ${(err as Error).message}`);
     return false;
