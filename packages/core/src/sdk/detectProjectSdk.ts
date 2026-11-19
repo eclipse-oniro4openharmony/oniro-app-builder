@@ -6,20 +6,7 @@ import type { ConfigProvider } from '../ports/config.js';
 import { SdkNotInstalledError } from '../ports/errors.js';
 import { ALL_SDKS } from './constants.js';
 import { getOhosBaseSdkHome } from './paths.js';
-
-/**
- * The `sdk.dir` a project's `local.properties` names (a base SDK home holding API
- * folders, as `createScaffold` writes it), unescaped, or undefined.
- */
-function localPropertiesSdkDir(projectRoot: string): string | undefined {
-  try {
-    const content = fs.readFileSync(path.join(projectRoot, 'local.properties'), 'utf-8');
-    const m = /^\s*sdk\.dir\s*[=:]\s*(.+?)\s*$/m.exec(content);
-    return m ? m[1]!.replace(/\\(.)/g, '$1') : undefined;
-  } catch {
-    return undefined;
-  }
-}
+import { localPropertiesSdkDir } from './localProperties.js';
 
 /**
  * The OpenHarmony SDK an OpenHarmony project builds against is missing, as a typed

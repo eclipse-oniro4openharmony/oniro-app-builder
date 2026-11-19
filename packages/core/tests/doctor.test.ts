@@ -5,7 +5,6 @@ import * as path from 'node:path';
 import {
   apiLevelOf,
   checkCmdTools,
-  checkCmdToolsFlavour,
   checkDisk,
   checkNode,
   checkSigning,
@@ -96,17 +95,6 @@ describe('doctor checks', () => {
       status: 'fail',
       fix: 'oniro-app cmdtools install',
     });
-  });
-
-  it('fails tools of the other flavour, and skips when the tools are incomplete', () => {
-    const project = describeProject(writeProject({ compileSdkVersion: 20, runtimeOS: 'OpenHarmony' }));
-    expect(checkCmdToolsFlavour({ node: '20', cmdToolsFlavour: 'HarmonyOS' }, project)).toMatchObject({
-      status: 'fail',
-      fix: expect.stringContaining('check arkts'),
-    });
-    expect(checkCmdToolsFlavour({ node: '20', cmdToolsFlavour: 'OpenHarmony' }, project).status).toBe('ok');
-    expect(checkCmdToolsFlavour({ node: '20', cmdToolsFlavour: 'OpenHarmony' }, project, false).status).toBe('skip');
-    expect(checkCmdToolsFlavour({ node: '20', cmdToolsFlavour: 'HarmonyOS' }, undefined).status).toBe('skip');
   });
 
   it('checks the signing material the signingConfig names', () => {

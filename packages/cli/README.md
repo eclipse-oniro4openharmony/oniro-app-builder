@@ -161,7 +161,6 @@ On this machine's KVM host (Linux), two instances at the defaults booted side by
 | `node`, `java` | Node.js is older than 20; no Java on `JAVA_HOME` or `PATH` (its `-version` is recorded). |
 | `sdk` | The SDK the project's `compileSdkVersion` names is not installed (the HarmonyOS SDK for a HarmonyOS project, and its release must match). `--fix` installs it. |
 | `cmdtools` | The command-line tools are missing, or a partial install (`bin/ohpm`, `bin/hvigorw`, `bin/codelinter`, `hvigor/`, `ohpm/`, `codelinter/`, `tool/node`, the SDK toolchains or `version.txt` missing). The version is recorded. |
-| `cmdtools-flavour` | The tools are the other flavour than the project's `runtimeOS`, so `lint` skips its checks. |
 | `arkts-check` | `check arkts` does not run, or runs but misses an error planted in a generated one-file project. |
 | `hdc`, `device` | hdc does not run; no device or emulator is reachable; the device's API is below the project's `compatibleSdkVersion`. A device of the other OS family is a warning. |
 | `signing` | The signingConfig names material that is missing (no signingConfig at all is a warning). |
@@ -418,7 +417,9 @@ $ oniro-app docs show --api 23 reference/apis-arkdata/errorcode-data-rdb.md --he
 
 #### `lint` — run the OpenHarmony codelinter
 
-`lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0, although codelinter itself exits 1 for them. When codelinter says its report is incomplete, for example because the command-line tools' flavour (see `cmdtools status`) does not match the project's `runtimeOS`, it exits 2: it skipped checks, so a clean report is not evidence of clean code. Its notices, and a hint when the flavour is the cause, go to stderr.
+`lint [project-dir]` (defaults to the current directory). Prints each finding as `file:line:col severity message [rule]`, then the totals (`N defects: E errors, W warnings, S suggestions.`). Exits 1 on error-severity findings or when codelinter fails to produce a report; warnings alone exit 0. When codelinter says its report is incomplete, for example because it could not find the SDK, it exits 2: it skipped checks, so a clean report is not evidence of clean code. Its notices go to stderr.
+
+Any command-line tools work, whichever SDK they bundle (see `cmdtools status`): `lint` runs codelinter's entry under the tools' Node.js, not their `bin/codelinter` launcher, with the SDK the project's `runtimeOS` needs. For an OpenHarmony project that is the OpenHarmony SDK `sdk install` installed, which codelinter reads only from `local.properties` `sdk.dir`: when the project's `local.properties` does not name an SDK holding its `compileSdkVersion`, `lint` sets `sdk.dir` for the run and restores the file afterwards, also on Ctrl+C (fails when that SDK is not installed). For a HarmonyOS project it is the tools' own SDK when they bundle the HarmonyOS SDK, as their launcher passes it, else the HarmonyOS SDK a build uses. `--files` patterns are expanded against the project (Node.js 22 or newer), as the launcher's shell did; a file codelinter cannot find makes the report incomplete, or the run fail when no file is left.
 
 | Flag | Description |
 | --- | --- |
