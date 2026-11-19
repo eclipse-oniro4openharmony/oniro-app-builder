@@ -1,9 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ConfigProvider } from '../ports/config.js';
-import type { Logger } from '../ports/logger.js';
+import { type Logger, noopLogger } from '../ports/logger.js';
 import { runProcess } from '../hdc/exec.js';
-import { getCmdToolsBin } from '../sdk/paths.js';
+import { SdkNotInstalledError } from '../ports/errors.js';
+import { getCmdToolsPath, getOhosBaseSdkHome } from '../sdk/paths.js';
+import { ALL_SDKS } from '../sdk/constants.js';
+import { detectProjectSdkVersion } from '../sdk/detectProjectSdk.js';
+import { withLocalPropertiesSdkDir } from '../sdk/localProperties.js';
+import { detectRuntimeOs, type RuntimeOs } from '../harmonyos/target.js';
+import { requireHarmonyOsSdk } from '../harmonyos/sdk.js';
+import { detectCmdToolsFlavour } from '../cmdTools/install.js';
 
 export interface CodelinterFinding {
   file: string;
@@ -39,7 +46,10 @@ export interface CodelinterReport {
 }
 
 export interface CodelinterResult extends CodelinterReport {
-  /** codelinter process exit code: 1 whenever it found any defect, warnings included. */
+  /**
+   * codelinter process exit code: 0 after a run that printed its report, whatever it
+   * found; non-zero when it did not run (1 for a bad option, 255 for an internal error).
+   */
   code: number;
   /** Combined stdout+stderr, with colour codes and progress-bar redraws removed. */
   raw: string;
@@ -53,7 +63,8 @@ const FILE_HEADER_RE = /^(.+\.\w+)\((\d+)\)$/;
 const ROW_RE = /^(\d+):(\d+)\s+(error|warning|warn|suggestion|info)\s+(.*)$/i;
 const RULE_RE = /^@?[\w.-]+(?:\/[\w.-]+)+$/;
 const SUMMARY_RE = /Defects:\s*(\d+);\s*Errors:\s*(\d+);\s*Warns:\s*(\d+);\s*Suggestions:\s*(\d+)/i;
-const NOTICE_RE = /does not match that of the project|error occurred during linting|incomplete report/i;
+/** Remarks meaning codelinter skipped part of the run; `<path> not exists` is a dropped file argument. */
+const NOTICE_RE = /does not match that of the project|error occurred during linting|incomplete report| not exists$/i;
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
 
 /**
@@ -188,16 +199,142 @@ export interface RunCodelinterOptions {
   logger?: Logger;
 }
 
-/** Run the OpenHarmony codelinter and return the parsed report + the cleaned raw output. */
-export async function runCodelinter(opts: RunCodelinterOptions): Promise<CodelinterResult> {
-  const res = await runProcess({
-    command: getCmdToolsBin(opts.config, 'codelinter'),
-    args: opts.files?.length ? [...opts.files] : [],
-    cwd: opts.projectDir,
-    timeoutMs: opts.timeoutMs ?? 600_000,
-    abortSignal: opts.abortSignal,
-    logger: opts.logger,
+/**
+ * The SDK argument that makes codelinter lint an OpenHarmony project: it then reads
+ * the SDK from `local.properties` `sdk.dir`. The tools' `bin/codelinter` launcher
+ * always passes `<tools>/sdk` instead, which codelinter accepts for HarmonyOS
+ * projects only ("The type of command line tools does not match that of the project").
+ */
+export const CODELINTER_OHOS_SDK_ARG = 'ohosSdkPath';
+
+/** The product codelinter lints when not given `-p`. */
+const CODELINTER_PRODUCT = 'default';
+
+/** How {@link runCodelinter} runs codelinter for a project. */
+export interface CodelinterInvocation {
+  /** The Node.js bundled with the command-line tools. */
+  command: string;
+  /** `<tools>/codelinter/index.js`, the SDK argument, then the files to lint. */
+  args: string[];
+  /** The project's `runtimeOS`, which picks the SDK argument. */
+  runtimeOS: RuntimeOs;
+  /**
+   * OpenHarmony projects only: the SDK home to set as `local.properties` `sdk.dir`
+   * for the run, when the project's own `local.properties` does not hold its
+   * `compileSdkVersion`.
+   */
+  sdkDir?: string;
+}
+
+/**
+ * `sdk.dir` as codelinter reads it from the project's `local.properties`: the last
+ * line starting with `sdk.dir`, the text after `=`, trimmed and not unescaped. A
+ * relative path is relative to the project, codelinter's working directory.
+ */
+function codelinterSdkDir(projectDir: string): string | undefined {
+  let content: string;
+  try {
+    content = fs.readFileSync(path.join(projectDir, 'local.properties'), 'utf8');
+  } catch {
+    return undefined;
+  }
+  let dir: string | undefined;
+  for (const line of content.split(/\r?\n/)) {
+    if (line.startsWith('sdk.dir')) dir = line.split('=')[1]?.trim();
+  }
+  return dir ? path.resolve(projectDir, dir) : undefined;
+}
+
+type GlobSync = (pattern: string, options: { cwd: string }) => string[];
+
+/**
+ * `files` with glob patterns expanded against the project, as the shell in the
+ * tools' `bin/codelinter` launcher did on Linux and macOS: codelinter takes only
+ * existing paths. Needs Node.js 22 (`fs.globSync`); before that, and for a pattern
+ * matching nothing, the pattern is passed on and codelinter says it does not exist.
+ */
+export function expandCodelinterFiles(projectDir: string, files: readonly string[]): string[] {
+  const globSync = (fs as unknown as { globSync?: GlobSync }).globSync;
+  return files.flatMap((f) => {
+    if (!globSync || !/[*?[{]/.test(f)) return [f];
+    const matches = globSync(f, { cwd: projectDir }).sort();
+    return matches.length ? matches : [f];
   });
+}
+
+/**
+ * How to run codelinter on a project with any command-line tools, whichever SDK
+ * they bundle. Runs `codelinter/index.js` under the tools' Node.js with the SDK
+ * argument the project's `runtimeOS` needs:
+ * - OpenHarmony: {@link CODELINTER_OHOS_SDK_ARG}, and the OpenHarmony SDK home
+ *   (from `oniro-app sdk install`) in `local.properties` unless the `sdk.dir`
+ *   codelinter reads there already holds the project's API level. Throws
+ *   `SdkNotInstalledError` when neither holds it.
+ * - HarmonyOS: the tools' own `sdk` when they bundle the HarmonyOS SDK, as their
+ *   launcher passes it; else the HarmonyOS SDK a build would use. Throws when
+ *   there is none.
+ */
+export function codelinterInvocation(
+  config: ConfigProvider,
+  projectDir: string,
+  files: readonly string[] = [],
+  logger: Logger = noopLogger,
+): CodelinterInvocation {
+  const tools = getCmdToolsPath(config);
+  const command =
+    process.platform === 'win32'
+      ? path.join(tools, 'tool', 'node', 'node.exe')
+      : path.join(tools, 'tool', 'node', 'bin', 'node');
+  const entry = path.join(tools, 'codelinter', 'index.js');
+  const lintFiles = expandCodelinterFiles(projectDir, files);
+  const runtimeOS = detectRuntimeOs(projectDir, CODELINTER_PRODUCT);
+
+  if (runtimeOS === 'HarmonyOS') {
+    const sdkPath =
+      detectCmdToolsFlavour(tools) === 'HarmonyOS'
+        ? path.join(tools, 'sdk')
+        : requireHarmonyOsSdk({ config, logger }).sdkPath;
+    return { command, args: [entry, sdkPath, ...lintFiles], runtimeOS };
+  }
+
+  const invocation: CodelinterInvocation = { command, args: [entry, CODELINTER_OHOS_SDK_ARG, ...lintFiles], runtimeOS };
+  const api = detectProjectSdkVersion(projectDir, noopLogger, CODELINTER_PRODUCT);
+  if (api === undefined) return invocation;
+  const localSdkDir = codelinterSdkDir(projectDir);
+  if (localSdkDir && fs.existsSync(path.join(localSdkDir, String(api)))) return invocation;
+  const home = getOhosBaseSdkHome(config);
+  const expected = path.join(home, String(api));
+  if (!fs.existsSync(expected)) {
+    throw new SdkNotInstalledError(String(api), expected, ALL_SDKS.find((s) => s.api === String(api))?.version);
+  }
+  invocation.sdkDir = home;
+  return invocation;
+}
+
+/**
+ * Run codelinter (see {@link codelinterInvocation}) and return the parsed report and
+ * the cleaned raw output. For an OpenHarmony project whose `local.properties` does
+ * not name its SDK, the file names it for the run and is restored afterwards, also
+ * when `abortSignal` fires.
+ */
+export async function runCodelinter(opts: RunCodelinterOptions): Promise<CodelinterResult> {
+  const invocation = codelinterInvocation(opts.config, opts.projectDir, opts.files, opts.logger);
+  // The launcher creates codelinter's log directory before each run.
+  try {
+    fs.mkdirSync(path.join(getCmdToolsPath(opts.config), 'codelinter', 'linter', 'result'), { recursive: true });
+  } catch {
+    // Read-only tools: codelinter reports what it cannot write.
+  }
+  const run = () =>
+    runProcess({
+      command: invocation.command,
+      args: invocation.args,
+      cwd: opts.projectDir,
+      timeoutMs: opts.timeoutMs ?? 600_000,
+      abortSignal: opts.abortSignal,
+      logger: opts.logger,
+    });
+  const res = invocation.sdkDir ? await withLocalPropertiesSdkDir(opts.projectDir, invocation.sdkDir, run) : await run();
   const raw = `${res.stdout}${res.stderr}`;
   return { code: res.code, ...parseCodelinterReport(raw), raw: cleanCodelinterOutput(raw) };
 }

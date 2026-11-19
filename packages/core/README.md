@@ -352,7 +352,8 @@ Adapted in part from deveco-cli's `faultlog/` module (MIT); see `src/faultlog/NO
 | `discoverHaps` | `(DiscoverHapsOptions) => Promise<Record<string, ModuleHaps>>` | Group `*-signed`/`*-unsigned` HAPs by module, newest first. Test HAPs (`*-ohosTest-*.hap`, `isTestHap`) are left out. |
 | `pickHap` | `(haps, module?) => PickedHap \| null` | The HAP to install: a signed one, else unsigned (`signed: false`). |
 | `runOhpm` / `ensureOhModules` | — | Run `ohpm`; install `--all` only when `oh_modules/` is missing. |
-| `runCodelinter` / `parseCodelinterReport` / `parseCodelinterFindings` | — | Run the codelinter → `CodelinterResult { code, findings, summary, notices, incomplete, raw }`; the parsers read its per-file table and `-Defects:` totals. |
+| `runCodelinter` / `parseCodelinterReport` / `parseCodelinterFindings` | — | Run the codelinter → `CodelinterResult { code, findings, summary, notices, incomplete, raw }`; the parsers read its per-file table and `-Defects:` totals. Works with any command-line tools: see `codelinterInvocation`. |
+| `codelinterInvocation` | `(config, projectDir, files?, logger?) => CodelinterInvocation` | How `runCodelinter` runs codelinter: `{ command, args, runtimeOS, sdkDir? }`, codelinter's `index.js` under the tools' Node.js with the SDK argument the project's `runtimeOS` needs (`ohosSdkPath` for OpenHarmony; for HarmonyOS the tools' own SDK when it is the HarmonyOS one, else the one a build uses) and the files (`expandCodelinterFiles` expands glob patterns), and for OpenHarmony the SDK home to set as `local.properties` `sdk.dir` for the run when the `sdk.dir` codelinter reads there does not hold the project's API. Throws `SdkNotInstalledError`, or the no-HarmonyOS-SDK error, when the SDK is not installed. |
 
 ### ArkTS check
 
@@ -376,7 +377,7 @@ Adapted in part from deveco-cli's `faultlog/` module (MIT); see `src/faultlog/NO
 | Export | Signature | Description |
 | --- | --- | --- |
 | `runDoctor` | `(DoctorOptions) => Promise<DoctorReport>` | Every `oniro-app doctor` check: `{ ok, checks: [{ id, status, detail, fix, fixed }], project, versions }`. Never throws for a failed check. `fix: true` installs the project's missing OpenHarmony SDK. |
-| `checkCmdTools` / `checkCmdToolsFlavour` / `checkSigning` / `checkDisk` / `checkNode` | — | The synchronous checks, for a caller that wants one. `CMD_TOOLS_REQUIRED` lists what a complete tools install holds. |
+| `checkCmdTools` / `checkSigning` / `checkDisk` / `checkNode` | — | The synchronous checks, for a caller that wants one. `CMD_TOOLS_REQUIRED` lists what a complete tools install holds. |
 | `describeProject` / `apiLevelOf` | — | A project's `runtimeOS`, SDK versions and minimum device API; the API level of `20` or `"6.0.0(20)"`. |
 | `resolveProjectSdkDir` | `(config, projectDir) => string \| undefined` | The SDK API directory an OpenHarmony project builds against, under the SDK home or `local.properties` `sdk.dir`. |
 

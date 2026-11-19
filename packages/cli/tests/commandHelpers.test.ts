@@ -7,7 +7,7 @@ const warning = { file: 'a.ets', line: 1, column: 1, severity: 'warning', code: 
 const error = { ...warning, severity: 'error', message: 'e' };
 
 describe('lintExitCode', () => {
-  it('exits 0 for warnings, although codelinter itself exits 1 for them', () => {
+  it('exits 0 for warnings, whatever codelinter exited with', () => {
     expect(lintExitCode({ code: 1, incomplete: false, findings: [warning], summary: { defects: 1, errors: 0, warnings: 1, suggestions: 0 } })).toBe(0);
   });
 
@@ -15,8 +15,10 @@ describe('lintExitCode', () => {
     expect(lintExitCode({ code: 1, incomplete: false, findings: [error], summary: null })).toBe(1);
   });
 
-  it('passes the code through when codelinter printed no report at all', () => {
-    expect(lintExitCode({ code: 2, incomplete: false, findings: [], summary: null })).toBe(2);
+  it('exits 1 when codelinter printed no report at all, not its own code', () => {
+    // 2 would read as an incomplete report; 255 is codelinter's internal error.
+    expect(lintExitCode({ code: 2, incomplete: false, findings: [], summary: null })).toBe(1);
+    expect(lintExitCode({ code: 255, incomplete: false, findings: [], summary: null })).toBe(1);
     expect(lintExitCode({ code: 1, incomplete: false, findings: [], summary: { defects: 0, errors: 0, warnings: 0, suggestions: 0 } })).toBe(0);
   });
 

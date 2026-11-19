@@ -27,7 +27,7 @@ export function registerDoctorCommand(program: Command): void {
     .command('doctor [project-dir]')
     .description(
       'Check that this machine can build, check, sign, install and test: node, java, the SDK the project compiles ' +
-        'with, the command-line tools (complete, their version, their flavour against runtimeOS), a `check arkts` ' +
+        'with, the command-line tools (complete, their version), a `check arkts` ' +
         "self-test, hdc and a reachable device at the project's API, signing material, free disk space. Each check is " +
         'ok, warn, fail or skip, with a fix. Uses the project in the current directory when there is one. Exits 1 when ' +
         'any check fails.',

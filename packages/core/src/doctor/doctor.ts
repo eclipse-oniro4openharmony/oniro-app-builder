@@ -30,7 +30,7 @@ import { checkArkts, resolveArktsCheckSdk } from '../check/arktsCheck.js';
 export type DoctorStatus = 'ok' | 'warn' | 'fail' | 'skip';
 
 export interface DoctorCheck {
-  /** Stable key: `node`, `java`, `sdk`, `cmdtools`, `cmdtools-flavour`, `arkts-check`, `hdc`, `device`, `signing`, `disk`. */
+  /** Stable key: `node`, `java`, `sdk`, `cmdtools`, `arkts-check`, `hdc`, `device`, `signing`, `disk`. */
   id: string;
   status: DoctorStatus;
   /** What was found, one line. */
@@ -73,7 +73,7 @@ export interface DoctorReport {
 
 export interface DoctorOptions {
   config: ConfigProvider;
-  /** A project to check the SDK, flavour, device API and signing for. */
+  /** A project to check the SDK, device API and signing for. */
   projectDir?: string;
   /** Install the project's missing OpenHarmony SDK. */
   fix?: boolean;
@@ -207,32 +207,6 @@ export function checkCmdTools(config: ConfigProvider, versions: DoctorVersions):
     };
   }
   return { id: 'cmdtools', status: 'ok', detail: `${status.flavour ?? ''} ${version ?? 'version unknown'} at ${dir}`.trim() };
-}
-
-/** codelinter only fully checks projects of its own flavour (#21). */
-export function checkCmdToolsFlavour(
-  versions: DoctorVersions,
-  project: DoctorProject | undefined,
-  toolsOk = true,
-): DoctorCheck {
-  if (!project) return { id: 'cmdtools-flavour', status: 'skip', detail: 'no project given' };
-  // A partial install may lack sdk/default/hms, which is what tells the flavours apart.
-  if (!versions.cmdToolsFlavour || !toolsOk) {
-    return { id: 'cmdtools-flavour', status: 'skip', detail: 'command-line tools missing or incomplete' };
-  }
-  if (versions.cmdToolsFlavour === project.runtimeOS) {
-    return { id: 'cmdtools-flavour', status: 'ok', detail: `${versions.cmdToolsFlavour} tools, ${project.runtimeOS} project` };
-  }
-  return {
-    id: 'cmdtools-flavour',
-    status: 'fail',
-    detail:
-      `the command-line tools are the ${versions.cmdToolsFlavour} flavour and the project targets ${project.runtimeOS}, ` +
-      'so codelinter skips its checks (`lint` exits 2)',
-    fix:
-      `Point ONIRO_CMD_TOOLS_PATH at ${project.runtimeOS} command-line tools for \`lint\`, or gate on ` +
-      '`oniro-app check arkts`, which does not use them.',
-  };
 }
 
 async function checkProjectSdk(
@@ -521,7 +495,6 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   }
   const tools = checkCmdTools(opts.config, versions);
   checks.push(tools);
-  checks.push(checkCmdToolsFlavour(versions, project, tools.status === 'ok'));
   checks.push(
     opts.arktsSelfTest === false
       ? { id: 'arkts-check', status: 'skip', detail: 'self-test not requested' }

@@ -1,15 +1,14 @@
 import { Command, InvalidArgumentError } from 'commander';
 import * as path from 'node:path';
 import {
-  detectCmdToolsFlavour,
-  detectRuntimeOs,
-  getCmdToolsPath,
+  CancelledError,
   missingProjectRootFiles,
   runCodelinter,
   type CodelinterResult,
   type CodelinterSummary,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+import { withInterrupt } from '../lib/interrupt.js';
 import { runArktsCheckCommand } from './check.js';
 
 interface LintOpts {
@@ -33,17 +32,17 @@ export function lintTotals(result: Pick<CodelinterResult, 'findings' | 'summary'
 
 /**
  * The exit code for a lint run: 1 when there is an error-severity finding, or when
- * codelinter exited non-zero without printing a report (so it did not really run);
- * 2 when codelinter said its report is incomplete (it skipped checks, so a clean
- * report means nothing), unless `allowIncomplete`. Warnings and suggestions alone
- * exit 0, although codelinter itself exits 1 for them.
+ * codelinter exited non-zero without printing a report (so it did not really run),
+ * whatever code it exited with; 2 when codelinter said its report is incomplete (it
+ * skipped checks, so a clean report means nothing), unless `allowIncomplete`.
+ * Warnings and suggestions alone exit 0.
  */
 export function lintExitCode(
   result: Pick<CodelinterResult, 'code' | 'findings' | 'summary' | 'incomplete'>,
   allowIncomplete = false,
 ): number {
   if (lintTotals(result).errors > 0) return 1;
-  if (lintFailed(result)) return result.code;
+  if (lintFailed(result)) return 1;
   return result.incomplete && !allowIncomplete ? 2 : 0;
 }
 
@@ -69,7 +68,7 @@ export function registerLintCommand(program: Command): void {
     )
     .option(
       '--allow-incomplete',
-      'Exit 0 rather than 2 when codelinter reports that it skipped checks (e.g. the tools flavour differs from runtimeOS).',
+      'Exit 0 rather than 2 when codelinter reports that it skipped checks (e.g. it could not find the SDK).',
     )
     .action(async (projectDir: string | undefined, opts: LintOpts) => {
       if (opts.engine === 'arkts') {
@@ -81,7 +80,17 @@ export function registerLintCommand(program: Command): void {
       }
       const { config, logger } = getRuntime();
       const dir = path.resolve(projectDir ?? process.cwd());
-      const result = await runCodelinter({ config, projectDir: dir, files: opts.files, logger });
+      let result: CodelinterResult;
+      try {
+        // Ctrl+C stops codelinter, so a local.properties edited for the run is restored.
+        result = await withInterrupt(logger, 'stopping codelinter', (abortSignal) =>
+          runCodelinter({ config, projectDir: dir, files: opts.files, logger, abortSignal }),
+        );
+      } catch (err) {
+        if (!(err instanceof CancelledError)) throw err;
+        process.exitCode = 130;
+        return;
+      }
       const totals = lintTotals(result);
       const failed = lintFailed(result);
       if (opts.json) {
@@ -109,17 +118,6 @@ export function registerLintCommand(program: Command): void {
       }
       if (result.incomplete) {
         for (const n of result.notices) logger.warn(`codelinter: ${n}`);
-        const cmdToolsPath = getCmdToolsPath(config);
-        const flavour = detectCmdToolsFlavour(cmdToolsPath);
-        const projectOs = detectRuntimeOs(dir);
-        if (flavour !== projectOs) {
-          logger.warn(
-            `The command-line tools at ${cmdToolsPath} are the ${flavour} flavour, but the project targets ` +
-              `${projectOs} (runtimeOS in build-profile.json5), so codelinter skipped part of its checks: treat the ` +
-              `counts as a lower bound. For a complete report, point ONIRO_CMD_TOOLS_PATH at ${projectOs} ` +
-              "command-line tools. The build's ArkTS compiler checks are not affected.",
-          );
-        }
       }
       // Let output flush before exiting non-zero.
       if (result.incomplete && !opts.allowIncomplete && lintTotals(result).errors === 0 && !failed) {

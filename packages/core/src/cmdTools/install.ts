@@ -444,8 +444,8 @@ export function describeCmdTools(info: { version?: string; sdk?: CmdToolsSdk; to
 /**
  * The flavour of a command-line tools install: `HarmonyOS` when it bundles the
  * HarmonyOS SDK (`sdk/default/hms`, as the Huawei developer-portal download
- * does), otherwise `OpenHarmony`. codelinter only fully checks projects of its
- * own flavour (`runtimeOS` in build-profile.json5).
+ * does), otherwise `OpenHarmony`. `lint` works with either: `runCodelinter`
+ * picks the SDK from the project's `runtimeOS`, not from the tools.
  */
 export function detectCmdToolsFlavour(cmdToolsPath: string): CmdToolsFlavour {
   return fs.existsSync(path.join(cmdToolsPath, 'sdk', 'default', 'hms')) ? 'HarmonyOS' : 'OpenHarmony';

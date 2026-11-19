@@ -5,6 +5,7 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 import { getOhosBaseSdkHome } from '../sdk/paths.js';
+import { toJavaPropertiesPath } from '../sdk/localProperties.js';
 import { HARMONYOS_SDK_VERSIONS, detectRuntimeOs, harmonyOsSdkLabelForApi } from '../harmonyos/target.js';
 import { findHarmonyOsSdk } from '../harmonyos/sdk.js';
 import { listTemplates, validateTemplateLayout } from './templates.js';
@@ -91,10 +92,6 @@ async function normalizeJson5ToJson(projectDir: string, logger: Logger): Promise
       }
     }
   }
-}
-
-function toJavaPropertiesPath(p: string): string {
-  return process.platform === 'win32' ? p.replace(/\\/g, '\\\\') : p;
 }
 
 function createOrUpdateLocalProperties(projectDir: string, sdkDir: string): void {
