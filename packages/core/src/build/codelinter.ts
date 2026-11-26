@@ -6,7 +6,8 @@ import { runProcess } from '../hdc/exec.js';
 import { SdkNotInstalledError } from '../ports/errors.js';
 import { getCmdToolsPath, getOhosBaseSdkHome } from '../sdk/paths.js';
 import { ALL_SDKS } from '../sdk/constants.js';
-import { detectProjectSdkVersion } from '../sdk/detectProjectSdk.js';
+import { detectProjectSdk } from '../sdk/detectProjectSdk.js';
+import { expectedSdkApiDir, findSdkApiDir } from '../sdk/apiDir.js';
 import { withLocalPropertiesSdkDir } from '../sdk/localProperties.js';
 import { detectRuntimeOs, type RuntimeOs } from '../harmonyos/target.js';
 import { requireHarmonyOsSdk } from '../harmonyos/sdk.js';
@@ -298,14 +299,18 @@ export function codelinterInvocation(
   }
 
   const invocation: CodelinterInvocation = { command, args: [entry, CODELINTER_OHOS_SDK_ARG, ...lintFiles], runtimeOS };
-  const api = detectProjectSdkVersion(projectDir, noopLogger, CODELINTER_PRODUCT);
-  if (api === undefined) return invocation;
+  const sdk = detectProjectSdk(projectDir, noopLogger, CODELINTER_PRODUCT);
+  if (sdk === undefined) return invocation;
+  const { api, declared } = sdk;
   const localSdkDir = codelinterSdkDir(projectDir);
-  if (localSdkDir && fs.existsSync(path.join(localSdkDir, String(api)))) return invocation;
+  if (localSdkDir && findSdkApiDir(localSdkDir, api, declared)) return invocation;
   const home = getOhosBaseSdkHome(config);
-  const expected = path.join(home, String(api));
-  if (!fs.existsSync(expected)) {
-    throw new SdkNotInstalledError(String(api), expected, ALL_SDKS.find((s) => s.api === String(api))?.version);
+  if (!findSdkApiDir(home, api, declared)) {
+    throw new SdkNotInstalledError(
+      String(api),
+      expectedSdkApiDir(home, api, declared),
+      ALL_SDKS.find((s) => s.api === String(api))?.version,
+    );
   }
   invocation.sdkDir = home;
   return invocation;

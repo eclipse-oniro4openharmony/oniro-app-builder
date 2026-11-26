@@ -5,6 +5,7 @@ import { getSdkRootDir } from './paths.js';
 import { getOsFolder } from './platform.js';
 import type { ConfigProvider } from '../ports/config.js';
 import { findHarmonyOsSdk, type HarmonyOsSdkSource } from '../harmonyos/sdk.js';
+import { findSdkApiDir, listSdkApiDirs } from './apiDir.js';
 
 export interface SdkInfo {
   version: string;
@@ -21,7 +22,7 @@ export function getSupportedSdksForUi(config: ConfigProvider): SdkInfo[] {
   return ALL_SDKS.map((sdk) => ({
     version: sdk.version,
     api: sdk.api,
-    installed: fs.existsSync(path.join(base, sdk.api)),
+    installed: findSdkApiDir(base, sdk.api) !== undefined,
   })).sort((a, b) => Number(b.api) - Number(a.api));
 }
 
@@ -71,10 +72,7 @@ export function getInstalledSdks(config: ConfigProvider): string[] {
   for (const osFolder of ['linux', 'darwin', 'windows'] as const) {
     const osPath = path.join(sdkRoot, osFolder);
     if (!fs.existsSync(osPath) || !fs.statSync(osPath).isDirectory()) continue;
-    for (const api of fs.readdirSync(osPath)) {
-      const apiPath = path.join(osPath, api);
-      if (fs.statSync(apiPath).isDirectory()) versions.add(api);
-    }
+    for (const { api } of listSdkApiDirs(osPath)) versions.add(String(api));
   }
   return ALL_SDKS.filter((sdk) => versions.has(sdk.api)).map((sdk) => sdk.version);
 }

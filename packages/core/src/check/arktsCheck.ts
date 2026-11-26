@@ -115,8 +115,8 @@ export function arktsCheckerScript(): string {
 
 /**
  * The SDK `check arkts` loads for a project: for HarmonyOS, the located HarmonyOS
- * SDK's `default/openharmony` plus `default/hms/ets`; for OpenHarmony, the API
- * directory named by `compileSdkVersion` under the SDK home (or the project's
+ * SDK's `default/openharmony` plus `default/hms/ets`; for OpenHarmony, the SDK
+ * folder `compileSdkVersion` names under the SDK home (or the project's
  * `local.properties` `sdk.dir`). Throws `SdkNotInstalledError` when that API is not
  * installed, so a caller can offer to install it.
  */
@@ -141,7 +141,8 @@ export function resolveArktsCheckSdk(config: ConfigProvider, projectDir: string,
   const api = detectProjectSdkVersion(projectDir, logger);
   if (api === undefined) {
     throw new OniroError(
-      `Cannot tell which SDK ${projectDir} compiles with: build-profile.json5 declares no numeric compileSdkVersion.`,
+      `Cannot tell which SDK ${projectDir} compiles with: build-profile.json5 declares no OpenHarmony ` +
+        'compileSdkVersion (the API level, or from API 26 its release, such as "26.0.0").',
     );
   }
   const dir = resolveProjectSdkDir(config, projectDir);

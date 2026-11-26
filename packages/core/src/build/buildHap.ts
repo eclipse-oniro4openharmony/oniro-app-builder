@@ -6,7 +6,8 @@ import { runHvigorw } from './runHvigorw.js';
 import { ensureOhModules } from './ohpm.js';
 import { discoverHaps, type ModuleHaps } from './discoverHaps.js';
 import { getOhosBaseSdkHome, toLongPath } from '../sdk/paths.js';
-import { detectProjectSdkVersion, findMissingProjectSdk } from '../sdk/detectProjectSdk.js';
+import { detectProjectSdkVersion, findMissingProjectSdk, migrateProjectSdkDir } from '../sdk/detectProjectSdk.js';
+import { findHvigorTooOld } from '../cmdTools/compat.js';
 import { OHOS_DAILY_BUILDS_URL } from '../sdk/constants.js';
 import { detectRuntimeOs } from '../harmonyos/target.js';
 import { findHarmonyOsSdk, findHarmonyOsTool } from '../harmonyos/sdk.js';
@@ -148,8 +149,16 @@ export async function buildHap(opts: BuildHapOptions): Promise<BuildHapResult> {
 
   // Fail before ohpm and hvigor run, with the release to install, rather than on
   // hvigor's own late and vaguer error.
-  const missingSdk = isHarmonyOs ? null : findMissingProjectSdk(opts.config, projectDir, opts.product);
-  if (missingSdk) throw missingSdk;
+  if (!isHarmonyOs) {
+    // An API 26+ SDK that oniro-app installed under <sdk home>/<api> is invisible to
+    // hvigor 6.26 ("The SDK management mode has changed"): move it where hvigor looks.
+    migrateProjectSdkDir(opts.config, projectDir, opts.product, logger);
+    const missingSdk = findMissingProjectSdk(opts.config, projectDir, opts.product);
+    if (missingSdk) throw missingSdk;
+    const api = detectProjectSdkVersion(projectDir, noopLogger, opts.product);
+    const tooOld = api === undefined ? null : findHvigorTooOld(opts.config, api, projectDir);
+    if (tooOld) throw new OniroError(`${tooOld.message} ${tooOld.fix}`);
+  }
 
   if (opts.autoInstallDeps !== false) {
     // HarmonyOS projects install dependencies with their own install's ohpm.

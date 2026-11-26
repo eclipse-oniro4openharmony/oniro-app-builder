@@ -33,7 +33,7 @@ export function registerDoctorCommand(program: Command): void {
         'any check fails.',
     )
     .option('--json', 'Print the report as JSON: ok, checks (id, status, detail, fix, fixed), project, versions.')
-    .option('--fix', "Install the project's missing OpenHarmony SDK.")
+    .option('--fix', "Install the project's missing OpenHarmony SDK, or move an API 26 one from the legacy <api> folder to the one hvigor 6.26 reads.")
     .option('--no-device', 'Skip the device check (for a machine that only builds).')
     .option('--serial <serial>', 'The device to check, when several are connected.')
     .option('--no-arkts-check', 'Skip the `check arkts` self-test.')

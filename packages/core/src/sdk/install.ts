@@ -12,6 +12,7 @@ import { downloadFile, verifySha256 } from './download.js';
 import { extractTarball, extractZipWithProgress, readZipEntry } from './extract.js';
 import { movePath } from './move.js';
 import { createInstallTempDir, removeTempWorkDir, toSpaceError } from './tmp.js';
+import { readOhUniPackage, sdkApiDirName } from './apiDir.js';
 
 export interface InstallSdkOptions {
   config: ConfigProvider;
@@ -28,7 +29,8 @@ export interface InstallSdkOptions {
 }
 
 /**
- * Download and install an OpenHarmony SDK release into `<sdkRootDir>/<osFolder>/<api>`.
+ * Download and install an OpenHarmony SDK release into `<sdkRootDir>/<osFolder>/<api>`
+ * (`<sdkRootDir>/<osFolder>/<release>` from API 26, e.g. `26.0.0`; see `sdk/apiDir.ts`).
  *
  * Progress budget (overall 0..100):
  *   0..35  SDK archive download
@@ -61,8 +63,8 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
   const extractDir = path.join(tmpDir, 'extract');
   fs.mkdirSync(extractDir);
 
-  const sdkInstallDir = path.join(sdkRoot, osFolder, api);
-  fs.mkdirSync(path.dirname(sdkInstallDir), { recursive: true });
+  const sdkHome = path.join(sdkRoot, osFolder);
+  fs.mkdirSync(sdkHome, { recursive: true });
 
   const checkCancelled = () => {
     if (abortSignal?.aborted) throw new CancelledError();
@@ -93,7 +95,7 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
         `Expected folder '${osFolder}' not found in extracted SDK. Tarball layout may have changed.`,
       );
     }
-    await installComponents({ osContentPath, sdkInstallDir, progress, logger, start: 60, range: 35, checkCancelled });
+    await installComponents({ osContentPath, sdkHome, api, progress, logger, start: 60, range: 35, checkCancelled });
 
     progress?.report({ message: 'Cleaning up...', increment: 0 });
     removeTempWorkDir(tmpDir, tmpRoot);
@@ -109,8 +111,10 @@ export async function downloadAndInstallSdk(opts: InstallSdkOptions): Promise<vo
 interface InstallComponentsOptions {
   /** Folder holding the SDK's component ZIPs; each is unpacked in place, then deleted. */
   osContentPath: string;
-  /** Replaced by `osContentPath` once every component is unpacked. */
-  sdkInstallDir: string;
+  /** The SDK home (`<sdkRootDir>/<os>`) that receives `osContentPath` once every component is unpacked. */
+  sdkHome: string;
+  /** The API level installed. */
+  api: string;
   progress?: ProgressReporter;
   logger: Logger;
   /** Overall progress the component extracts consume; finalizing adds 3 more. */
@@ -119,8 +123,13 @@ interface InstallComponentsOptions {
   checkCancelled: () => void;
 }
 
-async function installComponents(opts: InstallComponentsOptions): Promise<void> {
-  const { osContentPath, sdkInstallDir, progress, logger, checkCancelled } = opts;
+/**
+ * Unpack the components, then move them to the folder hvigor reads them from (see
+ * {@link sdkApiDirName}), replacing that folder and, from API 26, the legacy
+ * `<sdkHome>/<api>` one. Returns where they went.
+ */
+async function installComponents(opts: InstallComponentsOptions): Promise<string> {
+  const { osContentPath, sdkHome, api, progress, logger, checkCancelled } = opts;
   const zipFiles = fs.readdirSync(osContentPath).filter((n) => n.endsWith('.zip'));
 
   const n = zipFiles.length;
@@ -146,11 +155,13 @@ async function installComponents(opts: InstallComponentsOptions): Promise<void> 
   }
 
   progress?.report({ message: 'Finalizing installation...', increment: 0 });
-  if (fs.existsSync(sdkInstallDir)) {
-    fs.rmSync(sdkInstallDir, { recursive: true, force: true });
+  const sdkInstallDir = path.join(sdkHome, sdkApiDirName(api, readOhUniPackage(osContentPath).platformVersion));
+  for (const previous of new Set([sdkInstallDir, path.join(sdkHome, api)])) {
+    if (fs.existsSync(previous)) fs.rmSync(previous, { recursive: true, force: true });
   }
   movePath(osContentPath, sdkInstallDir);
   progress?.report({ message: 'Finalizing installation...', increment: 3 });
+  return sdkInstallDir;
 }
 
 export interface InstallSdkFromArchiveOptions {
@@ -174,13 +185,14 @@ export interface InstalledSdk {
   api: string;
   /** SDK build version from the same file (e.g. `26.0.0.39`). */
   version: string;
-  /** Where it was installed: `<sdkRootDir>/<os>/<api>`. */
+  /** Where it was installed: `<sdkRootDir>/<os>/<api>`, or `<sdkRootDir>/<os>/<release>` from API 26. */
   dir: string;
 }
 
 /**
- * Install an OpenHarmony SDK from a local tarball into `<sdkRootDir>/<os>/<api>`. This
- * is how the full SDK, which the release mirror does not carry, gets installed.
+ * Install an OpenHarmony SDK from a local tarball into `<sdkRootDir>/<os>/<api>` (from
+ * API 26, `<sdkRootDir>/<os>/<release>`, e.g. `26.0.0`). This is how the full SDK, which
+ * the release mirror does not carry, gets installed.
  *
  * Only the current OS's folder is unpacked, wherever it sits in the archive (the full
  * SDK packs `linux`, `ohos` and `windows` side by side under `ohos-sdk/`), and the API
@@ -229,16 +241,19 @@ export async function installSdkFromArchive(opts: InstallSdkFromArchiveOptions):
           'Is it an OpenHarmony SDK archive for this OS?',
       );
     }
-    const { api, version } = await readSdkComponentsMeta(osContentPath);
-    const sdkInstallDir = path.join(sdkRoot, osFolder, api);
-    if (fs.existsSync(sdkInstallDir) && !opts.force) {
+    const { api, version, platformVersion } = await readSdkComponentsMeta(osContentPath);
+    const sdkHome = path.join(sdkRoot, osFolder);
+    // What installComponents replaces: the release's folder, and the legacy <api> one.
+    // From API 26 each release has a folder, so another release of the API stays.
+    const existing = [sdkApiDirName(api, platformVersion), api].map((n) => path.join(sdkHome, n)).find((d) => fs.existsSync(d));
+    if (existing && !opts.force) {
       throw new OniroError(
-        `An SDK for api ${api} is already installed at ${sdkInstallDir}; pass --force to replace it ` +
+        `An SDK for api ${api} is already installed at ${existing}; pass --force to replace it ` +
           'with this archive, or set ONIRO_SDK_ROOT_DIR to install it in a separate SDK root.',
       );
     }
-    fs.mkdirSync(path.dirname(sdkInstallDir), { recursive: true });
-    await installComponents({ osContentPath, sdkInstallDir, progress, logger, start: 40, range: 55, checkCancelled });
+    fs.mkdirSync(sdkHome, { recursive: true });
+    const sdkInstallDir = await installComponents({ osContentPath, sdkHome, api, progress, logger, start: 40, range: 55, checkCancelled });
 
     progress?.report({ message: 'Cleaning up...', increment: 0 });
     removeTempWorkDir(tmpDir, tmpRoot);
@@ -277,7 +292,7 @@ export function findSdkOsDir(root: string, osFolder: OsFolder, maxDepth = 4): st
  * `<component>/oh-uni-package.json` every component carries. The small `ets` component
  * is read first.
  */
-async function readSdkComponentsMeta(dir: string): Promise<{ api: string; version: string }> {
+async function readSdkComponentsMeta(dir: string): Promise<{ api: string; version: string; platformVersion?: string }> {
   const zips = fs
     .readdirSync(dir)
     .filter((n) => n.endsWith('.zip'))
@@ -286,10 +301,13 @@ async function readSdkComponentsMeta(dir: string): Promise<{ api: string; versio
     const data = await readZipEntry(path.join(dir, name), (e) => /^[^/]+\/oh-uni-package\.json$/.test(e));
     if (!data) continue;
     try {
-      const pkg = JSON.parse(data.toString('utf8')) as { apiVersion?: unknown; version?: unknown };
+      const pkg = JSON.parse(data.toString('utf8')) as { apiVersion?: unknown; version?: unknown; platformVersion?: unknown };
       // The API level becomes a path segment of the install dir, so accept only digits.
       const api = String(pkg.apiVersion ?? '');
-      if (/^\d+$/.test(api)) return { api, version: String(pkg.version ?? '') };
+      if (/^\d+$/.test(api)) {
+        const platformVersion = typeof pkg.platformVersion === 'string' ? pkg.platformVersion : undefined;
+        return { api, version: String(pkg.version ?? ''), ...(platformVersion ? { platformVersion } : {}) };
+      }
     } catch {
       // Not JSON; try the next component.
     }

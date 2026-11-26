@@ -1,4 +1,3 @@
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
@@ -6,6 +5,7 @@ import type { RuntimeOs } from '../harmonyos/target.js';
 import { findHarmonyOsSdk } from '../harmonyos/sdk.js';
 import { resolveProjectSdkDir } from '../sdk/detectProjectSdk.js';
 import { ALL_SDKS } from '../sdk/constants.js';
+import { readOhUniPackage } from '../sdk/apiDir.js';
 
 /** The SDK a build compiles against, as `build --json` reports it (#22). */
 export interface BuildSdk {
@@ -18,23 +18,6 @@ export interface BuildSdk {
   api?: string;
   /** The SDK directory: `DEVECO_SDK_HOME` for HarmonyOS, `<sdk home>/<api>` for OpenHarmony. */
   path: string;
-}
-
-/** `{ apiVersion, version }` of an OpenHarmony SDK API folder, from a component's `oh-uni-package.json`. */
-function readOhUniPackage(apiDir: string): { apiVersion?: string; version?: string } {
-  for (const component of ['ets', 'toolchains', 'js', 'native']) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(apiDir, component, 'oh-uni-package.json'), 'utf8')) as {
-        apiVersion?: unknown;
-        version?: unknown;
-      };
-      const text = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v) || undefined : undefined);
-      return { apiVersion: text(pkg.apiVersion), version: text(pkg.version) };
-    } catch {
-      // Try the next component.
-    }
-  }
-  return {};
 }
 
 /**

@@ -63,9 +63,17 @@ HarmonyOS SDKs are not managed here: they ship inside the HarmonyOS command-line
 | Command | Description |
 | --- | --- |
 | `sdk install <version> [--force] [--tmp-dir <path>]` | Download and install an OpenHarmony SDK (e.g. `6.1`). `--tmp-dir` overrides where download/extract temporaries go (see [Temporary space](#temporary-space)). |
-| `sdk install --from-archive <path> [--force] [--tmp-dir <path>]` | Install an SDK from a local `.tar.gz` instead, such as the [full SDK](#full-sdk). Only the current OS's components are unpacked, and the API level is read from them; an SDK already installed at that level is replaced only with `--force`. |
+| `sdk install --from-archive <path> [--force] [--tmp-dir <path>]` | Install an SDK from a local `.tar.gz` instead, such as the [full SDK](#full-sdk). Only the current OS's components are unpacked, and the API level is read from them; an SDK already installed at that level is replaced only with `--force`. From API 26 that means the same release: another one (`26.0.1` beside `26.0.0`) installs next to it, as hvigor keeps them. |
 | `sdk list [--json]` | List known OpenHarmony SDK versions; an `*` marks installed ones. Then it says HarmonyOS SDKs come with the command-line tools and lists the HarmonyOS SDK a HarmonyOS build would use and where it came from, or names `oniro-app cmdtools install` when there is none. `--json` adds `flavour: "OpenHarmony"` to each release and appends the HarmonyOS SDK as `{ flavour: "HarmonyOS", displayName, version, api, installed, path, source }`, `source` being `cmdtools`, `deveco-studio` or `configured` (ONIRO_HARMONYOS_SDK_PATH). |
-| `sdk remove <api>` | Remove an installed SDK by API level (e.g. `18`, `20`). |
+| `sdk remove <api>` | Remove an installed SDK by API level (e.g. `18`, `20`, `26`), from every folder holding it; a release (`26.0.0`) removes only that one. |
+
+##### API 26 and later
+
+From API 26 (OpenHarmony 7.0), hvigor names an SDK by its dotted release, not by its API level, and only hvigor 6.26 and later (the 26.0.0 command-line tools) read that:
+
+- The SDK lives in `<ONIRO_SDK_ROOT_DIR>/<os>/26.0.0`, not `<os>/26`, and `sdk install` puts it there. hvigor 6.26 does not look in `26/`, and fails with `00308018 The SDK management mode has changed`. An SDK that an older oniro-app installed in `26/` is moved by `sdk install`, `build` or `doctor --fix`; a `26.0.0` symlink to it, which hvigor does not follow either, is replaced.
+- `build-profile.json5` declares `compileSdkVersion` and `compatibleSdkVersion` as that string, `"26.0.0"`: a number fails with "must be a string". An OpenHarmony project must then also declare `modelVersion` `6.0.0` or later in `hvigor/hvigor-config.json5` and `oh-package.json5`, or the build fails with `00303315`. `create --sdk 26` writes all of these. A HarmonyOS project declares `"26.0.0"` too, not `"26.0.0(26)"`.
+- The command-line tools must ship hvigor 6.26 or later; the 5.1.0 ones `cmdtools install` downloads, and 6.1.1, do not. `build` stops before running hvigor when the tools are too old, and `doctor` and `sdk install` say so. Download the 26.0.0 tools from the Huawei developer portal and install them with `cmdtools install --from-zip <zip> --force`.
 
 ##### Full SDK
 
@@ -75,7 +83,7 @@ HarmonyOS SDKs are not managed here: they ship inside the HarmonyOS command-line
 oniro-app sdk install --from-archive ~/Downloads/version-Master_Version-OpenHarmony_7.0.0.39-…-ohos-sdk-full_7.0-Release.tar.gz
 ```
 
-It lands in `<ONIRO_SDK_ROOT_DIR>/<os>/<api>` like a downloaded release, so projects with that `compileSdkVersion` build against it. Pass `--force` to replace a public SDK of the same API level, or set `ONIRO_SDK_ROOT_DIR` to a separate root to keep both.
+It lands in `<ONIRO_SDK_ROOT_DIR>/<os>/<api>` (from API 26 `<os>/<release>`, see [API 26 and later](#api-26-and-later)) like a downloaded release, so projects with that `compileSdkVersion` build against it. Pass `--force` to replace a public SDK of the same API level, or set `ONIRO_SDK_ROOT_DIR` to a separate root to keep both.
 
 #### `cmdtools` — manage the command-line tools (provides `hvigorw`, `ohpm`, `hdc`, `codelinter` and, in the HarmonyOS edition, the HarmonyOS SDK)
 
@@ -159,8 +167,8 @@ On this machine's KVM host (Linux), two instances at the defaults booted side by
 | Check | Fails when |
 | --- | --- |
 | `node`, `java` | Node.js is older than 20; no Java on `JAVA_HOME` or `PATH` (its `-version` is recorded). |
-| `sdk` | The SDK the project's `compileSdkVersion` names is not installed (the HarmonyOS SDK for a HarmonyOS project, and its release must match). `--fix` installs it. |
-| `cmdtools` | The command-line tools are missing, or a partial install (`bin/ohpm`, `bin/hvigorw`, `bin/codelinter`, `hvigor/`, `ohpm/`, `codelinter/`, `tool/node`, the SDK toolchains or `version.txt` missing). The version is recorded. |
+| `sdk` | The SDK the project's `compileSdkVersion` names is not installed (the HarmonyOS SDK for a HarmonyOS project, and its release must match), or an API 26 SDK is in the legacy `<os>/26` folder. `--fix` installs it, or moves it to `<os>/26.0.0`. |
+| `cmdtools` | The command-line tools are missing, or a partial install (`bin/ohpm`, `bin/hvigorw`, `bin/codelinter`, `hvigor/`, `ohpm/`, `codelinter/`, `tool/node`, the SDK toolchains or `version.txt` missing). The version is recorded. For an OpenHarmony project of API 26 or later, also when their hvigor is older than 6.26. |
 | `arkts-check` | `check arkts` does not run, or runs but misses an error planted in a generated one-file project. |
 | `hdc`, `device` | hdc does not run; no device or emulator is reachable; the device's API is below the project's `compatibleSdkVersion`. A device of the other OS family is a warning. |
 | `signing` | The signingConfig names material that is missing (no signingConfig at all is a warning). |
@@ -169,7 +177,7 @@ On this machine's KVM host (Linux), two instances at the defaults booted side by
 | Flag | Description |
 | --- | --- |
 | `--json` | Print the report: `ok`, `checks` (`id`, `status`, `detail`, `fix`, `fixed`), `project` (`runtimeOS`, `compileSdkVersion`, `compatibleSdkVersion`, `minApi`), `versions` (`node`, `java`, `cmdTools`, `cmdToolsFlavour`, `sdk`, `hdc`, `deviceApi`), for comparing two machines or two runs. |
-| `--fix` | Install the project's missing OpenHarmony SDK. |
+| `--fix` | Install the project's missing OpenHarmony SDK, or move an API 26 one from the legacy <api> folder to the one hvigor 6.26 reads. |
 | `--no-device` | Skip the device check, on a machine that only builds. |
 | `--serial <serial>` | The device to check when several are connected. |
 | `--no-arkts-check` | Skip the `check arkts` self-test. |
@@ -185,7 +193,7 @@ All flags are required except where a default is shown (non-interactive). On suc
 | `--name <name>` | Project folder name (letters, digits, `._-`, no slashes). |
 | `--bundle <bundleName>` | Bundle name in reverse-DNS form, e.g. `com.example.myapp`. |
 | `--location <dir>` | Parent directory the new project folder is created in. |
-| `--sdk <api>` | Target SDK API level (e.g. `18`, `20`). |
+| `--sdk <api>` | Target SDK API level (e.g. `18`, `20`, `26`). From API 26 the project declares the release (`"26.0.0"`, or the installed SDK's) and `modelVersion` `6.0.0`; see [API 26 and later](#api-26-and-later). |
 | `--template <id>` | Template id (default `EmptyAbility`; `HarmonyOSApp` targets HarmonyOS). |
 | `--module <name>` | Module folder name (defaults to the template default, usually `entry`). |
 | `--overwrite` | Replace the destination if it already exists. |
@@ -252,7 +260,7 @@ for HarmonyOS is refused with a pointer to `--harmonyos`.
 
 #### `build` — build the app via `hvigorw`
 
-`build [project-dir]` (defaults to the current directory). Modules build in parallel by default. An OpenHarmony project whose `compileSdkVersion` SDK is not installed fails before anything runs, naming the release to install. A failed build lists its errors on stderr, one per line (`file:line:col error source code: message (rule)`), after hvigor's own output. When the project uses kit symbols that its SDK lacks but a newer installed SDK declares, the error names that API level; when no installed SDK has them (`'…' is not exported from Kit '…'`), it adds a hint about the full SDK, which carries the system APIs. A failed build names the SDK it compiled against (`Built against HarmonyOS 5.1.0 (API 18) at ~/command-line-tools/sdk.`). When the errors are missing properties or names (`Property '…' does not exist on type …`, `Cannot find name '…'`) in code under `oh_modules/`, it adds a hint naming the dependency and that SDK: the dependency may need a newer API level than the SDK has. The hint reads only the compiler messages, not the dependencies' metadata, whose declared `compatibleSdkVersion` can be wrong.
+`build [project-dir]` (defaults to the current directory). Modules build in parallel by default. An OpenHarmony project whose `compileSdkVersion` SDK is not installed fails before anything runs, naming the release to install, and so does an API 26 or later one when the command-line tools' hvigor is older than 6.26. An API 26 SDK in the legacy `26/` folder is moved to `26.0.0/` first. A failed build lists its errors on stderr, one per line (`file:line:col error source code: message (rule)`), after hvigor's own output. When the project uses kit symbols that its SDK lacks but a newer installed SDK declares, the error names that API level; when no installed SDK has them (`'…' is not exported from Kit '…'`), it adds a hint about the full SDK, which carries the system APIs. A failed build names the SDK it compiled against (`Built against HarmonyOS 5.1.0 (API 18) at ~/command-line-tools/sdk.`). When the errors are missing properties or names (`Property '…' does not exist on type …`, `Cannot find name '…'`) in code under `oh_modules/`, it adds a hint naming the dependency and that SDK: the dependency may need a newer API level than the SDK has. The hint reads only the compiler messages, not the dependencies' metadata, whose declared `compatibleSdkVersion` can be wrong.
 
 A build that signs with material for the other runtime still passes, but warns on stderr (and with a `signing` warning diagnostic in `--json`). hvigor's SignHap signs with whatever the product's signingConfig holds, and the `-signed.hap` fails only at install time. The two cases are: a product with `runtimeOS: "HarmonyOS"` whose signingConfig lacks `type: "HarmonyOS"` (the OpenHarmony material a plain `sign` writes; run `oniro-app sign --harmonyos`), and an OpenHarmony product whose signingConfig has it (run `oniro-app sign`).
 
@@ -278,7 +286,7 @@ With `--json`, stdout gets one object whether the build passes or fails, and a f
 ```
 
 - `source` is `arkts` (the ArkTS compiler), `hvigor` (configuration and task errors such as `00303060`), `native` (clang and lld, one diagnostic per undefined symbol), `ohpm` (the dependency install before the build; `failedTask` is then `ohpm install --all`), `signing` (a signingConfig for the other runtime, see above; `file` is `build-profile.json5`) or `sdk`. An `sdk` diagnostic carries `api`, the API level the build needs: the SDK the project compiles against is not installed (the object also has `missingSdk: { api, version, expectedPath }`), or a newer installed SDK declares the symbols the build could not find. A `warning` `sdk` diagnostic without `api` is the dependency hint above.
-- `sdk` is the SDK the build compiled against: `runtimeOS`, `displayName`, `version` (`6.1.1(24)` for HarmonyOS, the SDK build for OpenHarmony), `api` and `path` (`DEVECO_SDK_HOME` for HarmonyOS). It is there for a build that passed too, and absent when it cannot be told (an ohpm failure, a missing SDK, no numeric `compileSdkVersion`).
+- `sdk` is the SDK the build compiled against: `runtimeOS`, `displayName`, `version` (`6.1.1(24)`, or from API 26 `26.0.0`, for HarmonyOS; the SDK build for OpenHarmony), `api` and `path` (`DEVECO_SDK_HOME` for HarmonyOS). It is there for a build that passed too, and absent when it cannot be told (an ohpm failure, a missing SDK, no `compileSdkVersion` it can read).
 - `file` is relative to the project when it lies inside it. hvigor prints the ArkTS block twice; each diagnostic is listed once.
 - `summary.reportedErrors` and `reportedWarnings` are hvigor's own `COMPILE RESULT` counts. They can exceed the distinct diagnostics (hvigor counts 3 errors for the two above), so use them as a cross-check, not as the length of the list.
 - A build that passes has `ok: true`, `discoveredHaps` (HAPs grouped by module) and its compiler warnings in `diagnostics`.
@@ -370,7 +378,7 @@ NavPathStack.getPathStack is not declared in API 18 (5.1.0.107).
   declared in the installed API 23 SDK (@since 19)
 ```
 
-The SDK is `--sdk <dir>`, else `<sdk home>/<--api>`, else the one the project's `compileSdkVersion` names (the project in the current directory or `--project`, looked up the way hvigor does), else the newest installed. The index is built on the first use of an SDK (about 3 s for API 23, parsing with the SDK's own TypeScript) and cached under `~/.oniro/cache/api-index/` (`ONIRO_CACHE_DIR`), keyed by the SDK directory and its `oh-uni-package.json` mtimes, so a reinstalled SDK is re-indexed.
+The SDK is `--sdk <dir>`, else the `--api` level's folder in the SDK home, else the one the project's `compileSdkVersion` names (the project in the current directory or `--project`, looked up the way hvigor does), else the newest installed. The index is built on the first use of an SDK (about 3 s for API 23, parsing with the SDK's own TypeScript) and cached under `~/.oniro/cache/api-index/` (`ONIRO_CACHE_DIR`), keyed by the SDK directory and its `oh-uni-package.json` mtimes, so a reinstalled SDK is re-indexed.
 
 | Flag | Description |
 | --- | --- |
@@ -1195,7 +1203,8 @@ oniro-app app install && oniro-app app launch
 Pass `--sdk` the API level of the installed HarmonyOS SDK (`apiVersion` in its
 `default/sdk-pkg.json`). hvigor builds a HarmonyOS project only against the release its
 `compileSdkVersion` names ("SDK component missing" otherwise), so `create` writes the
-installed SDK's release, e.g. `6.1.1(24)`, and warns when `--sdk` asks for another one.
+installed SDK's release, e.g. `6.1.1(24)` (from API 26 the release alone, `26.0.0`, which
+hvigor 6.26 requires), and warns when `--sdk` asks for another one.
 
 ### `oniro-app auth`
 

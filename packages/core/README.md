@@ -94,13 +94,18 @@ The injection points every frontend implements, plus their defaults.
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `downloadAndInstallSdk` | `(InstallSdkOptions) => Promise<void>` | Download + install an SDK release into `<sdkRootDir>/<os>/<api>`, reporting progress; `tmpDir` overrides the scratch directory (default: next to the install target). |
-| `installSdkFromArchive` | `(InstallSdkFromArchiveOptions) => Promise<InstalledSdk>` | Install an SDK from a local `.tar.gz` (e.g. the full SDK from `OHOS_DAILY_BUILDS_URL`) into `<sdkRootDir>/<os>/<api>`, unpacking only the current OS's components and reading `api`/`version` from their `oh-uni-package.json`. Throws when that API is already installed unless `force`. |
+| `downloadAndInstallSdk` | `(InstallSdkOptions) => Promise<void>` | Download + install an SDK release into `<sdkRootDir>/<os>/<api>` (from API 26 `<os>/<release>`, e.g. `26.0.0`, where hvigor 6.26 looks), reporting progress; `tmpDir` overrides the scratch directory (default: next to the install target). |
+| `installSdkFromArchive` | `(InstallSdkFromArchiveOptions) => Promise<InstalledSdk>` | Install an SDK from a local `.tar.gz` (e.g. the full SDK from `OHOS_DAILY_BUILDS_URL`) into `<sdkRootDir>/<os>/<api>` (from API 26 `<os>/<release>`), unpacking only the current OS's components and reading `api`/`version`/`platformVersion` from their `oh-uni-package.json`. Throws when that API is already installed, in either folder, unless `force`. |
 | `getSupportedSdksForUi` | `(config) => SdkInfo[]` | Known SDKs annotated with `installed`, newest first. |
 | `getHarmonyOsSdkListing` | `(config) => HarmonyOsSdkListing \| null` | The HarmonyOS SDK a HarmonyOS build would use, which `sdk install` does not manage: `{ flavour: 'HarmonyOS', displayName, version, api, installed, path, source }`. |
 | `getInstalledSdks` | `(config) => string[]` | Versions with at least one OS-folder install. |
-| `removeSdk` | `(config, api) => boolean` | Remove an installed SDK by API level across OS folders. |
-| `detectProjectSdkVersion` | `(projectRoot, logger?) => number \| undefined` | Read `compileSdkVersion` from a project's `build-profile.json5`. |
+| `removeSdk` | `(config, api) => boolean` | Remove an installed SDK across OS folders: by API level, every folder holding that level; by release (`26.0.0`), only that one. |
+| `detectProjectSdkVersion` | `(projectRoot, logger?) => number \| undefined` | Read the API level of `compileSdkVersion` from a project's `build-profile.json5`: a number, or from API 26 an OpenHarmony product's dotted release (`"26.0.0"`). |
+| `detectProjectSdk` | `(projectRoot, logger?, productName?) => ProjectSdk \| undefined` | `{ api, declared? }`, `declared` being the dotted release when the product names one. |
+| `findProjectSdkDir` / `migrateProjectSdkDir` | `(config, projectRoot, productName?, logger?)` | The installed SDK folder a project builds against (`SdkApiDir`), in the SDK home or under `local.properties`' `sdk.dir`; move it from a legacy `<api>` folder in the SDK home to its release folder (what `build` does before running hvigor). |
+| `listSdkApiDirs` / `findSdkApiDir` / `expectedSdkApiDir` | `(home, api?, declared?)` | SDK folders in an SDK home as `{ api, dir, legacy }`, newest API first; the one for an API level (or a declared release); where a missing one belongs. `legacy` marks an API 26+ SDK in `<api>/`, where older oniro-app installed it and hvigor 6.26 does not look. |
+| `migrateLegacySdkApiDir` / `legacySdkApiDirTarget` / `sdkApiDirName` / `readOhUniPackage` | — | Rename `<home>/<api>` to `<home>/<release>` (replacing a link there to it; `{ declared?, logger? }`), and where it would go; the folder name for an API level; `{ apiVersion, platformVersion, version }` of an SDK folder. |
+| `ohosSdkVersionValue` / `apiOfDottedVersion` / `usesDottedVersion` / `FIRST_DOTTED_API` | — | What an OpenHarmony product declares as its SDK (the API level up to 25, `"26.0.0"` from 26); the API level of a dotted release; whether an API level is named by one. |
 | `ALL_SDKS` / `SdkRelease` | — | Catalog of known releases (`version`, `api`, `tarballStrip`, optional `archiveSuffix`). |
 | `OHOS_URL_BASE` | — | Default SDK mirror base URL. |
 | `getOsFolder()` / `getSdkFilename(version?)` | — | Map the host platform to its OS folder / SDK archive (`SdkArchiveInfo`). |
@@ -128,6 +133,7 @@ are the pair the installers use; `resolveTmpRoot(config, override?, installRoot?
 | `installCmdTools` | `(InstallCmdToolsOptions) => Promise<InstallCmdToolsResult>` | Install the tools by download or from a local zip (`localZipPath`); `tmpDir` overrides the scratch directory (default: next to the install target). The archive is staged inside the install directory and swapped in only once complete, so a failed install leaves the previous tools untouched (or rolls them back), and a successful one replaces the tools' own entries outright (other entries of the directory stay). If the rollback itself fails, the previous tools are kept in a directory the error names. Returns `{ path, installed, previous? }` (`CmdToolsInfo`s); when it replaces an install it logs `describeReplacement(previous, installed)` before deleting the old one. |
 | `describeReplacement` | `(previous, next: CmdToolsInfo) => string[]` | `Replacing command-line tools <old> with <new>.`, plus a line when hvigor changes major version, when the new release is older, and how to go back. `Reinstalling …` for the same release. |
 | `getCmdToolsStatus` | `(config) => CmdToolsStatus` | `{ installed, status, path, hdc }`, and when installed `flavour`, `version`, the bundled `sdk` (`CmdToolsSdk`: `path`, `displayName`, `platformVersion`, `apiVersion`, `build`) and `tools` (e.g. `{ hvigor, ohpm, codelinter, hstack }`). |
+| `findHvigorTooOld` | `(config, api, projectDir?) => HvigorTooOld \| null` | `{ api, hvigor, toolsPath, message, fix }` when the command-line tools' hvigor is older than 6.26 and `api` is 26 or later; null otherwise, when the version is unknown, or when the project runs its own hvigorw wrapper. |
 | `readCmdToolsInfo` | `(cmdToolsPath) => CmdToolsInfo` | `{ version, flavour, sdk, tools }` from `version.txt` and `sdk/default/sdk-pkg.json`; unknown fields left out. |
 | `describeCmdTools` | `({ version?, sdk?, tools? }) => string` | One line, e.g. `6.1.1.280 (HarmonyOS 6.1.1, API 24, hvigor 6.24.2)`. |
 | `isCmdToolsInstalled` | `(config) => boolean` | — |
@@ -360,7 +366,7 @@ Adapted in part from deveco-cli's `faultlog/` module (MIT); see `src/faultlog/NO
 | Export | Signature | Description |
 | --- | --- | --- |
 | `checkArkts` | `(ArktsCheckOptions) => Promise<ArktsCheckReport>` | Run the SDK's ArkTS checker and the project rules on a project or a list of files, without a build (`oniro-app check arkts`). `completed: false` with `error` when the checker could not run or crashed; throws only when the SDK cannot be resolved (`SdkNotInstalledError` for an API that is not installed). `fix: true` applies the verified fixes. Diagnostics use `BuildDiagnostic` with `source: 'arkts-check'`. |
-| `resolveArktsCheckSdk` | `(config, projectDir, logger?) => ArktsCheckSdk` | The SDK directory the check loads: `<sdk home>/<compileSdkVersion>` for OpenHarmony, `default/openharmony` plus `default/hms/ets` of the located HarmonyOS SDK for HarmonyOS. |
+| `resolveArktsCheckSdk` | `(config, projectDir, logger?) => ArktsCheckSdk` | The SDK directory the check loads: the SDK home folder `compileSdkVersion` names for OpenHarmony (`20/`, or from API 26 `26.0.0/`), `default/openharmony` plus `default/hms/ets` of the located HarmonyOS SDK for HarmonyOS. |
 | `parseArktsCheckOutput` / `arktsCheckerScript` | — | Read the checker's JSON; the path of the vendored `arkts-check.cjs`. |
 
 ### Screens
@@ -390,7 +396,7 @@ Adapted in part from deveco-cli's `faultlog/` module (MIT); see `src/faultlog/NO
 | `searchApi` | `(index, query, ApiSearchOptions?) => ApiSearchResult` | Ranked token search: every word must match the name (exact > prefix > camelCase/snake_case part > substring), the owning class or namespace, or the doc line; a dotted word matches qualified names. Overloads fold into one hit (`overloads`). Filters: `kit`, `kinds`, `language`, `noDeprecated`, `noSystemApi`, `limit`. |
 | `showApi` | `(index, symbol, opts?) => ApiShowResult` | Exact lookup by qualified name (`NavPathStack.pushPathByName`, `@Local`), else by dotted suffix; `found: false` when the SDK does not declare it. |
 | `suggestApiSymbols` / `findApiInOtherSdks` | — | For a miss: the declared names closest to it, and the other installed SDKs that declare it (`[{ api, since }]`). |
-| `resolveApiSdk` / `installedApiLevels` / `getApiIndexCacheDir` | — | The SDK to read (`sdkDir`, else `<sdk home>/<api>`, else the enclosing project's `compileSdkVersion`, else the newest installed); the installed API levels; the `cacheDir` config key (default `~/.oniro/cache`). |
+| `resolveApiSdk` / `installedApiLevels` / `getApiIndexCacheDir` | — | The SDK to read (`sdkDir`, else the `api` level's folder in the SDK home, else the enclosing project's `compileSdkVersion`, else the newest installed); the installed API levels; the `cacheDir` config key (default `~/.oniro/cache`). |
 | `serializeApiIndex` / `deserializeApiIndex` / `apiIndexCachePath` / `parseDocBlock` / `mergeDocBlocks` | — | The compact stored form, the cache file of an SDK, and the doc-comment tag reader. |
 
 ### Documentation search
@@ -447,9 +453,9 @@ HarmonyOS support is additive: a project is HarmonyOS only when its product decl
 | Export | Description |
 | --- | --- |
 | `detectRuntimeOs(projectDir, productName?)` | `'HarmonyOS'` or `'OpenHarmony'`, from `build-profile.json5`. |
-| `findHarmonyOsSdk({ config, logger? })` / `requireHarmonyOsSdk(...)` | Locate a HarmonyOS SDK (`harmonyosSdkPath`, then DevEco Studio's default location, then `cmdToolsPath` when it is the HarmonyOS edition), with its release as `version`, e.g. `6.1.1(24)`, its `apiVersion` and its `source` (`configured`, `deveco-studio` or `cmdtools`); `null`, or an error naming `oniro-app cmdtools install`, when there is none. |
+| `findHarmonyOsSdk({ config, logger? })` / `requireHarmonyOsSdk(...)` | Locate a HarmonyOS SDK (`harmonyosSdkPath`, then DevEco Studio's default location, then `cmdToolsPath` when it is the HarmonyOS edition), with its release as `version`, e.g. `6.1.1(24)` (from API 26 `26.0.0`), its `apiVersion` and its `source` (`configured`, `deveco-studio` or `cmdtools`); `null`, or an error naming `oniro-app cmdtools install`, when there is none. |
 | `readSdkPkg(sdkPath)` | `SdkPkgInfo` (`displayName`, `version`, `platformVersion`, `apiVersion`, `build`) from `<sdkPath>/default/sdk-pkg.json`. |
-| `harmonyOsSdkLabelForApi(api)`, `HARMONYOS_SDK_VERSIONS` | The `"<version>(<api>)"` label HarmonyOS products declare. |
+| `harmonyOsSdkLabelForApi(api)`, `harmonyOsSdkLabel(release, api)`, `apiOfHarmonyOsSdkLabel(label)`, `HARMONYOS_SDK_VERSIONS` | The label HarmonyOS products declare: `"<version>(<api>)"` (`"6.1.1(24)"`), from API 26 the release alone (`"26.0.0"`); and its API level back. |
 | `createHarmonyOsSession(opts)` | `login` / `logout` / `getUserInfo` / `listTeams` / `resolveAgcAuth` / `getDeveloperAgreement` for a Huawei developer account. The token is stored encrypted, with the account's region. `onLoginUrl(url, { port })` reports the sign-in URL and loopback port. |
 | `session.login(HarmonyOsLoginOptions)` | `timeoutMs`; `port` to listen on a fixed loopback port (for an `ssh -L` tunnel); `openBrowser: false` to leave opening the URL to the user; `pastedCallbacks`, an `AsyncIterable<string>` (e.g. a `readline` interface over stdin) of callback addresses pasted from a browser on another machine, checked like a request to the loopback port. |
 | `harmonyOsAutoSign(opts)` | Keystore + CSR → AGC debug certificate → device registration → debug profile → `build-profile.json5`, reusing still-valid material. |

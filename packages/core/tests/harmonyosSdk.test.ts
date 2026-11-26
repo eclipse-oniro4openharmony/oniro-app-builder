@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { findHarmonyOsSdk, findHarmonyOsTool, requireHarmonyOsSdk } from '../src/harmonyos/sdk.js';
+import { findHarmonyOsSdk, findHarmonyOsTool, readSdkPkg, requireHarmonyOsSdk } from '../src/harmonyos/sdk.js';
 import { findJava } from '../src/harmonyos/java.js';
 import { staticConfig } from '../src/ports/config.js';
 import { getHdcPath } from '../src/sdk/paths.js';
@@ -79,6 +79,19 @@ describe('findHarmonyOsSdk', () => {
 
   it('requireHarmonyOsSdk names the setting to fix', () => {
     expect(() => requireHarmonyOsSdk({ config: config({}) })).toThrow(/ONIRO_HARMONYOS_SDK_PATH/);
+  });
+
+  it('labels the release as compileSdkVersion names it, the dotted release alone from API 26', () => {
+    const sdkDir = makeInstall(path.join(tmp, 'clt26'));
+    const pkg = (platformVersion: string, apiVersion: string) =>
+      fs.writeFileSync(
+        path.join(sdkDir, 'default', 'sdk-pkg.json'),
+        JSON.stringify({ data: { displayName: `HarmonyOS ${platformVersion}`, platformVersion, apiVersion } }),
+      );
+    pkg('6.1.1', '24');
+    expect(readSdkPkg(sdkDir).version).toBe('6.1.1(24)');
+    pkg('26.0.0', '26');
+    expect(readSdkPkg(sdkDir)).toMatchObject({ version: '26.0.0', platformVersion: '26.0.0', apiVersion: '26' });
   });
 
   it('finds tools in both install layouts', () => {

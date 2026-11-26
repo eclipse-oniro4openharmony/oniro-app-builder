@@ -1,17 +1,21 @@
 import { Command } from 'commander';
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   ALL_SDKS,
   OHOS_DAILY_BUILDS_URL,
   downloadAndInstallSdk,
+  findHvigorTooOld,
+  findSdkApiDir,
   getOsFolder,
   getHarmonyOsSdkListing,
   getSdkRootDir,
   getSupportedSdksForUi,
   installSdkFromArchive,
+  migrateLegacySdkApiDir,
   removeSdk,
+  type ConfigProvider,
   type HarmonyOsSdkListing,
+  type Logger,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
 
@@ -20,6 +24,12 @@ const HARMONYOS_SOURCE: Record<NonNullable<HarmonyOsSdkListing['source']>, strin
   'deveco-studio': 'from DevEco Studio',
   configured: 'from ONIRO_HARMONYOS_SDK_PATH',
 };
+
+/** Warn when the command-line tools cannot build projects for the SDK just installed (API 26 needs hvigor 6.26). */
+function warnIfToolsTooOld(config: ConfigProvider, logger: Logger, api: string): void {
+  const tooOld = findHvigorTooOld(config, Number(api));
+  if (tooOld) logger.warn(`${tooOld.message} ${tooOld.fix}`);
+}
 
 /** What `sdk list` prints after the OpenHarmony table: the HarmonyOS SDK, which it does not manage. */
 export function formatHarmonyOsSdkNote(listing: HarmonyOsSdkListing | null): string {
@@ -76,6 +86,7 @@ export function registerSdkCommand(program: Command): void {
         });
         const label = installed.version ? `SDK ${installed.version} (api ${installed.api})` : `SDK api ${installed.api}`;
         logger.info(`${label} installed at ${installed.dir}.`);
+        warnIfToolsTooOld(config, logger, installed.api);
         return;
       }
       if (!version) {
@@ -90,11 +101,15 @@ export function registerSdkCommand(program: Command): void {
           `Unknown SDK version "${version}". Known: ${ALL_SDKS.map((s) => s.version).join(', ')}`,
         );
       }
-      const sdkInstallDir = path.join(getSdkRootDir(config), getOsFolder(), release.api);
-      if (fs.existsSync(sdkInstallDir) && !opts.force) {
+      const sdkHome = path.join(getSdkRootDir(config), getOsFolder());
+      const existing = findSdkApiDir(sdkHome, release.api);
+      if (existing && !opts.force) {
+        // Installed by an older oniro-app under <api>/, where hvigor 6.26 does not look.
+        const moved = existing.legacy ? migrateLegacySdkApiDir(sdkHome, release.api, { logger }) : undefined;
         logger.info(
-          `SDK ${release.version} (api ${release.api}) already installed at ${sdkInstallDir}; pass --force to reinstall.`,
+          `SDK ${release.version} (api ${release.api}) already installed at ${moved ?? existing.dir}; pass --force to reinstall.`,
         );
+        warnIfToolsTooOld(config, logger, release.api);
         return;
       }
       logger.info(`Installing OpenHarmony SDK ${release.version} (api ${release.api})...`);
@@ -107,6 +122,7 @@ export function registerSdkCommand(program: Command): void {
         tmpDir: opts.tmpDir,
       });
       logger.info('SDK installed.');
+      warnIfToolsTooOld(config, logger, release.api);
     });
 
   sdk

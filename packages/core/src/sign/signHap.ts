@@ -6,6 +6,7 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 import { isValidBundleName } from '../project/validators.js';
+import { listSdkApiDirs } from '../sdk/apiDir.js';
 import { defaultSignedHapPath, readHapSigningInfo, writeHapAtomically } from './hapInfo.js';
 import {
   APL_VALUES,
@@ -34,17 +35,10 @@ import {
  * @internal exposed for tests.
  */
 export function pickSigningSdk(sdkHome: string, targetApiVersion?: number): { api: string; sdkPath: string } | null {
-  let apis: string[];
-  try {
-    apis = fs.readdirSync(sdkHome).filter((api) => /^\d+$/.test(api));
-  } catch {
-    return null;
-  }
-  const usable = apis
-    .filter((api) => fs.existsSync(sdkSigningFiles(path.join(sdkHome, api)).signTool))
-    .sort((a, b) => Number(b) - Number(a));
-  const api = usable.find((a) => targetApiVersion !== undefined && Number(a) === targetApiVersion) ?? usable[0];
-  return api ? { api, sdkPath: path.join(sdkHome, api) } : null;
+  // Newest API first (see sdk/apiDir.ts for the folder names).
+  const usable = listSdkApiDirs(sdkHome).filter((d) => fs.existsSync(sdkSigningFiles(d.dir).signTool));
+  const sdk = usable.find((d) => targetApiVersion !== undefined && d.api === targetApiVersion) ?? usable[0];
+  return sdk ? { api: String(sdk.api), sdkPath: sdk.dir } : null;
 }
 
 export interface SignOpenHarmonyHapOptions {

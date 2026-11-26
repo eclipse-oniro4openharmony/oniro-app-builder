@@ -418,6 +418,21 @@ describe('resolveApiSdk', () => {
     expect(fallback.note).toMatch(/compiles with API 12, whose SDK is not installed.*API 23/);
   });
 
+  it('finds an API 26 SDK under its release folder, for --api and for a project declaring it', () => {
+    const home = path.join(tmp, 'sdk', getOsFolder());
+    fs.cpSync(SDK23, path.join(home, '26.0.0'), { recursive: true });
+    expect(installedApiLevels(config)).toEqual([26, 23, 18]);
+    expect(resolveApiSdk(config, { api: 26 })).toEqual({ sdkDir: path.join(home, '26.0.0'), api: 26, source: 'api-option' });
+    const project = path.join(tmp, 'app26');
+    fs.mkdirSync(project);
+    fs.writeFileSync(path.join(project, 'build-profile.json5'), "{ app: { products: [{ compileSdkVersion: '26.0.0' }] } }");
+    expect(resolveApiSdk(config, { projectDir: project })).toEqual({ sdkDir: path.join(home, '26.0.0'), api: 26, source: 'project' });
+    expect(resolveApiSdk(config)).toMatchObject({ sdkDir: path.join(home, '26.0.0'), source: 'newest-installed' });
+    // A newer release without declarations does not hide it.
+    fs.mkdirSync(path.join(home, '26.0.1', 'toolchains'), { recursive: true });
+    expect(resolveApiSdk(config, { api: 26 })).toMatchObject({ sdkDir: path.join(home, '26.0.0') });
+  });
+
   it('names the other installed SDKs that declare a symbol', () => {
     const home = path.join(tmp, 'sdk', getOsFolder());
     const cacheDir = path.join(tmp, 'cache');

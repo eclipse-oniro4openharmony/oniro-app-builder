@@ -182,6 +182,17 @@ describe('sdkTooOldDiagnostic', () => {
     expect(d!.message).toMatch(/BorderRadiusMode \(@kit\.ArkUI\), AppServiceExtensionAbility \(@kit\.AbilityKit\) are not in API 18/);
   });
 
+  it('names an API 26 SDK by the dotted release the project must declare', () => {
+    for (const api of ['20', '23']) fs.rmSync(path.join(home, api), { recursive: true });
+    fs.mkdirSync(path.join(home, '26.0.0', 'ets', 'kits'), { recursive: true });
+    fs.writeFileSync(path.join(home, '26.0.0', 'ets', 'kits', '@kit.ArkUI.d.ts'), 'export { BorderRadiusMode };');
+    fs.writeFileSync(path.join(home, '26.0.0', 'ets', 'kits', '@kit.AbilityKit.d.ts'), 'export { AppServiceExtensionAbility };');
+    const d = sdkTooOldDiagnostic(diags, home, 18);
+    expect(d).toMatchObject({ api: '26' });
+    expect(d!.message).toMatch(/installed API 26 SDK declares them\. Raise compileSdkVersion and compatibleSdkVersion in build-profile\.json5 to "26\.0\.0"/);
+    expect(d!.message).toContain('and modelVersion in hvigor-config.json5 and oh-package.json5 to "6.0.0", which a release string needs,');
+  });
+
   it('says nothing when no newer SDK declares them (a system API, say)', () => {
     expect(sdkTooOldDiagnostic(diags, home, 23)).toBeNull();
     expect(sdkTooOldDiagnostic([], home, 18)).toBeNull();
@@ -357,6 +368,52 @@ describe.skipIf(process.platform === 'win32')('buildHap / buildWithDiagnostics o
     fs.writeFileSync(path.join(dir, 'ets', 'oh-uni-package.json'), JSON.stringify({ apiVersion: api, version }));
     return dir;
   };
+
+  describe('an API 26 project', () => {
+    const project26 = () => {
+      fs.mkdirSync(path.join(projectDir, 'oh_modules'), { recursive: true });
+      fs.writeFileSync(
+        path.join(projectDir, 'build-profile.json5'),
+        JSON.stringify({ app: { products: [{ name: 'default', compileSdkVersion: '26.0.0', compatibleSdkVersion: '26.0.0' }] } }),
+      );
+    };
+    const sdk26 = (folder: string) => {
+      const dir = path.join(tmp, 'sdk', getOsFolder(), folder);
+      fs.mkdirSync(path.join(dir, 'ets'), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'ets', 'oh-uni-package.json'),
+        JSON.stringify({ apiVersion: '26', platformVersion: '26.0.0', version: '26.0.0.39' }),
+      );
+      return dir;
+    };
+    const hvigorVersion = (version: string) => {
+      fs.mkdirSync(cmdTools, { recursive: true });
+      fs.writeFileSync(path.join(cmdTools, 'version.txt'), `# Version: x\nhvigor : ${version}\n`);
+    };
+
+    it('moves an SDK from the legacy <api> folder to the release folder hvigor 6.26 reads, then builds', async () => {
+      project26();
+      sdk26('26');
+      hvigorVersion('6.26.4');
+      tool('hvigorw', 'sdk-too-old', 255);
+      const err = await buildHap({ config: config(), projectDir }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BuildFailedError);
+      expect(fs.readdirSync(path.join(tmp, 'sdk', getOsFolder()))).toEqual(['26.0.0']);
+    });
+
+    it('stops before hvigor when the command-line tools ship an hvigor older than 6.26', async () => {
+      project26();
+      sdk26('26.0.0');
+      hvigorVersion('6.24.2');
+      const ran = path.join(tmp, 'hvigor-ran');
+      fs.mkdirSync(path.join(cmdTools, 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(cmdTools, 'bin', 'hvigorw'), `#!/bin/sh\ntouch "${ran}"\n`, { mode: 0o755 });
+      await expect(buildHap({ config: config(), projectDir })).rejects.toThrow(
+        /API 26 needs hvigor 6\.26\.0 or later.*hvigor 6\.24\.2.*cmdtools install --from-zip/,
+      );
+      expect(fs.existsSync(ran)).toBe(false);
+    });
+  });
 
   it('names the SDK a failed build used, in the error and as `sdk` (#22)', async () => {
     project(18);

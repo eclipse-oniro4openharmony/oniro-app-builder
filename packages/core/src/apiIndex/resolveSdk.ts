@@ -4,6 +4,7 @@ import { defaultPaths, type ConfigProvider } from '../ports/config.js';
 import { OniroError } from '../ports/errors.js';
 import { getOhosBaseSdkHome } from '../sdk/paths.js';
 import { detectProjectSdkVersion, resolveProjectSdkDir } from '../sdk/detectProjectSdk.js';
+import { expectedSdkApiDir, findSdkApiDir, listSdkApiDirs, type SdkApiDir } from '../sdk/apiDir.js';
 
 /** Which SDK API directory `api search` and `api show` read, and why. */
 export interface ApiSdkSelection {
@@ -17,7 +18,7 @@ export interface ApiSdkSelection {
 export interface ResolveApiSdkOptions {
   /** An SDK API directory (holding `ets/`), used as is. */
   sdkDir?: string;
-  /** An API level: `<sdk home>/<api>`. */
+  /** An API level: its folder in the SDK home (`<api>`, or from API 26 `<release>`). */
   api?: number;
   /** A project directory; its `compileSdkVersion` picks the SDK. Searched upwards for `build-profile.json5`. */
   projectDir?: string;
@@ -25,17 +26,17 @@ export interface ResolveApiSdkOptions {
 
 /** The installed OpenHarmony SDK API levels under the SDK home, newest first. */
 export function installedApiLevels(config: ConfigProvider): number[] {
-  const home = getOhosBaseSdkHome(config);
-  let names: string[];
-  try {
-    names = fs.readdirSync(home);
-  } catch {
-    return [];
-  }
-  return names
-    .filter((n) => /^\d+$/.test(n) && fs.existsSync(path.join(home, n, 'ets', 'api')))
-    .map(Number)
-    .sort((a, b) => b - a);
+  return installedApiDirs(config).map((d) => d.api);
+}
+
+/** One SDK folder with declarations (`ets/api`) per installed API level, newest first. */
+function installedApiDirs(config: ConfigProvider): SdkApiDir[] {
+  const seen = new Set<number>();
+  return listSdkApiDirs(getOhosBaseSdkHome(config)).filter((d) => {
+    if (seen.has(d.api) || !fs.existsSync(path.join(d.dir, 'ets', 'api'))) return false;
+    seen.add(d.api);
+    return true;
+  });
 }
 
 /**
@@ -68,7 +69,10 @@ export function resolveApiSdk(config: ConfigProvider, opts: ResolveApiSdkOptions
   }
   const home = getOhosBaseSdkHome(config);
   if (opts.api !== undefined) {
-    const dir = path.join(home, String(opts.api));
+    const dir =
+      installedApiDirs(config).find((d) => d.api === Number(opts.api))?.dir ??
+      findSdkApiDir(home, opts.api)?.dir ??
+      expectedSdkApiDir(home, opts.api);
     if (!fs.existsSync(path.join(dir, 'ets', 'api'))) {
       const installed = installedApiLevels(config);
       throw new OniroError(
@@ -87,13 +91,14 @@ export function resolveApiSdk(config: ConfigProvider, opts: ResolveApiSdkOptions
     if (dir) return { sdkDir: dir, api, source: 'project' };
     note = `The project at ${root} compiles with API ${api}, whose SDK is not installed.`;
   }
-  const newest = installedApiLevels(config)[0];
-  if (newest === undefined) {
+  const newestDir = installedApiDirs(config)[0];
+  const newest = newestDir?.api;
+  if (newestDir === undefined || newest === undefined) {
     throw new OniroError(
       `${note ? `${note} ` : ''}No OpenHarmony SDK is installed under ${home}. Install one with \`oniro-app sdk install\`.`,
     );
   }
-  const selection: ApiSdkSelection = { sdkDir: path.join(home, String(newest)), api: newest, source: 'newest-installed' };
+  const selection: ApiSdkSelection = { sdkDir: newestDir.dir, api: newest, source: 'newest-installed' };
   if (note) selection.note = `${note} Using the newest installed, API ${newest}.`;
   return selection;
 }

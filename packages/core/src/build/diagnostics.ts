@@ -1,5 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { listSdkApiDirs } from '../sdk/apiDir.js';
+import { DOTTED_API_MODEL_VERSION, ohosSdkVersionValue, usesDottedVersion } from '../sdk/apiVersion.js';
 
 /**
  * Where a diagnostic comes from: the ArkTS compiler, hvigor itself (configuration
@@ -329,7 +331,7 @@ function moduleDeclarationFile(apiDir: string, module: string): string {
 /**
  * When the build failed on kit or `@ohos` symbols that a newer installed SDK
  * declares, one `sdk` diagnostic naming the API level that has them all (#22);
- * otherwise null. `sdkHome` holds one folder per API level; `projectApi` is the
+ * otherwise null. `sdkHome` holds one folder per SDK (see `sdk/apiDir.ts`); `projectApi` is the
  * project's compileSdkVersion. Best effort: it reads declaration files and does
  * not know about SDKs that are not installed.
  */
@@ -340,20 +342,13 @@ export function sdkTooOldDiagnostic(
 ): BuildDiagnostic | null {
   const missing = missingSdkSymbols(diagnostics);
   if (missing.length === 0) return null;
-  let apis: number[];
-  try {
-    apis = fs
-      .readdirSync(sdkHome)
-      .filter((n) => /^\d+$/.test(n))
-      .map(Number)
-      .filter((n) => projectApi === undefined || n > projectApi)
-      .sort((a, b) => a - b);
-  } catch {
-    return null;
-  }
+  // One folder per newer API, the one hvigor finds first, oldest API first.
+  const sdks = listSdkApiDirs(sdkHome)
+    .filter((d, i, all) => (projectApi === undefined || d.api > projectApi) && all.findIndex((o) => o.api === d.api) === i)
+    .reverse();
   const cache = new Map<string, string | null>();
-  const declares = (api: number, s: MissingSdkSymbol): boolean => {
-    const file = moduleDeclarationFile(path.join(sdkHome, String(api)), s.module);
+  const declares = (sdkDir: string, s: MissingSdkSymbol): boolean => {
+    const file = moduleDeclarationFile(sdkDir, s.module);
     if (!cache.has(file)) {
       try {
         cache.set(file, fs.readFileSync(file, 'utf8'));
@@ -364,8 +359,10 @@ export function sdkTooOldDiagnostic(
     const text = cache.get(file);
     return !!text && new RegExp(`\\b${s.symbol.replace(/\$/g, '\\$')}\\b`).test(text);
   };
-  const api = apis.find((a) => missing.every((s) => declares(a, s)));
-  if (api === undefined) return null;
+  const sdk = sdks.find((d) => missing.every((s) => declares(d.dir, s)));
+  if (sdk === undefined) return null;
+  const api = sdk.api;
+  const value = ohosSdkVersionValue(api, path.basename(sdk.dir));
   const names = missing.map((s) => `${s.symbol} (${s.module})`).join(', ');
   return {
     severity: 'error',
@@ -374,7 +371,11 @@ export function sdkTooOldDiagnostic(
     message:
       `${names} ${missing.length === 1 ? 'is' : 'are'} not in API ${projectApi ?? '?'}, which the project compiles ` +
       `against, but the installed API ${api} SDK declares ${missing.length === 1 ? 'it' : 'them'}. Raise ` +
-      `compileSdkVersion and compatibleSdkVersion in build-profile.json5 to ${api} (and targetSdkVersion, if set), ` +
+      `compileSdkVersion and compatibleSdkVersion in build-profile.json5 to ${typeof value === 'string' ? `"${value}"` : value} ` +
+      '(and targetSdkVersion, if set), ' +
+      (typeof value === 'string' && !(projectApi !== undefined && usesDottedVersion(projectApi))
+        ? `and modelVersion in hvigor-config.json5 and oh-package.json5 to "${DOTTED_API_MODEL_VERSION}", which a release string needs, `
+        : '') +
       'or stop using the newer API.',
   };
 }
