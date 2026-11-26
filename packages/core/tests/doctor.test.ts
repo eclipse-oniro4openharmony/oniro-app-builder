@@ -155,7 +155,7 @@ describe('doctor checks', () => {
       const hdc = path.join(tmp, `hdc${sleep.replace('.', '')}`);
       fs.writeFileSync(
         hdc,
-        `#!/bin/sh\nsleep ${sleep}\n[ "$1" = "-t" ] && shift 2\ncase "$1" in\n  version) echo "Ver: 3.2.0d" ;;\n  list) printf 'FAKE\\tUSB\\tConnected\\tlocalhost\\n' ;;\nesac\nexit 0\n`,
+        `#!/bin/sh\n[ "$1" = "-t" ] && shift 2\ncase "$1" in\n  version) echo "Ver: 3.2.0d" ;;\n  list) sleep ${sleep}; printf 'FAKE\\tUSB\\tConnected\\tlocalhost\\n' ;;\n  shell) [ "$2" = "echo" ] && [ -f "$0.offline" ] && { echo "[Fail]ExecuteCommand need connect-key?"; exit 0; } ;;\nesac\nexit 0\n`,
         { mode: 0o755 },
       );
       return hdc;
@@ -167,6 +167,10 @@ describe('doctor checks', () => {
     expect(await speed(stand('0'))).toMatchObject({ status: 'ok', detail: expect.stringMatching(/^one call to FAKE takes \d+ ms$/) });
     const slow = await speed(stand('0.8'));
     expect(slow).toMatchObject({ status: 'warn', detail: expect.stringMatching(/^every hdc call takes \d+ ms before it reaches a device/) });
+    // A device that refuses the call answers at once: that is not a quick call, and no time is reported.
+    const offline = stand('0');
+    fs.writeFileSync(`${offline}.offline`, '');
+    expect(await speed(offline)).toMatchObject({ status: 'skip', detail: expect.stringMatching(/^not measured: a call to FAKE failed/) });
   }, 60_000);
 
   it.skipIf(isWin)('installs a missing SDK with --fix, and self-tests check arkts', async () => {

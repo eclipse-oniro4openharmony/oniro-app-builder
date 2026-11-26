@@ -52,7 +52,7 @@ describe('--screenshot-steps', () => {
     expect(stepList(' 0 , 2 ')).toEqual([0, 2]);
     expect(stepList('none')).toEqual([]);
     expect(stepList('')).toEqual([]);
-    for (const bad of ['a', '1,,2', '-1', '1.5', '2,last']) expect(() => stepList(bad)).toThrow(/step indexes/);
+    for (const bad of ['a', '1,,2', '-1', '1.5', '2,last', '0x10', '1e2', '+3', 'None']) expect(() => stepList(bad)).toThrow(/step indexes/);
   });
 });
 

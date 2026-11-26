@@ -28,11 +28,10 @@ export function stepList(raw: string): number[] {
   const text = raw.trim();
   if (text === '' || text === 'none') return [];
   return text.split(',').map((part) => {
-    const n = Number(part.trim());
-    if (part.trim() === '' || !Number.isInteger(n) || n < 0) {
+    if (!/^\d+$/.test(part.trim())) {
       throw new InvalidArgumentError('Expected step indexes (0-based) separated by commas, such as 3,7,19, or none.');
     }
-    return n;
+    return Number(part.trim());
   });
 }
 

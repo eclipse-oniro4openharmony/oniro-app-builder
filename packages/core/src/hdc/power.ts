@@ -2,7 +2,7 @@ import type { ConfigProvider } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { shell } from './exec.js';
-import { dumpLayout, flattenLayout, type LayoutNode } from './dump.js';
+import { dumpLayout, flattenLayout, type LayoutDumpCache, type LayoutNode } from './dump.js';
 import { getDisplaySize } from './display.js';
 import { sendInput } from './input.js';
 
@@ -20,6 +20,8 @@ export interface WakeScreenOptions {
   config: ConfigProvider;
   deviceSerial?: string;
   logger?: Logger;
+  /** A caller's cache for its layout dumps (a replay's), which the lock-screen check then shares. */
+  dumpCache?: LayoutDumpCache;
 }
 
 export interface WakeScreenResult {
@@ -54,7 +56,7 @@ export async function wakeAndUnlock(opts: WakeScreenOptions): Promise<WakeScreen
 
   const lockShown = async (): Promise<boolean> => {
     try {
-      return isLockScreenShown((await dumpLayout({ config, deviceSerial, timeoutMs: 20_000 })).tree);
+      return isLockScreenShown((await dumpLayout({ config, deviceSerial, timeoutMs: 20_000, cache: opts.dumpCache })).tree);
     } catch (err) {
       logger.debug(`lock screen check skipped: ${(err as Error).message}`);
       return false;

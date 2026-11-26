@@ -91,6 +91,14 @@ describe.skipIf(isWin)('replayFlow (stand-in hdc)', () => {
     const d = await replayFlow({ ...opts(), flow: { ...flow, steps: flow.steps.slice(1) }, screenshotsDir: none, screenshotSteps: [] });
     expect(d).toMatchObject({ ok: false, outcome: 'diverged', failedStep: 0 });
     expect(fs.readdirSync(none)).toEqual(['failed-step-00.jpeg']);
+
+    // A step the flow does not have is said; one outside the range that runs is not.
+    dev.show(rawPage1('', false));
+    dev.queue(rawPage1('Ann', true));
+    const part = await replayFlow({ ...opts(), flow, to: 0, screenshotsDir: path.join(dev.root, 'part'), screenshotSteps: [2, 7] });
+    expect(part.ok).toBe(true);
+    expect(part.warnings).toEqual(['screenshotSteps names step(s) the flow does not have: 7 (it has steps 0..2).']);
+    expect(fs.existsSync(path.join(dev.root, 'part'))).toBe(false);
   });
 
   it('asks for the display size and the input methods once when the dumps state the screen', async () => {
@@ -102,6 +110,12 @@ describe.skipIf(isWin)('replayFlow (stand-in hdc)', () => {
     expect(dev.dumps()).toBe(4);
     const sent = dev.shells();
     expect(sent.filter((c) => c.startsWith('hidumper -s 10 -a screen'))).toHaveLength(1);
+    // Waking the screen first dumps once more for the lock screen, and shares what it learned.
+    dev.show(stated(rawPage1('', false)));
+    dev.queue(stated(rawPage1('Ann', true)), stated(rawPage2('Ann', 'none')), stated(rawPage2('Ann', 'Banana')));
+    const before = dev.shells().length;
+    expect((await replayFlow({ ...opts(), wake: true, flow })).ok).toBe(true);
+    expect(dev.shells().slice(before).filter((c) => c.startsWith('hidumper -s 10 -a screen'))).toHaveLength(1);
     expect(sent.filter((c) => c.startsWith('hidumper -s 3703'))).toHaveLength(1);
     // The elements are where they were with a size asked for on every dump.
     expect(r.steps.map((s) => s.target)).toEqual([
