@@ -153,6 +153,11 @@ describe('pickSigningSdk', () => {
       expect(pickSigningSdk(home, 20)).toEqual({ api: '12', sdkPath: path.join(home, '12') });
       expect(pickSigningSdk(home)).toEqual({ api: '12', sdkPath: path.join(home, '12') });
       expect(pickSigningSdk(path.join(home, 'absent'))).toBeNull();
+      // From API 26 the folder is the release; the API level stays the number.
+      fs.mkdirSync(path.join(home, '26.0.0', 'toolchains', 'lib'), { recursive: true });
+      fs.writeFileSync(path.join(home, '26.0.0', 'toolchains', 'lib', 'hap-sign-tool.jar'), '');
+      expect(pickSigningSdk(home)).toEqual({ api: '26', sdkPath: path.join(home, '26.0.0') });
+      expect(pickSigningSdk(home, 12)).toEqual({ api: '12', sdkPath: path.join(home, '12') });
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

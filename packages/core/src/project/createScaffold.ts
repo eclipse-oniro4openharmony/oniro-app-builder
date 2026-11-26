@@ -6,7 +6,14 @@ import { noopLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
 import { getOhosBaseSdkHome } from '../sdk/paths.js';
 import { toJavaPropertiesPath } from '../sdk/localProperties.js';
-import { HARMONYOS_SDK_VERSIONS, detectRuntimeOs, harmonyOsSdkLabelForApi } from '../harmonyos/target.js';
+import {
+  HARMONYOS_SDK_VERSIONS,
+  apiOfHarmonyOsSdkLabel,
+  detectRuntimeOs,
+  harmonyOsSdkLabelForApi,
+} from '../harmonyos/target.js';
+import { DOTTED_API_MODEL_VERSION, compareDottedVersions, ohosSdkVersionValue } from '../sdk/apiVersion.js';
+import { findSdkApiDir, readOhUniPackage } from '../sdk/apiDir.js';
 import { findHarmonyOsSdk } from '../harmonyos/sdk.js';
 import { listTemplates, validateTemplateLayout } from './templates.js';
 import { isValidBundleName, isValidProjectName } from './validators.js';
@@ -115,7 +122,10 @@ function updateTemplateConfigs(
   args: {
     projectName: string;
     bundleName: string;
-    /** A plain API level for OpenHarmony; `"<version>(<api>)"` for HarmonyOS. */
+    /**
+     * OpenHarmony: the API level, or from API 26 the dotted release (`"26.0.0"`).
+     * HarmonyOS: `"<version>(<api>)"`, or from API 26 the dotted release.
+     */
     sdkVersion: number | string;
     moduleName: string;
   },
@@ -192,6 +202,20 @@ function updateTemplateConfigs(
 }
 
 /**
+ * Raise `modelVersion` in `hvigor/hvigor-config.json5` (which hvigor checks) and the
+ * root `oh-package.json5` (which DevEco keeps equal to it) to at least `min`.
+ */
+function raiseModelVersion(projectDir: string, min: string): void {
+  for (const file of [path.join(projectDir, 'hvigor', 'hvigor-config.json5'), path.join(projectDir, 'oh-package.json5')]) {
+    if (!fs.existsSync(file)) continue;
+    const json = readJson5File<{ modelVersion?: unknown }>(file);
+    if (typeof json.modelVersion === 'string' && compareDottedVersions(json.modelVersion, min) >= 0) continue;
+    json.modelVersion = min;
+    writeJson5File(file, json);
+  }
+}
+
+/**
  * Scaffold a new Oniro/OpenHarmony project from a template. Returns the absolute path
  * to the created project directory.
  */
@@ -225,14 +249,18 @@ export async function createScaffold(opts: CreateScaffoldOptions): Promise<Creat
 
   // HarmonyOS templates declare the SDK as "<version>(<api>)" and build against the
   // HarmonyOS SDK; OpenHarmony ones take the plain API level and the OpenHarmony SDK.
+  // From API 26 both declare the dotted release instead ("26.0.0"), which hvigor 6.26
+  // requires (see sdk/apiVersion.ts).
   let sdkVersion: number | string = opts.sdkApi;
   let sdkBaseDir = getOhosBaseSdkHome(opts.config);
-  if (detectRuntimeOs(templateDir) === 'HarmonyOS') {
+  const isHarmonyOs = detectRuntimeOs(templateDir) === 'HarmonyOS';
+  if (isHarmonyOs) {
     const harmonySdk = findHarmonyOsSdk({ config: opts.config, logger });
     // The installed SDK names its own release, which covers API levels newer than the table.
-    const label = harmonySdk?.version?.endsWith(`(${opts.sdkApi})`)
-      ? harmonySdk.version
-      : harmonyOsSdkLabelForApi(opts.sdkApi);
+    const label =
+      harmonySdk?.version !== undefined && apiOfHarmonyOsSdkLabel(harmonySdk.version) === opts.sdkApi
+        ? harmonySdk.version
+        : harmonyOsSdkLabelForApi(opts.sdkApi);
     if (!label) {
       throw new OniroError(
         `No HarmonyOS release is known for API ${opts.sdkApi}. Known: ${[...HARMONYOS_SDK_VERSIONS.keys()].join(', ')}` +
@@ -252,6 +280,10 @@ export async function createScaffold(opts: CreateScaffoldOptions): Promise<Creat
         );
       }
     }
+  } else {
+    // From API 26 the release comes from the installed SDK when there is one.
+    const installed = findSdkApiDir(sdkBaseDir, opts.sdkApi);
+    sdkVersion = ohosSdkVersionValue(opts.sdkApi, installed ? readOhUniPackage(installed.dir).platformVersion : undefined);
   }
 
   const projectDir = path.join(opts.location, opts.projectName);
@@ -279,6 +311,8 @@ export async function createScaffold(opts: CreateScaffoldOptions): Promise<Creat
     },
     sdkBaseDir,
   );
+  // An OpenHarmony project may declare its SDK as a string only from this modelVersion.
+  if (!isHarmonyOs && typeof sdkVersion === 'string') raiseModelVersion(projectDir, DOTTED_API_MODEL_VERSION);
 
   await normalizeJson5ToJson(projectDir, logger);
 

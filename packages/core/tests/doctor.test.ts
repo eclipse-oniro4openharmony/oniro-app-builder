@@ -57,6 +57,7 @@ describe('doctor checks', () => {
     expect(apiLevelOf(20)).toBe(20);
     expect(apiLevelOf('18')).toBe(18);
     expect(apiLevelOf('6.0.0(20)')).toBe(20);
+    expect(apiLevelOf('26.0.0')).toBe(26);
     expect(apiLevelOf('next')).toBeUndefined();
     expect(apiLevelOf(undefined)).toBeUndefined();
   });
@@ -76,6 +77,21 @@ describe('doctor checks', () => {
     const check = checkCmdTools(staticConfig({ cmdToolsPath: makeTools('HarmonyOS') }), versions);
     expect(check.status).toBe('ok');
     expect(versions).toMatchObject({ cmdTools: '6.1.1.280', cmdToolsFlavour: 'HarmonyOS' });
+  });
+
+  it('fails the tools when their hvigor is too old for an API 26 OpenHarmony project', () => {
+    const tools = makeTools();
+    fs.writeFileSync(path.join(tools, 'version.txt'), '# Version: 6.1.1.280\nhvigor : 6.24.2\n');
+    const config = staticConfig({ cmdToolsPath: tools });
+    const project = describeProject(writeProject({ compileSdkVersion: '26.0.0' }));
+    const check = checkCmdTools(config, { node: '20' }, project);
+    expect(check).toMatchObject({ status: 'fail', fix: expect.stringContaining('cmdtools install --from-zip') });
+    expect(check.detail).toMatch(/API 26 needs hvigor 6\.26\.0 or later.*hvigor 6\.24\.2/);
+    fs.writeFileSync(path.join(tools, 'version.txt'), '# Version: 26.0.0.821\nhvigor : 6.26.4\n');
+    expect(checkCmdTools(config, { node: '20' }, project).status).toBe('ok');
+    // An API 23 project builds with the older hvigor.
+    fs.writeFileSync(path.join(tools, 'version.txt'), '# Version: 6.1.1.280\nhvigor : 6.24.2\n');
+    expect(checkCmdTools(config, { node: '20' }, describeProject(writeProject({ compileSdkVersion: 23 }))).status).toBe('ok');
   });
 
   it('fails a partial install, naming what is missing (#16)', () => {
@@ -154,9 +170,42 @@ describe('doctor checks', () => {
     expect(report.versions).toMatchObject({ hdc: 'Ver: 3.2.0d', cmdTools: '6.1.1.280', sdk: path.join(sdkRoot, getOsFolder(), '20') });
   });
 
+  it('fails an API 26 SDK left in the legacy <api> folder, and moves it with --fix', async () => {
+    const sdkRoot = path.join(tmp, 'sdk');
+    const home = path.join(sdkRoot, getOsFolder());
+    fs.mkdirSync(path.join(home, '26', 'ets'), { recursive: true });
+    fs.writeFileSync(path.join(home, '26', 'ets', 'oh-uni-package.json'), JSON.stringify({ apiVersion: '26', platformVersion: '26.0.0' }));
+    const project = writeProject({ compileSdkVersion: '26.0.0', compatibleSdkVersion: '26.0.0' });
+    const run = (fix: boolean) =>
+      runDoctor({
+        config: staticConfig({ sdkRootDir: sdkRoot, cmdToolsPath: path.join(tmp, 'none'), hdcPath: path.join(tmp, 'none', 'hdc') }),
+        projectDir: project,
+        fix,
+        device: false,
+        arktsSelfTest: false,
+        env: { PATH: '' },
+        installSdk: async () => {
+          throw new Error('nothing to install');
+        },
+      });
+
+    let sdk = (await run(false)).checks.find((c) => c.id === 'sdk')!;
+    expect(sdk).toMatchObject({ status: 'fail', fix: expect.stringContaining(path.join(home, '26.0.0')) });
+    expect(sdk.detail).toBe(`API 26 is installed at ${path.join(home, '26')}, where hvigor 6.26 and later do not look for it`);
+    expect(fs.readdirSync(home)).toEqual(['26']);
+
+    const report = await run(true);
+    sdk = report.checks.find((c) => c.id === 'sdk')!;
+    expect(sdk).toMatchObject({ status: 'ok', fixed: true, detail: `API 26 at ${path.join(home, '26.0.0')}` });
+    expect(report.versions.sdk).toBe(path.join(home, '26.0.0'));
+    expect(fs.readdirSync(home)).toEqual(['26.0.0']);
+  });
+
   it.skipIf(isWin)('fails the self-test when the checker runs but misses the planted error', async () => {
     const sdkRoot = path.join(tmp, 'sdk');
-    fs.mkdirSync(path.join(sdkRoot, getOsFolder(), '18'), { recursive: true });
+    fs.mkdirSync(path.join(sdkRoot, getOsFolder(), '18', 'ets', 'api'), { recursive: true });
+    // A newer API folder without declarations is not one to check against.
+    fs.mkdirSync(path.join(sdkRoot, getOsFolder(), '20', 'toolchains'), { recursive: true });
     const checker = path.join(tmp, 'checker.cjs');
     fs.writeFileSync(checker, `process.stdout.write(JSON.stringify({ success: true, errors: [], summary: { fileCount: 1 } }));\n`);
     const report = await runDoctor({

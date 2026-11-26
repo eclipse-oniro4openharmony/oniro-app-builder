@@ -12,10 +12,11 @@ import { isUsableDevice, listDevices } from '../hdc/devices.js';
 import { getDeviceInfo } from '../device/info.js';
 import { getCmdToolsStatus } from '../cmdTools/install.js';
 import { getCmdToolsPath, getHdcPath, getOhosBaseSdkHome, getSdkRootDir } from '../sdk/paths.js';
-import { getInstalledSdks } from '../sdk/list.js';
 import { downloadAndInstallSdk, type InstallSdkOptions } from '../sdk/install.js';
-import { findMissingProjectSdk, resolveProjectSdkDir } from '../sdk/detectProjectSdk.js';
-import { ALL_SDKS } from '../sdk/constants.js';
+import { findMissingProjectSdk, findProjectSdkDir, migrateProjectSdkDir } from '../sdk/detectProjectSdk.js';
+import { expectedSdkApiDir, legacySdkApiDirTarget, listSdkApiDirs } from '../sdk/apiDir.js';
+import { apiOfDottedVersion, ohosSdkVersionValue } from '../sdk/apiVersion.js';
+import { findHvigorTooOld } from '../cmdTools/compat.js';
 import { detectRuntimeOs, type RuntimeOs } from '../harmonyos/target.js';
 import { findHarmonyOsSdk } from '../harmonyos/sdk.js';
 import { findJava } from '../harmonyos/java.js';
@@ -115,6 +116,8 @@ export const CMD_TOOLS_REQUIRED = [
 export function apiLevelOf(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string') return undefined;
+  const dotted = apiOfDottedVersion(value);
+  if (dotted !== undefined) return dotted;
   const m = /^\s*(?:\d+(?:\.\d+)*\s*\(\s*(\d+)\s*\)|(\d+))\s*$/.exec(value);
   const n = m ? Number(m[1] ?? m[2]) : NaN;
   return Number.isFinite(n) ? n : undefined;
@@ -180,8 +183,11 @@ async function checkJava(env: NodeJS.ProcessEnv, versions: DoctorVersions): Prom
   }
 }
 
-/** The command-line tools are installed, complete, and of a recorded version. */
-export function checkCmdTools(config: ConfigProvider, versions: DoctorVersions): DoctorCheck {
+/**
+ * The command-line tools are installed, complete, and of a recorded version; with an
+ * OpenHarmony `project`, also new enough to build its API level (hvigor 6.26 from API 26).
+ */
+export function checkCmdTools(config: ConfigProvider, versions: DoctorVersions, project?: DoctorProject): DoctorCheck {
   const status = getCmdToolsStatus(config);
   const dir = getCmdToolsPath(config);
   if (!status.installed) {
@@ -206,6 +212,9 @@ export function checkCmdTools(config: ConfigProvider, versions: DoctorVersions):
       fix: 'oniro-app cmdtools install --force',
     };
   }
+  const api = project?.runtimeOS === 'OpenHarmony' ? apiLevelOf(project.compileSdkVersion) : undefined;
+  const tooOld = api === undefined ? null : findHvigorTooOld(config, api, project!.dir);
+  if (tooOld) return { id: 'cmdtools', status: 'fail', detail: tooOld.message, fix: tooOld.fix };
   return { id: 'cmdtools', status: 'ok', detail: `${status.flavour ?? ''} ${version ?? 'version unknown'} at ${dir}`.trim() };
 }
 
@@ -240,7 +249,12 @@ async function checkProjectSdk(
 
   const api = apiLevelOf(project.compileSdkVersion);
   if (api === undefined) {
-    return { id: 'sdk', status: 'fail', detail: 'build-profile.json5 declares no numeric compileSdkVersion', fix: 'Set compileSdkVersion in build-profile.json5.' };
+    return {
+      id: 'sdk',
+      status: 'fail',
+      detail: 'build-profile.json5 declares no OpenHarmony compileSdkVersion',
+      fix: 'Set compileSdkVersion in build-profile.json5: the API level (20), or from API 26 its release ("26.0.0").',
+    };
   }
   let missing = findMissingProjectSdk(opts.config, project.dir);
   let fixed = false;
@@ -265,7 +279,25 @@ async function checkProjectSdk(
       ...(fixed ? { fixed } : {}),
     };
   }
-  versions.sdk = resolveProjectSdkDir(opts.config, project.dir) ?? path.join(getOhosBaseSdkHome(opts.config), String(api));
+  let found = findProjectSdkDir(opts.config, project.dir);
+  if (found?.legacy && opts.fix && migrateProjectSdkDir(opts.config, project.dir, undefined, logger)) {
+    fixed = true;
+    found = findProjectSdkDir(opts.config, project.dir);
+  }
+  versions.sdk = found?.dir ?? expectedSdkApiDir(getOhosBaseSdkHome(opts.config), api);
+  if (found?.legacy) {
+    return {
+      id: 'sdk',
+      status: 'fail',
+      detail: `API ${api} is installed at ${found.dir}, where hvigor 6.26 and later do not look for it`,
+      fix: `oniro-app doctor --fix (or the next oniro-app build) moves it to ${legacySdkApiDirTarget(
+        path.dirname(found.dir),
+        api,
+        typeof project.compileSdkVersion === 'string' ? project.compileSdkVersion : undefined,
+      )}.`,
+      ...(fixed ? { fixed } : {}),
+    };
+  }
   return { id: 'sdk', status: 'ok', detail: `API ${api} at ${versions.sdk}`, ...(fixed ? { fixed } : {}) };
 }
 
@@ -292,27 +324,24 @@ async function checkArktsSelfTest(
       return { id: 'arkts-check', status: 'skip', detail: `no SDK to check against: ${err instanceof Error ? err.message : String(err)}` };
     }
   } else {
-    // getInstalledSdks lists release versions; the directories are named by API level.
-    const installed = getInstalledSdks(opts.config)
-      .map((version) => Number(ALL_SDKS.find((s) => s.version === version)?.api))
-      .filter(Number.isFinite)
-      .sort((a, b) => b - a);
-    if (installed[0] === undefined) {
+    const newest = listSdkApiDirs(getOhosBaseSdkHome(opts.config)).find((d) => fs.existsSync(path.join(d.dir, 'ets', 'api')));
+    if (newest === undefined) {
       return { id: 'arkts-check', status: 'skip', detail: 'no OpenHarmony SDK installed' };
     }
-    api = installed[0];
-    sdkDir = path.join(getOhosBaseSdkHome(opts.config), String(api));
+    api = newest.api;
+    sdkDir = newest.dir;
   }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-doctor-'));
   try {
     const level = api ?? 12;
+    const sdkVersion = ohosSdkVersionValue(level, sdkDir ? path.basename(sdkDir) : undefined);
     const main = path.join(tmp, 'entry', 'src', 'main');
     fs.mkdirSync(path.join(main, 'ets', 'pages'), { recursive: true });
     fs.writeFileSync(
       path.join(tmp, 'build-profile.json5'),
       JSON.stringify({
-        app: { products: [{ name: 'default', compileSdkVersion: level, compatibleSdkVersion: level, runtimeOS: project?.runtimeOS ?? 'OpenHarmony' }] },
+        app: { products: [{ name: 'default', compileSdkVersion: sdkVersion, compatibleSdkVersion: sdkVersion, runtimeOS: project?.runtimeOS ?? 'OpenHarmony' }] },
         modules: [{ name: 'entry', srcPath: './entry' }],
       }),
     );
@@ -493,7 +522,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   } else {
     checks.push({ id: 'sdk', status: 'skip', detail: 'no project given' });
   }
-  const tools = checkCmdTools(opts.config, versions);
+  const tools = checkCmdTools(opts.config, versions, project);
   checks.push(tools);
   checks.push(
     opts.arktsSelfTest === false

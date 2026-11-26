@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { runCli } from './_helpers/runCli.js';
+import { getOsFolder } from '@oniroproject/core';
 
 describe('oniro-app --help / --version', () => {
   it('--version exits 0 and prints a version', () => {
@@ -91,6 +92,25 @@ describe('oniro-app sdk install', () => {
     const r = runCli(['sdk', 'install', '--from-archive', path.join(os.tmpdir(), 'oniro-no-such-sdk.tar.gz')]);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('SDK archive not found');
+  });
+
+  it('moves an API 26 SDK an older oniro-app installed under 26/, and warns when the tools cannot build it', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oniro-sdk26-'));
+    try {
+      const home = path.join(tmp, 'sdk', getOsFolder());
+      fs.mkdirSync(path.join(home, '26', 'ets'), { recursive: true });
+      fs.writeFileSync(path.join(home, '26', 'ets', 'oh-uni-package.json'), JSON.stringify({ apiVersion: '26', platformVersion: '26.0.0' }));
+      const tools = path.join(tmp, 'tools');
+      fs.mkdirSync(tools);
+      fs.writeFileSync(path.join(tools, 'version.txt'), '# Version: 6.1.1.280\nhvigor : 6.24.2\n');
+      const r = runCli(['sdk', 'install', '7.0'], { ONIRO_SDK_ROOT_DIR: path.join(tmp, 'sdk'), ONIRO_CMD_TOOLS_PATH: tools });
+      expect(r.status).toBe(0);
+      expect(fs.readdirSync(home)).toEqual(['26.0.0']);
+      expect(r.stderr).toContain(`already installed at ${path.join(home, '26.0.0')}`);
+      expect(r.stderr).toMatch(/API 26 needs hvigor 6\.26\.0 or later/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

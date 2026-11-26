@@ -1,4 +1,11 @@
-export { detectRuntimeOs, harmonyOsSdkLabelForApi, HARMONYOS_SDK_VERSIONS, type RuntimeOs } from './target.js';
+export {
+  apiOfHarmonyOsSdkLabel,
+  detectRuntimeOs,
+  harmonyOsSdkLabel,
+  harmonyOsSdkLabelForApi,
+  HARMONYOS_SDK_VERSIONS,
+  type RuntimeOs,
+} from './target.js';
 export {
   findHarmonyOsSdk,
   requireHarmonyOsSdk,

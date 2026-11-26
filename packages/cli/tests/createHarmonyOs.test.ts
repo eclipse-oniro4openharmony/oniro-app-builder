@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import JSON5 from 'json5';
-import { createScaffold, detectRuntimeOs, listTemplates, staticConfig, type Logger } from '@oniroproject/core';
+import { createScaffold, detectRuntimeOs, getOsFolder, listTemplates, staticConfig, type Logger } from '@oniroproject/core';
 import { getBundledTemplateRoot } from '../src/lib/templateRoot.js';
 
 // Exercises the real bundled HarmonyOSApp template. The thing that makes it a
@@ -42,9 +42,9 @@ describe('HarmonyOSApp template', () => {
       logger: overrides.logger,
     });
 
-  /** A HarmonyOS SDK whose sdk-pkg.json names `version`, e.g. `6.1.1(24)`. */
+  /** A HarmonyOS SDK whose sdk-pkg.json names `version`, e.g. `6.1.1(24)`, or from API 26 `26.0.0`. */
   const installSdk = (version: string) => {
-    const [, platformVersion, apiVersion] = /^(.+)\((\d+)\)$/.exec(version)!;
+    const [, platformVersion, apiVersion] = /^(.+)\((\d+)\)$/.exec(version) ?? [version, version, version.split('.')[0]!];
     const sdkDir = path.join(location, 'hos-sdk');
     fs.mkdirSync(path.join(sdkDir, 'default', 'openharmony'), { recursive: true });
     fs.writeFileSync(
@@ -81,8 +81,27 @@ describe('HarmonyOSApp template', () => {
   });
 
   it("takes the installed SDK's release for its API level, known to the table or not", async () => {
-    const { projectDir } = await scaffold({ sdkApi: 99, installed: '9.9.9(99)' });
-    expect(readProfile(projectDir).app.products[0]!.compileSdkVersion).toBe('9.9.9(99)');
+    let { projectDir } = await scaffold({ sdkApi: 25, installed: '6.9.9(25)' });
+    expect(readProfile(projectDir).app.products[0]!.compileSdkVersion).toBe('6.9.9(25)');
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    ({ projectDir } = await scaffold({ sdkApi: 27, installed: '27.0.1' }));
+    expect(readProfile(projectDir).app.products[0]!.compileSdkVersion).toBe('27.0.1');
+  });
+
+  it('declares the dotted release alone from API 26, which hvigor 6.26 requires', async () => {
+    const warnings: string[] = [];
+    const logger: Logger = { debug() {}, info() {}, warn: (m) => warnings.push(m), error() {} };
+    let { projectDir } = await scaffold({ sdkApi: 26, logger });
+    let product = readProfile(projectDir).app.products[0]!;
+    expect(product.compileSdkVersion).toBe('26.0.0');
+    expect(product.compatibleSdkVersion).toBe('26.0.0');
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    warnings.length = 0;
+    // The SDK of the 26.0.0 command-line tools names itself so, and the label matches it.
+    ({ projectDir } = await scaffold({ sdkApi: 26, installed: '26.0.0', logger }));
+    product = readProfile(projectDir).app.products[0]!;
+    expect(product.compileSdkVersion).toBe('26.0.0');
+    expect(warnings).toEqual([]);
   });
 
   it('warns when the requested release is not the installed one, which hvigor cannot build', async () => {
@@ -142,5 +161,40 @@ describe('HarmonyOSApp template', () => {
     expect(product.runtimeOS).toBe('OpenHarmony');
     expect(product.compileSdkVersion).toBe(20);
     expect(detectRuntimeOs(projectDir)).toBe('OpenHarmony');
+  });
+
+  describe('OpenHarmony templates from API 26', () => {
+    const sdkRoot = () => path.join(location, 'sdk-root');
+    const create = (templateId: string, projectName: string) =>
+      createScaffold({
+        config: staticConfig({ sdkRootDir: sdkRoot() }),
+        templateId,
+        projectName,
+        bundleName: 'com.example.ohos26',
+        location,
+        sdkApi: 26,
+        templateRoot: root,
+      });
+    const modelVersion = (file: string) => (JSON5.parse(fs.readFileSync(file, 'utf-8')) as { modelVersion?: string }).modelVersion;
+
+    it.each(['EmptyAbility', 'NativeCpp'])(
+      '%s declares the dotted release and the modelVersion hvigor 6.26 needs for a string',
+      async (templateId) => {
+        const { projectDir } = await create(templateId, `Ohos26${templateId}`);
+        const product = readProfile(projectDir).app.products[0]!;
+        expect(product.compileSdkVersion).toBe('26.0.0');
+        expect(product.compatibleSdkVersion).toBe('26.0.0');
+        expect(modelVersion(path.join(projectDir, 'hvigor', 'hvigor-config.json5'))).toBe('6.0.0');
+        expect(modelVersion(path.join(projectDir, 'oh-package.json5'))).toBe('6.0.0');
+      },
+    );
+
+    it('takes the release of the installed SDK for that API level', async () => {
+      const ets = path.join(sdkRoot(), getOsFolder(), '26.0.1', 'ets');
+      fs.mkdirSync(ets, { recursive: true });
+      fs.writeFileSync(path.join(ets, 'oh-uni-package.json'), JSON.stringify({ apiVersion: '26', platformVersion: '26.0.1' }));
+      const { projectDir } = await create('EmptyAbility', 'Ohos26Installed');
+      expect(readProfile(projectDir).app.products[0]!.compileSdkVersion).toBe('26.0.1');
+    });
   });
 });

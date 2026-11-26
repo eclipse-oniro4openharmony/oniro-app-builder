@@ -4,7 +4,8 @@ import { execFileSync } from 'node:child_process';
 import JSON5 from 'json5';
 import { encryptPwd, createMaterial } from './encryptKey.js';
 import { OPEN_HARMONY_APPLICATION_CERT } from './applicationCert.js';
-import { detectProjectSdkVersion } from '../sdk/detectProjectSdk.js';
+import { detectProjectSdk } from '../sdk/detectProjectSdk.js';
+import { expectedSdkApiDir, findSdkApiDir } from '../sdk/apiDir.js';
 import { ALL_SDKS } from '../sdk/constants.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
@@ -461,8 +462,8 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
     );
   }
 
-  const sdkVersion = detectProjectSdkVersion(projectDir, logger, options.product);
-  if (!sdkVersion) {
+  const projectSdk = detectProjectSdk(projectDir, logger, options.product);
+  if (!projectSdk) {
     throw new OniroError(
       `Could not detect project SDK version (compileSdkVersion missing ${
         options.product ? `for product '${options.product}' ` : ''
@@ -470,9 +471,14 @@ export function generateSigningConfigs(options: GenerateSigningConfigsOptions): 
     );
   }
 
-  const sdkPath = path.join(sdkHome, String(sdkVersion));
-  if (!fs.existsSync(sdkPath)) {
-    throw new SdkNotInstalledError(String(sdkVersion), sdkPath, ALL_SDKS.find((s) => s.api === String(sdkVersion))?.version);
+  const { api, declared } = projectSdk;
+  const sdkPath = findSdkApiDir(sdkHome, api, declared)?.dir;
+  if (!sdkPath) {
+    throw new SdkNotInstalledError(
+      String(api),
+      expectedSdkApiDir(sdkHome, api, declared),
+      ALL_SDKS.find((s) => s.api === String(api))?.version,
+    );
   }
 
   const paths = sdkSigningFiles(sdkPath);

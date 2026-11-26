@@ -2,6 +2,8 @@ export * from './constants.js';
 export * from './platform.js';
 export * from './paths.js';
 export * from './detectProjectSdk.js';
+export * from './apiVersion.js';
+export * from './apiDir.js';
 export * from './tmp.js';
 export * from './download.js';
 export * from './extract.js';

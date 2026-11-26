@@ -11,9 +11,10 @@ import { makeStoredZip } from './_helpers/storedZip.js';
 const osFolder = getOsFolder();
 
 /** A component ZIP as the SDK ships it: `<name>/oh-uni-package.json` plus a marker naming its OS folder. */
-function component(name: string, folder: string, apiVersion: string): Buffer {
+function component(name: string, folder: string, apiVersion: string, platformVersion?: string): Buffer {
+  const pkg = { apiVersion, version: `${apiVersion}.0.0.39`, ...(platformVersion ? { platformVersion } : {}) };
   return makeStoredZip([
-    { name: `${name}/oh-uni-package.json`, data: Buffer.from(JSON.stringify({ apiVersion, version: `${apiVersion}.0.0.39` })) },
+    { name: `${name}/oh-uni-package.json`, data: Buffer.from(JSON.stringify(pkg)) },
     { name: `${name}/os.txt`, data: Buffer.from(folder) },
   ]);
 }
@@ -35,7 +36,7 @@ describe('installSdkFromArchive', () => {
    * A tarball shaped like the daily-build full SDK: `manifest_tag.xml` beside
    * `ohos-sdk/<folder>/<component>-….zip` for each folder.
    */
-  async function makeArchive(folders: string[], apiVersion = '26'): Promise<string> {
+  async function makeArchive(folders: string[], apiVersion = '26', platformVersion: string | undefined = '26.0.0'): Promise<string> {
     const src = path.join(dir, 'src');
     fs.mkdirSync(src, { recursive: true });
     fs.writeFileSync(path.join(src, 'manifest_tag.xml'), '<manifest/>');
@@ -43,7 +44,10 @@ describe('installSdkFromArchive', () => {
       const osDir = path.join(src, 'ohos-sdk', folder);
       fs.mkdirSync(osDir, { recursive: true });
       for (const name of ['toolchains', 'ets']) {
-        fs.writeFileSync(path.join(osDir, `${name}-${folder}-x64-Release.zip`), component(name, folder, apiVersion));
+        fs.writeFileSync(
+          path.join(osDir, `${name}-${folder}-x64-Release.zip`),
+          component(name, folder, apiVersion, platformVersion),
+        );
       }
     }
     const archive = path.join(dir, 'ohos-sdk-full.tar.gz');
@@ -53,11 +57,12 @@ describe('installSdkFromArchive', () => {
 
   const allFolders = [...new Set(['linux', 'ohos', 'windows', osFolder])];
 
-  it("installs this OS's components at the API level the archive declares", async () => {
+  it("installs this OS's components in the folder hvigor reads for the archive's API level", async () => {
     const archivePath = await makeArchive(allFolders);
     const installed = await installSdkFromArchive({ config: staticConfig({ sdkRootDir: sdkRoot }), archivePath });
 
-    const expected = path.join(sdkRoot, osFolder, '26');
+    // From API 26, hvigor 6.26 looks for the SDK under its release, not its API level.
+    const expected = path.join(sdkRoot, osFolder, '26.0.0');
     expect(installed).toEqual({ api: '26', version: '26.0.0.39', dir: expected });
     expect(fs.readFileSync(path.join(expected, 'ets', 'os.txt'), 'utf8')).toBe(osFolder);
     expect(fs.readFileSync(path.join(expected, 'toolchains', 'os.txt'), 'utf8')).toBe(osFolder);
@@ -66,10 +71,16 @@ describe('installSdkFromArchive', () => {
     expect(fs.readdirSync(sdkRoot)).toEqual([osFolder]);
   });
 
+  it('installs an SDK before API 26 under its API level', async () => {
+    const archivePath = await makeArchive([osFolder], '23', '6.1.0');
+    const installed = await installSdkFromArchive({ config: staticConfig({ sdkRootDir: sdkRoot }), archivePath });
+    expect(installed.dir).toBe(path.join(sdkRoot, osFolder, '23'));
+  });
+
   it('refuses to replace an installed SDK unless forced', async () => {
     const archivePath = await makeArchive([osFolder]);
     const config = staticConfig({ sdkRootDir: sdkRoot });
-    const existing = path.join(sdkRoot, osFolder, '26');
+    const existing = path.join(sdkRoot, osFolder, '26.0.0');
     fs.mkdirSync(existing, { recursive: true });
     fs.writeFileSync(path.join(existing, 'public.txt'), '');
 
@@ -78,6 +89,36 @@ describe('installSdkFromArchive', () => {
 
     await installSdkFromArchive({ config, archivePath, force: true });
     expect(fs.readdirSync(existing).sort()).toEqual(['ets', 'toolchains']);
+  });
+
+  it('installs another release of an API beside the one installed', async () => {
+    const config = staticConfig({ sdkRootDir: sdkRoot });
+    fs.mkdirSync(path.join(sdkRoot, osFolder, '26.0.0'), { recursive: true });
+    const installed = await installSdkFromArchive({ config, archivePath: await makeArchive([osFolder], '26', '26.0.1') });
+    expect(installed.dir).toBe(path.join(sdkRoot, osFolder, '26.0.1'));
+    expect(fs.readdirSync(path.join(sdkRoot, osFolder)).sort()).toEqual(['26.0.0', '26.0.1']);
+  });
+
+  it('counts an SDK in the legacy <api> folder as installed, and replaces it when forced', async () => {
+    const archivePath = await makeArchive([osFolder]);
+    const config = staticConfig({ sdkRootDir: sdkRoot });
+    const legacy = path.join(sdkRoot, osFolder, '26');
+    fs.mkdirSync(legacy, { recursive: true });
+
+    await expect(installSdkFromArchive({ config, archivePath })).rejects.toThrow(`already installed at ${legacy}`);
+
+    await installSdkFromArchive({ config, archivePath, force: true });
+    expect(fs.readdirSync(path.join(sdkRoot, osFolder))).toEqual(['26.0.0']);
+  });
+
+  it('names the folder <api>.0.0 when the release the components declare is not a plain one for that API', async () => {
+    for (const platformVersion of ['../../escape', '27.0.0', undefined]) {
+      fs.rmSync(sdkRoot, { recursive: true, force: true });
+      const archivePath = await makeArchive([osFolder], '26', platformVersion);
+      const installed = await installSdkFromArchive({ config: staticConfig({ sdkRootDir: sdkRoot }), archivePath });
+      expect(installed.dir).toBe(path.join(sdkRoot, osFolder, '26.0.0'));
+    }
+    expect(fs.existsSync(path.join(dir, 'escape'))).toBe(false);
   });
 
   it('rejects an archive without components for this OS', async () => {

@@ -1029,7 +1029,7 @@ const doctor: Tool = {
     'fixed), project, versions. isError when a check fails.',
   inputSchema: object({
     project: str("Project directory (default: the server's --project when it holds build-profile.json5)."),
-    fix: bool("Install the project's missing OpenHarmony SDK.", false),
+    fix: bool("Install the project's missing OpenHarmony SDK, or move an API 26 one from the legacy <api> folder to the one hvigor 6.26 reads.", false),
     device: bool('Check the device (false = --no-device, for a machine that only builds).', true),
     serial: str("The device to check, when several are connected (default: the server's --device)."),
     arktsCheck: bool('Run the `check arkts` self-test (false = --no-arkts-check).', true),

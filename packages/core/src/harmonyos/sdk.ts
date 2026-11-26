@@ -6,6 +6,7 @@ import { defaultPaths } from '../ports/config.js';
 import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import { OniroError } from '../ports/errors.js';
+import { harmonyOsSdkLabel } from './target.js';
 
 /**
  * A HarmonyOS SDK install. Unlike the OpenHarmony SDK, which `oniro-app sdk install`
@@ -20,8 +21,8 @@ export interface HarmonyOsSdk {
   /** From `default/sdk-pkg.json`, e.g. `HarmonyOS 6.1.1`. */
   displayName?: string;
   /**
-   * The release as `compileSdkVersion` names it, e.g. `6.1.1(24)`, from
-   * `default/sdk-pkg.json`. hvigor builds only projects that name this release.
+   * The release as `compileSdkVersion` names it, e.g. `6.1.1(24)` (`26.0.0` from API
+   * 26), from `default/sdk-pkg.json`. hvigor builds only projects that name this release.
    */
   version?: string;
   /** The API level, e.g. `24`, from `default/sdk-pkg.json`. */
@@ -39,7 +40,7 @@ export type HarmonyOsSdkSource = 'configured' | 'deveco-studio' | 'cmdtools';
 export interface SdkPkgInfo {
   /** e.g. `HarmonyOS 6.1.1`. */
   displayName?: string;
-  /** `<platformVersion>(<apiVersion>)`, e.g. `6.1.1(24)`. */
+  /** The release as `compileSdkVersion` names it: `<platformVersion>(<apiVersion>)`, e.g. `6.1.1(24)`, or from API 26 the platformVersion alone (`26.0.0`). */
   version?: string;
   /** e.g. `6.1.1`. */
   platformVersion?: string;
@@ -65,7 +66,7 @@ export function readSdkPkg(sdkPath: string): SdkPkgInfo {
   const apiVersion = text(data?.apiVersion);
   const build = text(data?.version);
   if (displayName) info.displayName = displayName;
-  if (platformVersion && apiVersion) info.version = `${platformVersion}(${apiVersion})`;
+  if (platformVersion && apiVersion) info.version = harmonyOsSdkLabel(platformVersion, Number(apiVersion));
   if (platformVersion) info.platformVersion = platformVersion;
   if (apiVersion) info.apiVersion = apiVersion;
   if (build) info.build = build;
