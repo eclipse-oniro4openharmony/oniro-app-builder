@@ -28,6 +28,9 @@ export type ConfigKey =
   // A HarmonyOS SDK: a DevEco Studio or HarmonyOS command-line-tools install, or its
   // `sdk` directory. Autodetected when unset; never downloaded.
   | 'harmonyosSdkPath'
+  // The HarmonyOS emulator: its `Emulator` binary, that binary's directory, or a
+  // HarmonyOS command-line-tools install holding `emulator/`. Autodetected when unset.
+  | 'harmonyosEmulatorPath'
   // Encrypted Huawei developer-account token. Default `~/.oniro/harmonyos`.
   | 'harmonyosAuthDir'
   // Generated HarmonyOS signing material (p12/csr/cer/p7b). Default `~/.ohos/config`,

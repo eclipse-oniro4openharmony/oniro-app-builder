@@ -181,7 +181,7 @@ The injection-safe primitives every device operation builds on (`spawn` with `sh
 
 | Export | Signature | Description |
 | --- | --- | --- |
-| `runProcess` | `(RunProcessOptions) => Promise<HdcExecResult>` | Spawn any process and collect `{ code, stdout, stderr }`. Resolves for **any** exit code. |
+| `runProcess` | `(RunProcessOptions) => Promise<HdcExecResult>` | Spawn any process and collect `{ code, stdout, stderr }`. Resolves for **any** exit code. `input` is written to its stdin, which is then closed (`''` closes it at once, so a prompt reads end-of-input). |
 | `hdcExec` | `(HdcExecOptions) => Promise<HdcExecResult>` | Run `hdc [-t <serial>] <args…>`. |
 | `shell` | `(HdcShellOptions) => Promise<HdcExecResult>` | Convenience wrapper for `hdc shell <command>`. |
 | `ensureOk` | `(result, command) => HdcExecResult` | Throw `CommandFailedError` when `code !== 0`; otherwise pass through. |
@@ -378,12 +378,28 @@ Adapted in part from deveco-cli's `faultlog/` module (MIT); see `src/faultlog/NO
 | `pagesMatching` | `(inventory, name) => ScreenPage[]` | The pages a spec name refers to, by that rule. |
 | `scanEts` / `LAYOUT_COMPONENTS` | — | The ArkTS token scanner (comments, strings, templates, regex literals, matched brackets, declarations with decorators) the inventory uses; the components that do not count as content. |
 
+### HarmonyOS emulator
+
+Huawei's `Emulator` (in `emulator/` of the HarmonyOS command-line tools from 26.0.0, on Linux), driven through its command line. Verified with Emulator 26.0.0.400.
+
+| Export | Description |
+| --- | --- |
+| `findHarmonyOsEmulator(config, logger?)` / `requireHarmonyOsEmulator(...)` | `{ binary, dir, version, source }`, from `harmonyosEmulatorPath`, then `<cmdToolsPath>/emulator`, then next to the HarmonyOS SDK; `null`, or an error saying where to get it. |
+| `listHarmonyOsEmulatorDevices(emulator, opts?)` / `parseHarmonyOsEmulatorDevices(stdout)` | The devices from `-list -details`: `name`, `running`, `deviceType`, `osVersion`, `release`, `api`, `instancePath`, `memoryMb`, `cpus`, `screen`, `hdcPort` (only when the device sets one). |
+| `listHarmonyOsEmulatorImages(emulator, { deviceType?, downloaded?, httpProxy? })` / `parseHarmonyOsEmulatorImages(stdout)` / `resolveHarmonyOsEmulatorImage(images, query, deviceType)` | The catalogue from `-imageList` (`osVersion`, `release`, `api`, `stage`, `deviceType`, `softwareVersion`, `downloaded`, `upgradable`); the image an API level, release or full name picks, or an error listing the choices. |
+| `installHarmonyOsEmulatorImage(opts)` | `-install` with progress (0–100); afterwards checks the image is listed as downloaded, since the emulator exits 0 on some failures. |
+| `createHarmonyOsEmulatorDevice(opts)` / `deleteHarmonyOsEmulatorDevice(opts)` | `-create` (validating the name, refusing a duplicate) and `-delete -force` (refusing a running device). |
+| `startHarmonyOsEmulator(opts)` / `stopHarmonyOsEmulator(opts)` | `-start` detached, with `headless`, `bootMode`, `hdcPort`, `logFile` and `waitReadySeconds` (polls `bootevent.boot.completed` over hdc); `{ name, address, pid, logFile, alreadyRunning, ready, bootSeconds }`. `-stop`, then waits until the device no longer runs. |
+| `readHarmonyOsEmulatorLicenses(emulator, opts?)` / `requireHarmonyOsEmulatorLicenses(emulator, 'install' \| 'start')` / `acceptHarmonyOsEmulatorLicenses` / `reviewHarmonyOsEmulatorLicenses` | The agreements in `emulator/agreement/` and whether each is accepted (from `~/Library/Caches/Huawei/Emulator<major.minor>/.emu_config`; unknown on Windows); `HarmonyOsEmulatorLicenseError` when the one an operation needs is not; `-license accept`; `-license` on the terminal. `installHarmonyOsEmulatorImage` and `startHarmonyOsEmulator` check first, because without the agreement the emulator only prompts. |
+| `checkHarmonyOsEmulatorHost({ devDir?, platform? })` | On Linux, whether `/dev/kvm` and a `/dev/dri/renderD*` node are read-write (with the fix when not); `null` elsewhere. |
+| `harmonyOsEmulatorEnv(env?)` / `harmonyOsEmulatorAddress(device, hdcPort?)` | The start environment (`__GL_SYNC_TO_VBLANK=0` unless set); the device's hdc serial. |
+
 ### Doctor
 
 | Export | Signature | Description |
 | --- | --- | --- |
 | `runDoctor` | `(DoctorOptions) => Promise<DoctorReport>` | Every `oniro-app doctor` check: `{ ok, checks: [{ id, status, detail, fix, fixed }], project, versions }`. Never throws for a failed check. `fix: true` installs the project's missing OpenHarmony SDK. |
-| `checkCmdTools` / `checkSigning` / `checkDisk` / `checkNode` | — | The synchronous checks, for a caller that wants one. `CMD_TOOLS_REQUIRED` lists what a complete tools install holds. |
+| `checkCmdTools` / `checkSigning` / `checkDisk` / `checkNode` / `checkHarmonyOsEmulator` | — | The synchronous checks, for a caller that wants one. `CMD_TOOLS_REQUIRED` lists what a complete tools install holds. `checkHarmonyOsEmulator` (`hos-emulator`) warns about KVM, the GPU render node and unaccepted agreements when a HarmonyOS emulator is found. |
 | `describeProject` / `apiLevelOf` | — | A project's `runtimeOS`, SDK versions and minimum device API; the API level of `20` or `"6.0.0(20)"`. |
 | `resolveProjectSdkDir` | `(config, projectDir) => string \| undefined` | The SDK API directory an OpenHarmony project builds against, under the SDK home or `local.properties` `sdk.dir`. |
 
