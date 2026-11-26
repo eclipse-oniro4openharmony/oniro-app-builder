@@ -17,6 +17,7 @@ import { findMissingProjectSdk, findProjectSdkDir, migrateProjectSdkDir } from '
 import { expectedSdkApiDir, legacySdkApiDirTarget, listSdkApiDirs } from '../sdk/apiDir.js';
 import { apiOfDottedVersion, ohosSdkVersionValue } from '../sdk/apiVersion.js';
 import { findHvigorTooOld } from '../cmdTools/compat.js';
+import { checkHarmonyOsEmulatorHost, findHarmonyOsEmulator, readHarmonyOsEmulatorLicenses } from '../harmonyos/emulator.js';
 import { detectRuntimeOs, type RuntimeOs } from '../harmonyos/target.js';
 import { findHarmonyOsSdk } from '../harmonyos/sdk.js';
 import { findJava } from '../harmonyos/java.js';
@@ -31,7 +32,7 @@ import { checkArkts, resolveArktsCheckSdk } from '../check/arktsCheck.js';
 export type DoctorStatus = 'ok' | 'warn' | 'fail' | 'skip';
 
 export interface DoctorCheck {
-  /** Stable key: `node`, `java`, `sdk`, `cmdtools`, `arkts-check`, `hdc`, `device`, `signing`, `disk`. */
+  /** Stable key: `node`, `java`, `sdk`, `cmdtools`, `arkts-check`, `hdc`, `device`, `hos-emulator`, `signing`, `disk`. */
   id: string;
   status: DoctorStatus;
   /** What was found, one line. */
@@ -62,6 +63,8 @@ export interface DoctorVersions {
   sdk?: string;
   hdc?: string;
   deviceApi?: string;
+  /** The HarmonyOS emulator's version, e.g. `26.0.0.400`. */
+  harmonyosEmulator?: string;
 }
 
 export interface DoctorReport {
@@ -502,6 +505,42 @@ export function checkDisk(dirs: string[], statfs: (dir: string) => { bavail: num
   return { id: 'disk', status: 'ok', detail: `${gb} GB free at ${worst.dir}` };
 }
 
+/**
+ * The HarmonyOS emulator, when one is found: on Linux KVM and a GPU render node it can
+ * use, and Huawei's agreements accepted. Problems are warnings, since neither builds
+ * nor real devices need the emulator.
+ */
+export function checkHarmonyOsEmulator(
+  config: ConfigProvider,
+  versions: DoctorVersions,
+  opts: { devDir?: string; platform?: NodeJS.Platform; home?: string } = {},
+): DoctorCheck {
+  const id = 'hos-emulator';
+  const emulator = findHarmonyOsEmulator(config);
+  if (!emulator) {
+    return { id, status: 'skip', detail: 'no HarmonyOS emulator (it comes with the HarmonyOS command-line tools 26.0.0 or later)' };
+  }
+  if (emulator.version) versions.harmonyosEmulator = emulator.version;
+  const where = `Emulator ${emulator.version ?? '(version unknown)'} at ${emulator.dir}`;
+  const problems: string[] = [];
+  const fixes: string[] = [];
+  const host = checkHarmonyOsEmulatorHost(opts);
+  for (const c of host ? [host.kvm, host.gpu] : []) {
+    if (c.ok) continue;
+    problems.push(c.detail);
+    if (c.fix) fixes.push(c.fix);
+  }
+  const agreements = readHarmonyOsEmulatorLicenses(emulator, opts).agreements;
+  const pending = agreements.filter((a) => a.accepted === false);
+  if (pending.length) {
+    problems.push(`${pending.map((a) => a.title).join(' and ')} not accepted`);
+    fixes.push('Read them (`oniro-app emulator harmonyos license`), then accept with `oniro-app emulator harmonyos license --accept`.');
+  }
+  if (problems.length) return { id, status: 'warn', detail: `${where}: ${problems.join('; ')}`, fix: fixes.join(' ') };
+  const accepted = agreements.length > 0 && agreements.every((a) => a.accepted === true);
+  return { id, status: 'ok', detail: `${where}${host ? ', KVM and GPU accessible' : ''}${accepted ? ', agreements accepted' : ''}` };
+}
+
 /** Run every check. Never throws for a failed check; `ok` is false when any check failed. */
 export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   const logger = opts.logger ?? noopLogger;
@@ -538,6 +577,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   } else {
     checks.push(await checkDevice(opts, project, versions, logger));
   }
+  checks.push(checkHarmonyOsEmulator(opts.config, versions));
   checks.push(project ? checkSigning(project) : { id: 'signing', status: 'skip', detail: 'no project given' });
   checks.push(checkDisk([getSdkRootDir(opts.config), ...(project ? [project.dir] : [])]));
 

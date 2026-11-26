@@ -22,6 +22,7 @@ import {
   type EmulatorInstanceStatus,
 } from '@oniroproject/core';
 import { getRuntime } from '../lib/runtime.js';
+import { registerHarmonyOsEmulatorCommands } from './emulatorHarmonyOs.js';
 
 function parseInstance(v: string): number {
   const n = Number(v);
@@ -91,7 +92,9 @@ interface StartOpts {
 const flagName = (key: string): string => `--${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
 
 export function registerEmulatorCommand(program: Command): void {
-  const emu = program.command('emulator').description('Manage the Oniro emulator.');
+  const emu = program
+    .command('emulator')
+    .description('Manage the Oniro emulator; `emulator harmonyos` manages the HarmonyOS emulator.');
 
   emu
     .command('install')
@@ -270,4 +273,6 @@ export function registerEmulatorCommand(program: Command): void {
       removeEmulator(config);
       logger.info('Emulator removed.');
     });
+
+  registerHarmonyOsEmulatorCommands(emu);
 }

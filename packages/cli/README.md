@@ -160,6 +160,34 @@ oniro-app emulator stop --instance 2 --discard
 
 On this machine's KVM host (Linux), two instances at the defaults booted side by side to `ready` in about 15 s, each using about 2.3 GB of RAM and under 1 % of a CPU when idle. The pool shares the bundled images with the default emulator, which opens them read-write, so the two cannot run at once: `emulator start --instance <n>` refuses while the default emulator runs, and `emulator start` refuses while a pool instance does. If the default emulator has written to the images since an instance's overlays were made, starting that instance fails and asks for `--fresh`.
 
+#### `emulator harmonyos` — manage the HarmonyOS emulator
+
+Huawei's HarmonyOS emulator (`Emulator`) ships in `emulator/` of the HarmonyOS command-line tools from 26.0.0, on Linux; it needs KVM, a GPU with OpenGL 4.1 and Ubuntu 18.04 or later. oniro-app finds it at `ONIRO_HARMONYOS_EMULATOR_PATH` (the binary, its directory or a tools install), else in the command-line tools at `ONIRO_CMD_TOOLS_PATH`, else next to the HarmonyOS SDK (`ONIRO_HARMONYOS_SDK_PATH`). Images are downloaded from Huawei's servers into the emulator's image root, and devices live where the emulator keeps them (`Emulator -config`), so `Emulator` itself lists the same ones. Verified with Emulator 26.0.0.400.
+
+| Command | Description |
+| --- | --- |
+| `emulator harmonyos license [--accept \| --review] [--json]` | The agreements the emulator needs, whether each is accepted, and the file to read each in: the HarmonyOS SDK License Agreement (to download images) and the HarmonyOS Software License and Service Agreement (to start devices). Exits 1 while one is not accepted. `--accept` accepts them all (`Emulator -license accept`); `--review` goes through Huawei's own prompt on the terminal. oniro-app never accepts them on its own: `install` and `start` refuse until they are accepted. |
+| `emulator harmonyos images [--device-type <type>] [--downloaded] [--http-proxy <url>] [--json]` | Huawei's image catalogue, fetched over the network unless `--downloaded`; `*` marks a downloaded image, `^` one with a newer build. |
+| `emulator harmonyos install <image> [--device-type phone] [--image-root <dir>] [--http-proxy <url>]` | Download an image, with progress. `<image>` is the API level (`26`), the release (`7.0.0`) or the name `images` prints (`"HarmonyOS 7.0.0(26.0.0)"`); of a release and its betas, the release. A phone image is about 2 GB. |
+| `emulator harmonyos create <name> --image <image> [--device-type phone] [--memory <GB>] [--storage <GB>] [--json]` | Create a device on a downloaded image. The name takes letters, digits, underscores and spaces; Huawei picks the model and screen for the device type (default 4 GB RAM, 6 GB storage). |
+| `emulator harmonyos list [--json]` | The devices: name, `running` or `stopped`, image, device type and hdc address. |
+| `emulator harmonyos start <name> [--headless] [--boot-mode coldboot\|reset\|snapshot] [--hdc-port <port>] [--log <path>] [--wait-ready <seconds>] [--json]` | Start a device in the background and detach, so the CLI can exit while it runs; `--wait-ready` waits until the guest reports `bootevent.boot.completed=true`. The emulator connects the device to the hdc server itself, at `127.0.0.1:5555` unless `--hdc-port` (10000–16555) or the device sets another, so run two devices at once on different ports. Its output goes to `<device>/Log/oniro-app-start.log`. It sets `__GL_SYNC_TO_VBLANK=0` unless the variable is set: NVIDIA's driver otherwise holds each frame for the monitor's vsync, which doubled the emulator's frame-time p90 (40 ms against 20 ms) on a 60 Hz display. |
+| `emulator harmonyos stop <name> [--timeout <seconds>]` | Stop a device and wait (60 s by default) until it has shut down. |
+| `emulator harmonyos delete <name>` | Delete a stopped device and its data; the image stays. |
+
+```bash
+export ONIRO_CMD_TOOLS_PATH=~/clt26/command-line-tools   # the HarmonyOS command-line tools 26.0.0
+oniro-app emulator harmonyos license                      # read the agreements it lists, then:
+oniro-app emulator harmonyos license --accept
+oniro-app emulator harmonyos install 26                   # HarmonyOS 7.0.0(26.0.0), phone
+oniro-app emulator harmonyos create "Pura 90" --image 26
+oniro-app emulator harmonyos start "Pura 90" --wait-ready 180
+oniro-app app apply && oniro-app app launch --smoke       # ONIRO_DEVICE_SERIAL=127.0.0.1:5555 when other devices are connected
+oniro-app emulator harmonyos stop "Pura 90"
+```
+
+On this machine (Ryzen 7 3800X, RTX 2060, KVM), a phone device on the 7.0.0 image boots to ready in 35 s (90 s the first time) and renders at about 59 fps; on the 6.1.1 image it manages 15 to 20 fps. An OpenHarmony-signed HAP also installs and runs on it.
+
 #### `doctor` — check the machine can build, check, sign and test
 
 `doctor [project-dir]` (defaults to the project in the current directory, if any). One line per check, `ok`, `warn`, `fail` or `skip`, with the fix under anything that is not ok; exits 1 when a check fails.
@@ -171,6 +199,7 @@ On this machine's KVM host (Linux), two instances at the defaults booted side by
 | `cmdtools` | The command-line tools are missing, or a partial install (`bin/ohpm`, `bin/hvigorw`, `bin/codelinter`, `hvigor/`, `ohpm/`, `codelinter/`, `tool/node`, the SDK toolchains or `version.txt` missing). The version is recorded. For an OpenHarmony project of API 26 or later, also when their hvigor is older than 6.26. |
 | `arkts-check` | `check arkts` does not run, or runs but misses an error planted in a generated one-file project. |
 | `hdc`, `device` | hdc does not run; no device or emulator is reachable; the device's API is below the project's `compatibleSdkVersion`. A device of the other OS family is a warning. |
+| `hos-emulator` | Warns, when a HarmonyOS emulator is found, that `/dev/kvm` or a GPU render node (`/dev/dri/renderD*`) is not accessible, or that Huawei's agreements are not accepted (see [`emulator harmonyos`](#emulator-harmonyos--manage-the-harmonyos-emulator)). Skipped when there is none. |
 | `signing` | The signingConfig names material that is missing (no signingConfig at all is a warning). |
 | `disk` | Under 1 GB free where SDKs install or the project builds (under 5 GB is a warning). |
 
@@ -1130,6 +1159,7 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 | `ONIRO_TMP_DIR` | `<install root>/.oniro-tmp` | Scratch directory for download/extract temporaries (see [Temporary space](#temporary-space)) |
 | `ONIRO_APPLICATION_CERT_PATH` | (unset) | External application-cert chain to use when signing system apps |
 | `ONIRO_HARMONYOS_SDK_PATH` | autodetected | HarmonyOS SDK: a DevEco Studio or HarmonyOS command-line-tools install, or its `sdk` directory |
+| `ONIRO_HARMONYOS_EMULATOR_PATH` | autodetected | HarmonyOS emulator: its `Emulator` binary, that binary's directory, or a HarmonyOS command-line-tools install holding `emulator/` |
 | `ONIRO_HARMONYOS_AUTH_DIR` | `~/.oniro/harmonyos` | Where the encrypted Huawei account token is stored |
 | `ONIRO_HARMONYOS_SIGNING_DIR` | `~/.ohos/config` | Where generated HarmonyOS signing material (p12/csr/cer/p7b) is written |
 | `ONIRO_STORE_URL` | `https://store.iparo.app` | Oniro App Store the `store` commands talk to (`--url` overrides it) |

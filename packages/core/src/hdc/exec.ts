@@ -35,6 +35,12 @@ export interface RunProcessOptions {
   abortSignal?: AbortSignal;
   /** Receive stdout/stderr chunks as they arrive (in addition to the buffered result). */
   onOutput?: OutputSink;
+  /**
+   * Written to the process's stdin, which is then closed. `''` closes it at once, so a
+   * tool that prompts reads end-of-input instead of waiting until `timeoutMs`. Default:
+   * stdin is left open.
+   */
+  input?: string;
   /** Reserved for future scoped diagnostics; the buffered result is returned regardless. */
   logger?: Logger;
 }
@@ -111,6 +117,12 @@ export function runProcess(opts: RunProcessOptions): Promise<HdcExecResult> {
     }, timeoutMs);
 
     abortSignal?.addEventListener('abort', onAbort, { once: true });
+
+    if (opts.input !== undefined && child.stdin) {
+      // A child that exits without reading would fail the write with EPIPE.
+      child.stdin.on('error', () => {});
+      child.stdin.end(opts.input);
+    }
 
     child.stdout?.on('data', (d: Buffer) => {
       const s = stdoutDecoder.write(d);
