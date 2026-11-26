@@ -70,6 +70,14 @@ export function rawHome(): RawLayoutNode {
   ]);
 }
 
+/**
+ * The tree with the root's bounds set to the screen's, as a device's own dump has
+ * them (`[0,0][1080,2400]`): what lets a run of dumps keep the display size.
+ */
+export function stated(raw: RawLayoutNode, size: { width: number; height: number } = DISPLAY): RawLayoutNode {
+  return { ...raw, attributes: { ...raw.attributes, bounds: `[0,0][${size.width},${size.height}]` } };
+}
+
 /** A raw tree pruned the way `dumpLayout` prunes it. */
 export function pruned(raw: RawLayoutNode): LayoutNode {
   const p = pruneLayout(raw, DISPLAY, findCoveredNodes(raw));
@@ -87,6 +95,8 @@ export interface FakeDevice {
   inputs(): string[];
   /** How many `uitest dumpLayout` the device has served. */
   dumps(): number;
+  /** Every `hdc shell` command the device was sent, in order. */
+  shells(): string[];
   /** Make `hdc list targets` report no device. */
   disconnect(): void;
   cleanup(): void;
@@ -95,7 +105,7 @@ export interface FakeDevice {
 /**
  * A stand-in `hdc` for one device: `uitest dumpLayout` serves the layout last
  * passed to `show` (the queue advances it on each `uitest uiInput`), hidumper
- * reports a 1080x2400 display, screenshots are a few bytes, and the recorder
+ * reports a 1080x2400 display and one input method, screenshots are a few bytes, and the recorder
  * commands (`uitest uiRecord record`, `kill`, `date`, `stat`, `cat`, `hilog -D`)
  * replay files under `rec/` (record.csv, stat.txt, touches.hilog, layout_*.json)
  * and `dumps/<n>.json` for the n-th dump when present.
@@ -105,6 +115,7 @@ export function fakeDevice(): FakeDevice {
   for (const d of ['queue', 'rec', 'dumps']) fs.mkdirSync(path.join(root, d));
   fs.writeFileSync(path.join(root, 'targets.txt'), 'FAKE\tUSB\tConnected\tlocalhost\n');
   fs.writeFileSync(path.join(root, 'inputs.log'), '');
+  fs.writeFileSync(path.join(root, 'shell.log'), '');
   fs.writeFileSync(path.join(root, 'dumpcount'), '0');
   const hdc = path.join(root, 'hdc');
   fs.writeFileSync(
@@ -125,12 +136,14 @@ case "$1" in
     echo "FileTransfer finish"; exit 0 ;;
   shell)
     cmd="$2"
+    printf '%s\\n' "$cmd" | head -1 >> "$R/shell.log"
     case "$cmd" in
       'uitest dumpLayout'*)
         echo $(( $(cat "$R/dumpcount") + 1 )) > "$R/dumpcount"
         echo "DumpLayout saved to:/data/local/tmp/fake_layout.json" ;;
       'hidumper -s 10 -a screen'*) echo "render resolution=1080x2400" ;;
       'hidumper -s 3301'*) echo "Current State: AWAKE" ;;
+      'hidumper -s 3703'*) echo '{ "ime": "${IME}/ServiceExtAbility", "isCurrentIme": "true" }' ;;
       hidumper*) : ;;
       'uitest uiInput'*)
         echo "\${cmd%%;*}" >> "$R/inputs.log"
@@ -167,7 +180,9 @@ exit 0
     },
     inputs: () => fs.readFileSync(path.join(root, 'inputs.log'), 'utf8').split('\n').filter(Boolean),
     dumps: () => Number(fs.readFileSync(path.join(root, 'dumpcount'), 'utf8').trim()),
+    shells: () => fs.readFileSync(path.join(root, 'shell.log'), 'utf8').split('\n').filter(Boolean),
     disconnect: () => fs.writeFileSync(path.join(root, 'targets.txt'), '[Empty]\n'),
-    cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    // A clean-up `rm` a dump left running may still be writing its line to shell.log: try again.
+    cleanup: () => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   };
 }

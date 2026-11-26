@@ -7,7 +7,7 @@ import type { Logger } from '../ports/logger.js';
 import { noopLogger } from '../ports/logger.js';
 import type { ProgressReporter } from '../ports/progress.js';
 import { SdkNotInstalledError } from '../ports/errors.js';
-import { runProcess } from '../hdc/exec.js';
+import { hdcExec, runProcess, shell } from '../hdc/exec.js';
 import { isUsableDevice, listDevices } from '../hdc/devices.js';
 import { getDeviceInfo } from '../device/info.js';
 import { getCmdToolsStatus } from '../cmdTools/install.js';
@@ -32,7 +32,7 @@ import { checkArkts, resolveArktsCheckSdk } from '../check/arktsCheck.js';
 export type DoctorStatus = 'ok' | 'warn' | 'fail' | 'skip';
 
 export interface DoctorCheck {
-  /** Stable key: `node`, `java`, `sdk`, `cmdtools`, `arkts-check`, `hdc`, `device`, `hos-emulator`, `signing`, `disk`. */
+  /** Stable key: `node`, `java`, `sdk`, `cmdtools`, `arkts-check`, `hdc`, `device`, `hdc-speed`, `hos-emulator`, `signing`, `disk`. */
   id: string;
   status: DoctorStatus;
   /** What was found, one line. */
@@ -405,6 +405,8 @@ async function checkDevice(
   project: DoctorProject | undefined,
   versions: DoctorVersions,
   logger: Logger,
+  /** Told the serial of the device that was looked at, when there is one. */
+  found?: (serial: string) => void,
 ): Promise<DoctorCheck> {
   let devices;
   try {
@@ -421,6 +423,7 @@ async function checkDevice(
       fix: 'oniro-app emulator start --headless --wait-for-hdc 120, or connect a device (or pass --no-device)',
     };
   }
+  found?.(serial);
   const info = await getDeviceInfo({ config: opts.config, deviceSerial: serial, logger });
   if (info.sdkApiVersion) versions.deviceApi = info.sdkApiVersion;
   const deviceApi = Number(info.sdkApiVersion);
@@ -437,6 +440,85 @@ async function checkDevice(
     return { id: 'device', status: 'warn', detail: `${label} runs ${info.osFamily}, the project targets ${project.runtimeOS}` };
   }
   return { id: 'device', status: 'ok', detail: devices.length > 1 ? `${label}, ${devices.length - 1} more` : label };
+}
+
+/** One hdc call that takes longer than this is worth a warning. */
+export const SLOW_HDC_CALL_MS = 700;
+
+/** How long one hdc call takes, ms: the median of three runs. */
+export interface HdcSpeed {
+  /** `hdc list targets`: the client and its server, without a device. */
+  clientMs: number;
+  /** `hdc shell echo` on the device: the client, the server and the way to the device. */
+  deviceMs?: number;
+  /** The device that was called. */
+  serial?: string;
+}
+
+/**
+ * Grade what one hdc call costs. Every device command is at least one call and a
+ * layout dump, a screenshot or a replay step are several, so a client or a link
+ * that adds a second to each makes `replay`, `record`, `perf` and `test` several
+ * times slower with nothing else to show for it: a 58-flow replay run measured
+ * 131 minutes at 1.5 s a call and 42 at 0.2 s. Two causes are told apart: the
+ * client is slow before it reaches any device (`list targets` is slow too), or
+ * only the calls to the device are. The first was seen with a device on another
+ * machine's server, reached through a wrapper that adds `-s <host:port>`: hdc
+ * (3.2.0c and 3.2.0d alike) then finds no server on this machine, forks one and
+ * sleeps before every call, unless it is given `-p`. Pure.
+ */
+export function checkHdcSpeed(speed: HdcSpeed): DoctorCheck {
+  const id = 'hdc-speed';
+  if (speed.clientMs > SLOW_HDC_CALL_MS) {
+    return {
+      id,
+      status: 'warn',
+      detail: `every hdc call takes ${speed.clientMs} ms before it reaches a device (\`hdc list targets\`, median of 3)`,
+      fix:
+        'An hdc client that finds no hdc server running on this machine starts one and sleeps 1.3 s before every call, also when a wrapper or `-s` sends the call to a server elsewhere. ' +
+        'Keep a local server up (`hdc start`), or have the wrapper call hdc with `-p`, which skips that step. Then `time hdc list targets` answers in about 0.2 s.',
+    };
+  }
+  if (speed.deviceMs !== undefined && speed.deviceMs > SLOW_HDC_CALL_MS) {
+    return {
+      id,
+      status: 'warn',
+      detail: `one call to ${speed.serial ?? 'the device'} takes ${speed.deviceMs} ms (hdc alone answers in ${speed.clientMs} ms)`,
+      fix: 'The way to the device is slow (an hdc server on another machine, a tunnel, a hub). Commands that make many calls (replay, record, perf, test) take that much longer.',
+    };
+  }
+  return {
+    id,
+    status: 'ok',
+    detail:
+      speed.deviceMs !== undefined
+        ? `one call to ${speed.serial ?? 'the device'} takes ${speed.deviceMs} ms`
+        : `one hdc call takes ${speed.clientMs} ms`,
+  };
+}
+
+/** The median duration of three runs of `call`, ms. */
+async function medianMs(call: () => Promise<unknown>): Promise<number> {
+  const times: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const t = Date.now();
+    await call();
+    times.push(Date.now() - t);
+  }
+  return times.sort((a, b) => a - b)[1]!;
+}
+
+/** Time hdc with its server up (the device check has just listed the targets), then one call to the device. */
+async function measureHdcSpeed(opts: DoctorOptions, serial: string | undefined, logger: Logger): Promise<DoctorCheck> {
+  try {
+    const clientMs = await medianMs(() => hdcExec({ config: opts.config, args: ['list', 'targets'], timeoutMs: 15_000, logger }));
+    const deviceMs = serial
+      ? await medianMs(() => shell({ config: opts.config, command: 'echo', deviceSerial: serial, timeoutMs: 15_000, logger }))
+      : undefined;
+    return checkHdcSpeed({ clientMs, ...(deviceMs !== undefined ? { deviceMs, serial } : {}) });
+  } catch (err) {
+    return { id: 'hdc-speed', status: 'skip', detail: `not measured: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 /** The signing material the project's signingConfigs name exists. */
@@ -572,10 +654,16 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   checks.push(hdc);
   if (opts.device === false) {
     checks.push({ id: 'device', status: 'skip', detail: 'device check not requested' });
+    checks.push({ id: 'hdc-speed', status: 'skip', detail: 'device check not requested' });
   } else if (hdc.status !== 'ok') {
     checks.push({ id: 'device', status: 'fail', detail: 'hdc is not usable', fix: hdc.fix });
+    checks.push({ id: 'hdc-speed', status: 'skip', detail: 'hdc is not usable' });
   } else {
-    checks.push(await checkDevice(opts, project, versions, logger));
+    let serial: string | undefined;
+    checks.push(await checkDevice(opts, project, versions, logger, (s) => {
+      serial = s;
+    }));
+    checks.push(await measureHdcSpeed(opts, serial, logger));
   }
   checks.push(checkHarmonyOsEmulator(opts.config, versions));
   checks.push(project ? checkSigning(project) : { id: 'signing', status: 'skip', detail: 'no project given' });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseBounds,
+  dumpedDisplaySize,
+  displayStillHolds,
   pruneLayout,
   findCoveredNodes,
   flattenLayout,
@@ -261,5 +263,30 @@ describe('pickTarget', () => {
   it('ignores matches without a position', () => {
     const offscreen: LayoutNode = { type: 'Button', text: 'Go', click: true };
     expect(pickError(() => pickTarget({ children: [offscreen] }, { text: 'Go' })).reason).toBe('none');
+  });
+});
+
+describe('the display size a dump states', () => {
+  const win = (bounds: string): RawLayoutNode => ({ attributes: { type: 'root', bounds }, children: [] });
+  const portrait: RawLayoutNode = { attributes: { bounds: '[0,0][1080,2400]' }, children: [win('[0,117][1080,2400]'), win('[0,0][1080,117]')] };
+
+  it('is the root node\'s bounds, when they start at the origin', () => {
+    expect(dumpedDisplaySize(portrait)).toEqual({ width: 1080, height: 2400 });
+    expect(dumpedDisplaySize({ attributes: {}, children: [] })).toBeNull();
+    expect(dumpedDisplaySize({ children: [] })).toBeNull();
+    // One bundle's window is not the screen.
+    expect(dumpedDisplaySize({ attributes: { bounds: '[0,117][1080,2400]' } })).toBeNull();
+    expect(dumpedDisplaySize({ attributes: { bounds: '[0,0][0,0]' } })).toBeNull();
+  });
+
+  it('confirms a size kept from an earlier dump only while the dump agrees with it', () => {
+    expect(displayStillHolds({ width: 1080, height: 2400 }, portrait)).toBe(true);
+    // The screen turned: the root states the other size.
+    expect(displayStillHolds({ width: 1080, height: 2400 }, { attributes: { bounds: '[0,0][2400,1080]' }, children: [win('[0,0][2400,1080]')] })).toBe(false);
+    // A root that kept the old bounds while a window is wider than them is not believed either.
+    expect(displayStillHolds({ width: 1080, height: 2400 }, { attributes: { bounds: '[0,0][1080,2400]' }, children: [win('[0,0][2400,1080]')] })).toBe(false);
+    // A dump that does not state the screen confirms nothing.
+    expect(displayStillHolds({ width: 1080, height: 2400 }, { attributes: {}, children: [win('[0,0][1080,2400]')] })).toBe(false);
+    expect(displayStillHolds({ width: 720, height: 1280 }, portrait)).toBe(false);
   });
 });

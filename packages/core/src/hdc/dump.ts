@@ -543,9 +543,55 @@ export interface DumpLayoutOptions {
    * Ignored with `bundleName`, which filters the keyboard window out of the dump.
    */
   detectKeyboard?: boolean;
+  /**
+   * What earlier dumps of the same device learned, for a caller that dumps many
+   * times in a row (a replay). See {@link LayoutDumpCache}.
+   */
+  cache?: LayoutDumpCache;
   deviceSerial?: string;
   timeoutMs?: number;
   logger?: Logger;
+}
+
+/**
+ * What a run of dumps of one device keeps between them, so that each dump is two
+ * device calls (dump, pull) instead of four. The same object is passed to every
+ * dump of the run; `dumpLayout` reads and fills it.
+ *
+ * - `display`: the size the last dump resolved. It is used again only while the
+ *   dump itself agrees with it (see {@link displayStillHolds}), so a screen that
+ *   turned, or a display that changed, is asked for again.
+ * - `imeBundles`: the installed input methods, which change only when one is
+ *   installed. An empty answer (hidumper failed) is not kept.
+ */
+export interface LayoutDumpCache {
+  display?: DisplaySize;
+  imeBundles?: string[];
+}
+
+/**
+ * The display size a raw dump states: uitest gives the root node the bounds of
+ * the screen as it is shown, `[0,0][width,height]`. Null when the root has no
+ * such bounds (a dump filtered to one bundle, an older uitest). Pure.
+ */
+export function dumpedDisplaySize(root: RawLayoutNode): DisplaySize | null {
+  const b = parseBounds(root.attributes?.bounds);
+  return b && b[0] === 0 && b[1] === 0 && b[2] > 0 && b[3] > 0 ? { width: b[2], height: b[3] } : null;
+}
+
+/**
+ * Whether a display size resolved for an earlier dump is still this dump's: the
+ * root's bounds are that size, and no window reaches beyond it (after a turn to
+ * landscape a full-screen window is wider than the portrait size). A dump that
+ * does not state its size never confirms one. Pure.
+ */
+export function displayStillHolds(cached: DisplaySize, root: RawLayoutNode): boolean {
+  const stated = dumpedDisplaySize(root);
+  if (!stated || stated.width !== cached.width || stated.height !== cached.height) return false;
+  return (root.children ?? []).every((w) => {
+    const b = parseBounds(w.attributes?.bounds);
+    return !b || (b[2] <= cached.width && b[3] <= cached.height);
+  });
 }
 
 /**
@@ -566,7 +612,14 @@ export async function dumpLayout(opts: DumpLayoutOptions): Promise<DumpLayoutRes
   try {
     await recvFile({ config: opts.config, remote, local, deviceSerial: opts.deviceSerial, timeoutMs });
     const parsed = JSON.parse(await fs.promises.readFile(local, 'utf8')) as RawLayoutNode;
-    const display = await getDisplaySize(opts.config, { deviceSerial: opts.deviceSerial });
+    const cache = opts.cache;
+    let display: DisplaySize | null;
+    if (cache?.display && displayStillHolds(cache.display, parsed)) {
+      display = cache.display;
+    } else {
+      display = await getDisplaySize(opts.config, { deviceSerial: opts.deviceSerial });
+      if (cache) cache.display = display ?? undefined;
+    }
 
     if (opts.prune === false && opts.windowId === undefined) {
       return { display, tree: parsed as unknown as LayoutNode };
@@ -584,7 +637,11 @@ export async function dumpLayout(opts: DumpLayoutOptions): Promise<DumpLayoutRes
     }
     if (!opts.detectKeyboard || opts.bundleName) return { display, tree };
 
-    const imeBundles = await getImeBundles(opts.config, { deviceSerial: opts.deviceSerial, logger: opts.logger });
+    let imeBundles = cache?.imeBundles;
+    if (!imeBundles) {
+      imeBundles = await getImeBundles(opts.config, { deviceSerial: opts.deviceSerial, logger: opts.logger });
+      if (cache && imeBundles.length > 0) cache.imeBundles = imeBundles;
+    }
     const kb = findKeyboardWindow(full, imeBundles);
     const keyboard: KeyboardState = kb ? { shown: true, bundle: kb.bundle, ...(kb.b ? { b: kb.b } : {}) } : { shown: false };
     return { display, tree, keyboard };

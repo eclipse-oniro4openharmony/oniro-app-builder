@@ -199,6 +199,7 @@ On this machine (Ryzen 7 3800X, RTX 2060, KVM), a phone device on the 7.0.0 imag
 | `cmdtools` | The command-line tools are missing, or a partial install (`bin/ohpm`, `bin/hvigorw`, `bin/codelinter`, `hvigor/`, `ohpm/`, `codelinter/`, `tool/node`, the SDK toolchains or `version.txt` missing). The version is recorded. For an OpenHarmony project of API 26 or later, also when their hvigor is older than 6.26. |
 | `arkts-check` | `check arkts` does not run, or runs but misses an error planted in a generated one-file project. |
 | `hdc`, `device` | hdc does not run; no device or emulator is reachable; the device's API is below the project's `compatibleSdkVersion`. A device of the other OS family is a warning. |
+| `hdc-speed` | Warns when one hdc call takes over 700 ms (the median of three `hdc list targets`, then of three `hdc shell echo` on the device). Every device command is one call or several, and `replay`, `record`, `perf` and `test` make hundreds. It says which is slow: hdc before it reaches any device (an hdc client that finds no server on this machine starts one and sleeps 1.3 s before every call, also when a wrapper sends the call to a server elsewhere with `-s`; keep a local server up with `hdc start`, or call hdc with `-p` in the wrapper), or the way to the device. |
 | `hos-emulator` | Warns, when a HarmonyOS emulator is found, that `/dev/kvm` or a GPU render node (`/dev/dri/renderD*`) is not accessible, or that Huawei's agreements are not accepted (see [`emulator harmonyos`](#emulator-harmonyos--manage-the-harmonyos-emulator)). Skipped when there is none. |
 | `signing` | The signingConfig names material that is missing (no signingConfig at all is a warning). |
 | `disk` | Under 1 GB free where SDKs install or the project builds (under 5 GB is a warning). |
@@ -877,6 +878,7 @@ The report adds a screenshot of the screen at that moment, the app's elements as
 | `--from <i>` / `--to <i>` | Run only steps `i` to `j` (0-based, inclusive). |
 | `--step-timeout <ms>` | How long to wait for a step's selector and its `expect` (default `10000`); a step's `timeoutMs` overrides it. |
 | `--screenshots <dir>` | Save a screenshot after every step (`step-<i>.jpeg`) and the divergence screenshot (`failed-step-<i>.jpeg`) here. Without it the divergence screenshot goes to a new directory under the system temp dir. |
+| `--screenshot-steps <i,j,…>` | With `--screenshots`: photograph only after these steps (0-based) instead of after every step; `none` photographs no step. The divergence screenshot is taken either way. A frame costs about a second on a phone, so a caller that reads a few frames of a long flow names them. |
 | `--fallback` | When a step's selector is not found, act on its `fallback` point instead of stopping (the step is reported with `usedFallback`). |
 | `--launch` | Force-stop and start the flow's `bundle` (its `ability`, else the main ability) before the first step. |
 | `--no-wake` | Leave the screen as it is. By default it is turned on, a lock screen without a credential is swiped away, and it is kept on during the run (`power-shell timeout`, restored afterwards). |
@@ -1150,7 +1152,7 @@ The CLI reads paths and URLs from environment variables. All are optional; defau
 | `ONIRO_EMULATOR_DIR` | `~/oniro-emulator` | Emulator install root |
 | `ONIRO_HAP_PATH` | `entry/build/.../entry-default-signed.hap` | Default `.hap` used by `app install` (relative to the project) |
 | `ONIRO_DEVICE_SERIAL` | (unset) | Device every device command addresses when `--device` is not given (also read as `DEVICE_SERIAL`) |
-| `ONIRO_HDC` | the cmd-tools `hdc` | `hdc` binary to use instead, e.g. a wrapper for a remote device |
+| `ONIRO_HDC` | the cmd-tools `hdc` | `hdc` binary to use instead, e.g. a wrapper for a remote device (have it call hdc with `-p`: see `doctor`'s `hdc-speed`) |
 | `ONIRO_SDK_URL_BASE` | `https://repo.huaweicloud.com/openharmony/os` | Base URL for SDK downloads (point at a private/CI mirror) |
 | `ONIRO_CMD_TOOLS_URL_LINUX` | Huawei mirror, x64 5.1.0.840 | Override the Linux cmd-tools URL |
 | `ONIRO_CMD_TOOLS_URL_WINDOWS` | (unset) | Self-hosted Windows cmd-tools URL |

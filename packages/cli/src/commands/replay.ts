@@ -10,6 +10,7 @@ interface ReplayOpts {
   to?: number;
   stepTimeout: number;
   screenshots?: string;
+  screenshotSteps?: number[];
   fallback?: boolean;
   launch?: boolean;
   wake: boolean;
@@ -20,6 +21,19 @@ function stepIndex(raw: string): number {
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 0) throw new InvalidArgumentError('Expected a step index (0-based).');
   return n;
+}
+
+/** `3,7,19`: the steps to photograph. `none` (or an empty list): no step, the divergence screenshot only. */
+export function stepList(raw: string): number[] {
+  const text = raw.trim();
+  if (text === '' || text === 'none') return [];
+  return text.split(',').map((part) => {
+    const n = Number(part.trim());
+    if (part.trim() === '' || !Number.isInteger(n) || n < 0) {
+      throw new InvalidArgumentError('Expected step indexes (0-based) separated by commas, such as 3,7,19, or none.');
+    }
+    return n;
+  });
 }
 
 function positiveMs(raw: string): number {
@@ -68,6 +82,11 @@ export function registerReplayCommand(program: Command): void {
     .option('--to <i>', 'Last step to run (0-based, inclusive).', stepIndex)
     .option('--step-timeout <ms>', "How long to wait for a step's selector and its expect (a step's timeoutMs overrides it).", positiveMs, 10_000)
     .option('--screenshots <dir>', 'Save a screenshot after every step (step-<i>.jpeg), and the divergence screenshot, here.')
+    .option(
+      '--screenshot-steps <i,j,…>',
+      'With --screenshots: photograph only after these steps (0-based) instead of after every step; `none` keeps the divergence screenshot only. A frame costs about a second on a phone.',
+      stepList,
+    )
     .option('--fallback', "When a step's selector is not found, act on its recorded fallback point instead of stopping.")
     .option('--launch', "Force-stop and start the flow's app (its bundle and ability) before the first step.")
     .option('--no-wake', 'Leave the screen as it is (by default it is turned on, a lock screen without a credential is swiped away, and it is kept on during the run).')
@@ -80,6 +99,7 @@ export function registerReplayCommand(program: Command): void {
       const { config, logger } = getRuntime();
       let report: ReplayReport;
       try {
+        if (opts.screenshotSteps && !opts.screenshots) throw new Error('--screenshot-steps needs --screenshots <dir>, where the frames go.');
         const flow = readFlowFile(path.resolve(flowPath));
         report = await withInterrupt(logger, 'stopping the replay', (abortSignal) => replayFlow({
           config,
@@ -89,6 +109,7 @@ export function registerReplayCommand(program: Command): void {
           to: opts.to,
           stepTimeoutMs: opts.stepTimeout,
           screenshotsDir: opts.screenshots,
+          screenshotSteps: opts.screenshotSteps,
           fallback: opts.fallback,
           launch: opts.launch,
           wake: opts.wake,

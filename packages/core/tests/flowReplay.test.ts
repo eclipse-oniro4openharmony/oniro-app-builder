@@ -6,7 +6,7 @@ import { replayFlow, nearMatches, summarizeDivergenceLayout } from '../src/flow/
 import { recordFlow } from '../src/flow/record.js';
 import { parseSelector } from '../src/hdc/selector.js';
 import type { Flow } from '../src/flow/flowFile.js';
-import { APP, fakeDevice, pruned, rawHome, rawPage1, rawPage2, type FakeDevice } from './_helpers/flowProbe.js';
+import { APP, fakeDevice, pruned, rawHome, rawPage1, rawPage2, stated, type FakeDevice } from './_helpers/flowProbe.js';
 
 const isWin = process.platform === 'win32';
 
@@ -72,6 +72,53 @@ describe.skipIf(isWin)('replayFlow (stand-in hdc)', () => {
     // after the action (2), acts in it, its expect dumps (3); step 2 finds Banana in that dump, acts
     // in it, and its expect dumps (4). Before the reuse every step dumped the same screen 2–3 times.
     expect(dev.dumps()).toBe(4);
+  });
+
+  it('photographs only the steps it is told to, and still the step it diverges at', async () => {
+    dev.show(rawPage1('', false));
+    dev.queue(rawPage1('Ann', true), rawPage2('Ann', 'none'), rawPage2('Ann', 'Banana'));
+    const shots = path.join(dev.root, 'shots');
+    const r = await replayFlow({ ...opts(), flow, screenshotsDir: shots, screenshotSteps: [2] });
+    expect(r.ok).toBe(true);
+    expect(fs.readdirSync(shots)).toEqual(['step-02.jpeg']);
+    expect(r.steps.map((s) => s.screenshot)).toEqual([undefined, undefined, path.join(shots, 'step-02.jpeg')]);
+    // One capture on the device, not three: a frame is a round trip to capture and one to pull.
+    expect(dev.shells().filter((c) => c.includes('snapshot_display'))).toHaveLength(1);
+
+    // No step named: no frame, until the flow diverges.
+    const none = path.join(dev.root, 'none');
+    dev.show(rawPage1('', false, 'Next'));
+    const d = await replayFlow({ ...opts(), flow: { ...flow, steps: flow.steps.slice(1) }, screenshotsDir: none, screenshotSteps: [] });
+    expect(d).toMatchObject({ ok: false, outcome: 'diverged', failedStep: 0 });
+    expect(fs.readdirSync(none)).toEqual(['failed-step-00.jpeg']);
+  });
+
+  it('asks for the display size and the input methods once when the dumps state the screen', async () => {
+    // A device's dump gives its root the bounds of the screen; the run keeps the size while they agree.
+    dev.show(stated(rawPage1('', false)));
+    dev.queue(stated(rawPage1('Ann', true)), stated(rawPage2('Ann', 'none')), stated(rawPage2('Ann', 'Banana')));
+    const r = await replayFlow({ ...opts(), flow });
+    expect(r.ok).toBe(true);
+    expect(dev.dumps()).toBe(4);
+    const sent = dev.shells();
+    expect(sent.filter((c) => c.startsWith('hidumper -s 10 -a screen'))).toHaveLength(1);
+    expect(sent.filter((c) => c.startsWith('hidumper -s 3703'))).toHaveLength(1);
+    // The elements are where they were with a size asked for on every dump.
+    expect(r.steps.map((s) => s.target)).toEqual([
+      'TextInput "hint: Your name" #nameInput at 0.500,0.235',
+      'Button "Continue" #continueBtn at 0.500,0.305',
+      'Text "Banana" at 0.500,0.339',
+    ]);
+  });
+
+  it('asks for the display size on every dump that does not state the screen', async () => {
+    dev.show(rawPage1('', false));
+    dev.queue(rawPage1('Ann', true), rawPage2('Ann', 'none'), rawPage2('Ann', 'Banana'));
+    const r = await replayFlow({ ...opts(), flow });
+    expect(r.ok).toBe(true);
+    expect(dev.shells().filter((c) => c.startsWith('hidumper -s 10 -a screen'))).toHaveLength(dev.dumps());
+    // The input methods do not depend on the screen: once.
+    expect(dev.shells().filter((c) => c.startsWith('hidumper -s 3703'))).toHaveLength(1);
   });
 
   it('confirms a dump taken right after an action with a second one before acting on it', async () => {
