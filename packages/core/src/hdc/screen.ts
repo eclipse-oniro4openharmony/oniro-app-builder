@@ -12,9 +12,42 @@ import { OniroError } from '../ports/errors.js';
 export interface Screenshot {
   /** Raw JPEG bytes, exactly as `snapshot_display` wrote them (no decode/resize). */
   pixels: Buffer;
-  /** Device render width/height from hidumper; 0 when it couldn't be resolved. */
+  /**
+   * Width and height of the picture, read from its JPEG header, which is the screen as it
+   * is shown. When the header cannot be read: the display size from hidumper, or 0 when
+   * that is not available either.
+   */
   width: number;
   height: number;
+}
+
+/**
+ * The size a JPEG states in its frame header (the SOF segment), without decoding
+ * the picture. Null when the bytes are not a JPEG or hold no frame header. Pure.
+ */
+export function jpegSize(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let i = 2;
+  while (i + 3 < bytes.length) {
+    if (bytes[i] !== 0xff) return null;
+    const marker = bytes[i + 1]!;
+    // Fill bytes before a marker, and the markers that stand alone (RSTn, SOI, TEM).
+    if (marker === 0xff) { i += 1; continue; }
+    if ((marker >= 0xd0 && marker <= 0xd8) || marker === 0x01) { i += 2; continue; }
+    // End of image, or the start of the scan: the frame header comes before both.
+    if (marker === 0xd9 || marker === 0xda) return null;
+    const length = (bytes[i + 2]! << 8) | bytes[i + 3]!;
+    if (length < 2) return null;
+    // SOF0..SOF15, except DHT (C4), JPG (C8) and DAC (CC), which share the range.
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (i + 8 >= bytes.length) return null;
+      const height = (bytes[i + 5]! << 8) | bytes[i + 6]!;
+      const width = (bytes[i + 7]! << 8) | bytes[i + 8]!;
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    i += 2 + length;
+  }
+  return null;
 }
 
 export interface ScreenshotOptions {
@@ -77,7 +110,7 @@ async function captureOnDevice(opts: ScreenshotOptions, remote: string, timeoutM
 
 /**
  * Capture the screen via on-device `snapshot_display`, pull the JPEG bytes back,
- * and return them raw alongside the device resolution. The agent-facing grid
+ * and return them raw alongside the picture's size (read from its header). The agent-facing grid
  * overlay / downscale / base64 encoding stays in the MCP — core does no image
  * decoding and adds no image dependency.
  */
@@ -93,7 +126,8 @@ export async function takeScreenshot(opts: ScreenshotOptions): Promise<Screensho
   try {
     await recvFile({ config: opts.config, remote, local, deviceSerial: opts.deviceSerial, timeoutMs });
     const pixels = await fs.promises.readFile(local);
-    const size = (await getDisplaySize(opts.config, { deviceSerial: opts.deviceSerial })) ?? { width: 0, height: 0 };
+    // The picture says how large it is; asking the device is one more round trip per frame.
+    const size = jpegSize(pixels) ?? (await getDisplaySize(opts.config, { deviceSerial: opts.deviceSerial })) ?? { width: 0, height: 0 };
     return { pixels, width: size.width, height: size.height };
   } finally {
     fs.promises.unlink(local).catch(() => {});

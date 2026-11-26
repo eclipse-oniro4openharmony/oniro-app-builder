@@ -5,12 +5,14 @@ import * as path from 'node:path';
 import {
   apiLevelOf,
   checkCmdTools,
+  checkHdcSpeed,
   checkDisk,
   checkNode,
   checkSigning,
   CMD_TOOLS_REQUIRED,
   describeProject,
   runDoctor,
+  SLOW_HDC_CALL_MS,
   type DoctorVersions,
 } from '../src/doctor/doctor.js';
 import { staticConfig } from '../src/ports/config.js';
@@ -134,6 +136,39 @@ describe('doctor checks', () => {
     expect(checkDisk([path.join(tmp, 'not', 'yet')], stat(50)).detail).toContain(tmp);
   });
 
+  it('grades what one hdc call costs, and tells a slow client from a slow way to the device', () => {
+    expect(checkHdcSpeed({ clientMs: 150, deviceMs: 190, serial: 'PHONE' })).toEqual({ id: 'hdc-speed', status: 'ok', detail: 'one call to PHONE takes 190 ms' });
+    expect(checkHdcSpeed({ clientMs: 20 })).toEqual({ id: 'hdc-speed', status: 'ok', detail: 'one hdc call takes 20 ms' });
+    expect(checkHdcSpeed({ clientMs: SLOW_HDC_CALL_MS, deviceMs: SLOW_HDC_CALL_MS })).toMatchObject({ status: 'ok' });
+    // A client that starts a server and sleeps before it connects is slow without a device too (1.3 s on every call).
+    const client = checkHdcSpeed({ clientMs: 1480, deviceMs: 1530, serial: 'PHONE' });
+    expect(client).toMatchObject({ status: 'warn', detail: expect.stringContaining('every hdc call takes 1480 ms before it reaches a device') });
+    expect(client.fix).toMatch(/`-p`/);
+    // The client is quick and the device is far.
+    const link = checkHdcSpeed({ clientMs: 40, deviceMs: 900, serial: 'PHONE' });
+    expect(link).toMatchObject({ status: 'warn', detail: 'one call to PHONE takes 900 ms (hdc alone answers in 40 ms)' });
+    expect(link.fix).toMatch(/way to the device/);
+  });
+
+  it.skipIf(isWin)('times a call to the connected device, and warns when the client sleeps', async () => {
+    const stand = (sleep: string): string => {
+      const hdc = path.join(tmp, `hdc${sleep.replace('.', '')}`);
+      fs.writeFileSync(
+        hdc,
+        `#!/bin/sh\nsleep ${sleep}\n[ "$1" = "-t" ] && shift 2\ncase "$1" in\n  version) echo "Ver: 3.2.0d" ;;\n  list) printf 'FAKE\\tUSB\\tConnected\\tlocalhost\\n' ;;\nesac\nexit 0\n`,
+        { mode: 0o755 },
+      );
+      return hdc;
+    };
+    const speed = async (hdc: string) => {
+      const report = await runDoctor({ config: staticConfig({ sdkRootDir: path.join(tmp, 'sdk'), cmdToolsPath: path.join(tmp, 'none'), hdcPath: hdc }), env: { PATH: '' }, arktsSelfTest: false });
+      return report.checks.find((c) => c.id === 'hdc-speed')!;
+    };
+    expect(await speed(stand('0'))).toMatchObject({ status: 'ok', detail: expect.stringMatching(/^one call to FAKE takes \d+ ms$/) });
+    const slow = await speed(stand('0.8'));
+    expect(slow).toMatchObject({ status: 'warn', detail: expect.stringMatching(/^every hdc call takes \d+ ms before it reaches a device/) });
+  }, 60_000);
+
   it.skipIf(isWin)('installs a missing SDK with --fix, and self-tests check arkts', async () => {
     const sdkRoot = path.join(tmp, 'sdk');
     const project = writeProject({ compileSdkVersion: 20, compatibleSdkVersion: 20 });
@@ -165,6 +200,7 @@ describe('doctor checks', () => {
     expect(byId['arkts-check']).toMatchObject({ status: 'ok', detail: expect.stringContaining('caught the planted error') });
     expect(byId.hdc).toMatchObject({ status: 'ok' });
     expect(byId.device!.status).toBe('skip');
+    expect(byId['hdc-speed']).toMatchObject({ status: 'skip', detail: 'device check not requested' });
     expect(byId.java!.status).toBe('fail');
     expect(report.ok).toBe(false);
     expect(report.versions).toMatchObject({ hdc: 'Ver: 3.2.0d', cmdTools: '6.1.1.280', sdk: path.join(sdkRoot, getOsFolder(), '20') });
@@ -218,6 +254,7 @@ describe('doctor checks', () => {
     expect(byId['arkts-check']).toMatchObject({ status: 'fail', detail: expect.stringContaining('missed a planted') });
     // Without hdc there is no device check to run.
     expect(byId.device).toMatchObject({ status: 'fail', detail: 'hdc is not usable' });
+    expect(byId['hdc-speed']).toMatchObject({ status: 'skip', detail: 'hdc is not usable' });
     expect(byId.sdk!.status).toBe('skip');
   });
 });

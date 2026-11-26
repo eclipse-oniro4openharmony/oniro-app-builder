@@ -15,6 +15,7 @@ import {
   TargetNotFoundError,
   type DumpLayoutResult,
   type FlatLayoutNode,
+  type LayoutDumpCache,
 } from '../hdc/dump.js';
 import { clauseMatches, parseSelector, type ElementSelector } from '../hdc/selector.js';
 import { performInput, selectableTree, waitForTargetLayout, type PerformInputOptions } from '../hdc/uiActions.js';
@@ -117,6 +118,13 @@ export interface ReplayFlowOptions {
   settleMs?: number;
   /** Save a screenshot after every step here (`step-<i>.jpeg`); the divergence screenshot goes here too. */
   screenshotsDir?: string;
+  /**
+   * With `screenshotsDir`: photograph only after these steps (0-based indexes of the flow)
+   * instead of after every step. A frame costs about a second on a phone, and a caller that
+   * reads a few of them (the last state, the steps it checks) pays for those only. The
+   * divergence screenshot is taken either way. An empty list photographs no step.
+   */
+  screenshotSteps?: readonly number[];
   /** Act on a step's fallback point when its selector is not found, instead of diverging. */
   fallback?: boolean;
   /** Force-stop and start the flow's app before the first step. */
@@ -231,7 +239,11 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
     report.error = (err as Error).message;
     return report;
   }
-  const device = { config, deviceSerial, logger };
+  // One cache for the run's layout dumps: the display size and the input methods are asked
+  // for once, not on each of the two or three dumps a step takes.
+  const dumpCache: LayoutDumpCache = {};
+  const device = { config, deviceSerial, logger, dumpCache };
+  const photographed = opts.screenshotSteps ? new Set(opts.screenshotSteps) : undefined;
 
   let restoreScreen: (() => Promise<void>) | undefined;
   let index = from;
@@ -306,7 +318,7 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
         const settled = async (d: TimedLayout, sel: ElementSelector): Promise<DumpLayoutResult> => {
           let cur = d;
           while (cur.at - actedAt < settleMs && Date.now() - stepStarted < timeoutMs) {
-            const fresh = await dumpLayout({ ...device, detectKeyboard: true }).catch(() => undefined); // a transient hdc failure: wait again below
+            const fresh = await dumpLayout({ config, deviceSerial, logger, cache: dumpCache, detectKeyboard: true }).catch(() => undefined); // a transient hdc failure: wait again below
             const again: TimedLayout | undefined = fresh ? { layout: fresh, at: Date.now() } : undefined;
             const a = findVisibleMatch(tree(cur.layout), sel);
             const b = again ? findVisibleMatch(tree(again.layout), sel) : null;
@@ -350,7 +362,7 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
           );
         }
       }
-      if (opts.screenshotsDir) {
+      if (opts.screenshotsDir && (!photographed || photographed.has(index))) {
         result.screenshot = await saveScreenshot(device, opts.screenshotsDir, `step-${String(index).padStart(2, '0')}.jpeg`).catch(
           (err: Error) => {
             report.warnings.push(`step ${index}: no screenshot: ${err.message}`);
@@ -391,12 +403,12 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
 /** Fill in the screen state of a divergence: layout summary, near matches, screenshot, wrong-screen detection. */
 async function describeDivergence(
   report: ReplayReport,
-  device: { config: ConfigProvider; deviceSerial: string; logger: Logger },
+  device: { config: ConfigProvider; deviceSerial: string; logger: Logger; dumpCache?: LayoutDumpCache },
   opts: ReplayFlowOptions,
   selectorText: string | undefined,
 ): Promise<void> {
   try {
-    const layout = await dumpLayout({ ...device, detectKeyboard: true });
+    const layout = await dumpLayout({ config: device.config, deviceSerial: device.deviceSerial, logger: device.logger, cache: device.dumpCache, detectKeyboard: true });
     const summary = summarizeDivergenceLayout(layout, opts.flow.bundle);
     report.layout = summary;
     if (selectorText) {

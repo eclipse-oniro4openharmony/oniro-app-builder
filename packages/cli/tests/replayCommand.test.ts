@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { formatDivergence, formatReplayStep, replayExitCode } from '../src/commands/replay.js';
+import { formatDivergence, formatReplayStep, replayExitCode, stepList } from '../src/commands/replay.js';
 import { runCli } from './_helpers/runCli.js';
 import { fakeDevice, rawPage1, rawPage2, type FakeDevice } from '../../core/tests/_helpers/flowProbe.js';
 
@@ -46,6 +46,16 @@ describe('replay output', () => {
   });
 });
 
+describe('--screenshot-steps', () => {
+  it('reads a list of step indexes, and `none`', () => {
+    expect(stepList('3,7,19')).toEqual([3, 7, 19]);
+    expect(stepList(' 0 , 2 ')).toEqual([0, 2]);
+    expect(stepList('none')).toEqual([]);
+    expect(stepList('')).toEqual([]);
+    for (const bad of ['a', '1,,2', '-1', '1.5', '2,last']) expect(() => stepList(bad)).toThrow(/step indexes/);
+  });
+});
+
 describe.skipIf(isWin)('oniro-app replay', () => {
   let dev: FakeDevice;
   let file: string;
@@ -81,6 +91,20 @@ describe.skipIf(isWin)('oniro-app replay', () => {
       nearMatches: [{ differs: 'text=Continue' }],
       screenshot: path.join(dev.root, 'shots', 'failed-step-00.jpeg'),
     });
+  });
+
+  it('photographs the steps named by --screenshot-steps, which needs --screenshots', () => {
+    dev.show(rawPage1('', false));
+    dev.queue(rawPage2('', 'none'), rawPage2('', 'Banana'));
+    const shots = path.join(dev.root, 'shots');
+    const r = run('--json', '--screenshots', shots, '--screenshot-steps', '1');
+    expect(r.status).toBe(0);
+    expect(fs.readdirSync(shots)).toEqual(['step-01.jpeg']);
+    expect(JSON.parse(r.stdout).steps.map((s: { screenshot?: string }) => s.screenshot)).toEqual([undefined, path.join(shots, 'step-01.jpeg')]);
+
+    const alone = run('--json', '--screenshot-steps', '1');
+    expect(alone.status).toBe(2);
+    expect(JSON.parse(alone.stdout).error).toMatch(/--screenshot-steps needs --screenshots/);
   });
 
   it('exits 2 for an invalid flow file or no device', () => {

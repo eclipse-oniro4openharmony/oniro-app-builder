@@ -12,6 +12,7 @@ import {
   type DumpLayoutResult,
   type ElementQuery,
   type FlatLayoutNode,
+  type LayoutDumpCache,
 } from './dump.js';
 import { getDisplaySize, type DisplaySize } from './display.js';
 import { sendInput, type InputType } from './input.js';
@@ -46,6 +47,12 @@ interface DeviceOptions {
   config: ConfigProvider;
   deviceSerial?: string;
   logger?: Logger;
+  /**
+   * Shared by a caller that makes many of these calls on one device in a row (a
+   * replay): every layout dump they take reads and fills it, and so skips the
+   * display-size and input-method queries (see {@link LayoutDumpCache}).
+   */
+  dumpCache?: LayoutDumpCache;
 }
 
 function pressBack(opts: DeviceOptions): Promise<void> {
@@ -57,7 +64,7 @@ function pressBack(opts: DeviceOptions): Promise<void> {
  * Back without a keyboard navigates away. Returns whether a keyboard was dismissed.
  */
 export async function hideKeyboard(opts: DeviceOptions): Promise<boolean> {
-  const { keyboard } = await dumpLayout({ ...opts, detectKeyboard: true });
+  const { keyboard } = await dumpLayout({ config: opts.config, deviceSerial: opts.deviceSerial, logger: opts.logger, cache: opts.dumpCache, detectKeyboard: true });
   if (!keyboard?.shown) return false;
   await pressBack(opts);
   await sleep(KEYBOARD_SETTLE_MS);
@@ -106,6 +113,7 @@ export async function locateTarget(opts: LocateTargetOptions): Promise<LocatedTa
     windowId: opts.windowId,
     deviceSerial: opts.deviceSerial,
     logger: opts.logger,
+    cache: opts.dumpCache,
   };
   let layout = opts.layout ?? (await dumpLayout(dumpOpts));
   // Without the display size no node has a position, and every match would look missing.
@@ -209,7 +217,7 @@ function pair<T>(a: T | undefined, b: T | undefined, names: string): [T, T] | un
  * soft keyboard only when it is up.
  */
 export async function performInput(opts: PerformInputOptions): Promise<PerformInputResult> {
-  const device: DeviceOptions = { config: opts.config, deviceSerial: opts.deviceSerial, logger: opts.logger };
+  const device: DeviceOptions = { config: opts.config, deviceSerial: opts.deviceSerial, logger: opts.logger, dumpCache: opts.dumpCache };
   const startFx = pair(fraction(opts.fx, '--fx'), fraction(opts.fy, '--fy'), '--fx and --fy');
   const startPx = pair(opts.pxX, opts.pxY, '--x and --y');
   const endFx = pair(fraction(opts.fx2, '--fx2'), fraction(opts.fy2, '--fy2'), '--fx2 and --fy2');
@@ -325,6 +333,7 @@ export async function waitForTargetLayout(opts: WaitForTargetOptions): Promise<{
         detectKeyboard: true,
         deviceSerial: opts.deviceSerial,
         logger: opts.logger,
+        cache: opts.dumpCache,
       });
       last = layout;
       let tree: DumpLayoutResult['tree'] | null = layout.tree;
