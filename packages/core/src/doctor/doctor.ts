@@ -462,7 +462,8 @@ export interface HdcSpeed {
  * times slower with nothing else to show for it: a 58-flow replay run measured
  * 131 minutes at 1.5 s a call and 42 at 0.2 s. Two causes are told apart: the
  * client is slow before it reaches any device (`list targets` is slow too), or
- * only the calls to the device are. The first was seen with a device on another
+ * only the calls to the device are (a slow server reached with `-s` looks like the
+ * first, which the fix says). The first was seen with a device on another
  * machine's server, reached through a wrapper that adds `-s <host:port>`: hdc
  * (3.2.0c and 3.2.0d alike) then finds no server on this machine, forks one and
  * sleeps before every call, unless it is given `-p`. Pure.
@@ -475,8 +476,9 @@ export function checkHdcSpeed(speed: HdcSpeed): DoctorCheck {
       status: 'warn',
       detail: `every hdc call takes ${speed.clientMs} ms before it reaches a device (\`hdc list targets\`, median of 3)`,
       fix:
-        'An hdc client that finds no hdc server running on this machine starts one and sleeps 1.3 s before every call, also when a wrapper or `-s` sends the call to a server elsewhere. ' +
-        'Keep a local server up (`hdc start`), or have the wrapper call hdc with `-p`, which skips that step. Then `time hdc list targets` answers in about 0.2 s.',
+        'If hdc reaches its server through a wrapper or `-s <host:port>`: an hdc client that finds no hdc server running on this machine starts one and sleeps 1.3 s before every call, also then. ' +
+        'Keep a local server up (`hdc start`), or have the wrapper call hdc with `-p`, which skips that step; `time hdc list targets` then answers in about 0.2 s. ' +
+        'If it stays slow, the server or the way to it is.',
     };
   }
   if (speed.deviceMs !== undefined && speed.deviceMs > SLOW_HDC_CALL_MS) {
@@ -497,12 +499,16 @@ export function checkHdcSpeed(speed: HdcSpeed): DoctorCheck {
   };
 }
 
-/** The median duration of three runs of `call`, ms. */
-async function medianMs(call: () => Promise<unknown>): Promise<number> {
+/**
+ * The median duration of three runs of `call`, ms. A run that fails throws: a device that
+ * is offline or refuses the call answers at once, and its time says nothing of a call that works.
+ */
+async function medianMs(what: string, call: () => Promise<{ code: number; stdout: string; stderr: string }>): Promise<number> {
   const times: number[] = [];
   for (let i = 0; i < 3; i++) {
     const t = Date.now();
-    await call();
+    const res = await call();
+    if (res.code !== 0) throw new Error(`${what} failed: ${`${res.stderr}${res.stdout}`.trim().split('\n')[0] ?? `exit ${res.code}`}`);
     times.push(Date.now() - t);
   }
   return times.sort((a, b) => a - b)[1]!;
@@ -511,9 +517,9 @@ async function medianMs(call: () => Promise<unknown>): Promise<number> {
 /** Time hdc with its server up (the device check has just listed the targets), then one call to the device. */
 async function measureHdcSpeed(opts: DoctorOptions, serial: string | undefined, logger: Logger): Promise<DoctorCheck> {
   try {
-    const clientMs = await medianMs(() => hdcExec({ config: opts.config, args: ['list', 'targets'], timeoutMs: 15_000, logger }));
+    const clientMs = await medianMs('hdc list targets', () => hdcExec({ config: opts.config, args: ['list', 'targets'], timeoutMs: 15_000, logger }));
     const deviceMs = serial
-      ? await medianMs(() => shell({ config: opts.config, command: 'echo', deviceSerial: serial, timeoutMs: 15_000, logger }))
+      ? await medianMs(`a call to ${serial}`, () => shell({ config: opts.config, command: 'echo', deviceSerial: serial, timeoutMs: 15_000, logger }))
       : undefined;
     return checkHdcSpeed({ clientMs, ...(deviceMs !== undefined ? { deviceMs, serial } : {}) });
   } catch (err) {

@@ -122,7 +122,8 @@ export interface ReplayFlowOptions {
    * With `screenshotsDir`: photograph only after these steps (0-based indexes of the flow)
    * instead of after every step. A frame costs about a second on a phone, and a caller that
    * reads a few of them (the last state, the steps it checks) pays for those only. The
-   * divergence screenshot is taken either way. An empty list photographs no step.
+   * divergence screenshot is taken either way. An empty list photographs no step. A step
+   * outside `from`..`to` is simply not reached; one the flow does not have is a warning.
    */
   screenshotSteps?: readonly number[];
   /** Act on a step's fallback point when its selector is not found, instead of diverging. */
@@ -244,6 +245,10 @@ export async function replayFlow(opts: ReplayFlowOptions): Promise<ReplayReport>
   const dumpCache: LayoutDumpCache = {};
   const device = { config, deviceSerial, logger, dumpCache };
   const photographed = opts.screenshotSteps ? new Set(opts.screenshotSteps) : undefined;
+  // A step the flow does not have is a caller's mistake worth saying; one outside this run's
+  // range is not (a caller that replays a flow in parts names the whole flow's steps each time).
+  const beyond = (opts.screenshotSteps ?? []).filter((i) => !Number.isInteger(i) || i < 0 || i >= flow.steps.length);
+  if (beyond.length > 0) report.warnings.push(`screenshotSteps names step(s) the flow does not have: ${beyond.join(', ')} (it has steps 0..${flow.steps.length - 1}).`);
 
   let restoreScreen: (() => Promise<void>) | undefined;
   let index = from;

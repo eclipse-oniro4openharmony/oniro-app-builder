@@ -554,8 +554,8 @@ export interface DumpLayoutOptions {
 }
 
 /**
- * What a run of dumps of one device keeps between them, so that each dump is two
- * device calls (dump, pull) instead of four. The same object is passed to every
+ * What a run of dumps of one device keeps between them, so that a dump does not
+ * ask again for the display size and the input methods. The same object is passed to every
  * dump of the run; `dumpLayout` reads and fills it.
  *
  * - `display`: the size the last dump resolved. It is used again only while the
